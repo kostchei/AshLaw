@@ -784,6 +784,29 @@ Together these were 650 ms → 135 ms on the packed scene. The remaining cost is
 hold **exactly** — the tests use no epsilon. The viewport round-trip is asserted over
 every logical pixel at 1×–5×, windowed and letterboxed.
 
+### 6.4a Viewport settings — fixed, and now enforced
+
+M1 task 2 was recorded as done but was not. `game/project.godot` carried
+`window/stretch/mode="canvas_items"`, and `stretch/aspect` and `stretch/scale_mode` were
+absent entirely, so Godot was falling back to `ignore` and `fractional`. Nearest
+filtering and the 320×200 base resolution were correct.
+
+That combination is quietly wrong rather than visibly broken: `canvas_items` scales
+drawing commands instead of the framebuffer, giving sub-pixel sprite positions, and
+`fractional` lets the pixel grid absorb the slack that should go to the letterbox. The
+headless `ViewportScaling` round-trip tests would have kept passing throughout, because
+they model the *intended* settings.
+
+All three are now set per §2.8 and `tools/check-project-settings.ps1` asserts them in
+the headless CI job. It parses `project.godot` rather than querying the engine, so it
+needs no Godot installed and — more importantly — an *absent* key fails rather than
+resolving to a Godot default. Both failure modes were verified.
+
+This matters more than a one-off fix, because **the Godot editor rewrites
+`project.godot` every time the project is opened.** Applying the pending stash also
+restored the editor-generated `config/features`, `[dotnet] project/assembly_name`, and
+the `uid://` on `Main.cs`, which the same rewrite had produced.
+
 ### 6.5 What M1 should do next
 
 1. Settle the "2,000 visible" reading above, since it decides whether §2.5's escape hatch

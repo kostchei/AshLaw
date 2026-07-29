@@ -10,6 +10,7 @@ config_version=5
 [application]
 
 config/name="AshLaw"
+config/features=PackedStringArray("4.7", "C#", "GL Compatibility")
 run/main_scene="res://scenes/main.tscn"
 
 [display]
@@ -18,7 +19,20 @@ window/size/viewport_width=320
 window/size/viewport_height=200
 window/size/window_width_override=960
 window/size/window_height_override=600
-window/stretch/mode="canvas_items"
+
+; Build plan §2.8. "viewport" renders the world at 320x200 and scales the whole
+; framebuffer, which is what keeps pixels square and makes Ash.Core.ViewportScaling
+; the accurate model of what the engine does. "canvas_items" would scale drawing
+; commands instead, giving sub-pixel sprite positions and defeating the point.
+; "integer" forbids fractional scales, so the letterbox absorbs the slack rather
+; than the pixel grid.
+window/stretch/mode="viewport"
+window/stretch/aspect="keep"
+window/stretch/scale_mode="integer"
+
+[dotnet]
+
+project/assembly_name="Ash.Game"
 
 [rendering]
 

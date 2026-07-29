@@ -52,6 +52,13 @@ jobs:
         shell: pwsh
         run: ./tools/check-architecture.ps1
 
+      # Parses project.godot rather than asking the engine, so it runs here rather
+      # than in the Godot job, and so an absent setting is caught instead of
+      # silently falling back to a Godot default that is wrong for this project.
+      - name: Project settings check (must match build plan §2.8)
+        shell: pwsh
+        run: ./tools/check-project-settings.ps1
+
       # Includes the M1 palette identity, sorter and projection round-trip spikes.
       - name: Test Ash.Core
         run: dotnet test tests/Ash.Core.Tests/Ash.Core.Tests.csproj --configuration Release --no-restore

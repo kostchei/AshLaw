@@ -60,12 +60,20 @@ for p in Ash.Core Ash.Rules Ash.Content Ash.Sim Ash.Script; do dotnet test "test
 
 ## Checks
 
-All four run in CI and should pass before a push.
+All five run in CI and should pass before a push.
 
 Assert no headless project has taken a Godot dependency:
 
 ```bash
 pwsh ./tools/check-architecture.ps1
+```
+
+Assert `game/project.godot` still matches build plan §2.8. `Ash.Core.ViewportScaling`
+models those settings, and the Godot editor rewrites `project.godot` every time the
+project is opened, so this catches the drift:
+
+```bash
+pwsh ./tools/check-project-settings.ps1
 ```
 
 Assert `attack_tables_summary.csv` still agrees with `combat_system_data.json`. The CSV
