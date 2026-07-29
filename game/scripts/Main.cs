@@ -5,19 +5,26 @@ namespace Ash.Game;
 
 public partial class Main : Node2D
 {
-    private const int TileSize = 12;
-    private const int MapOriginX = 6;
-    private const int MapOriginY = 6;
+    private const int IsoOriginX = 100;
+    private const int IsoOriginY = 27;
+    private const int TileHalfWidth = 8;
+    private const int TileHalfHeight = 4;
     private const int InventoryRowHeight = 12;
 
-    private static readonly Color GroundA = new("33442f");
-    private static readonly Color GroundB = new("2b3a29");
-    private static readonly Color Grid = new("40513b");
-    private static readonly Color Panel = new("171a20");
-    private static readonly Color PanelEdge = new("9a835d");
-    private static readonly Color Text = new("eee5ce");
-    private static readonly Color MutedText = new("a9a38f");
-    private static readonly Color Highlight = new("f1d96a");
+    private static readonly Color Void = new("100d0b");
+    private static readonly Color Mortar = new("332a24");
+    private static readonly Color StoneA = new("55483b");
+    private static readonly Color StoneB = new("4a4037");
+    private static readonly Color TimberA = new("71512f");
+    private static readonly Color TimberB = new("634529");
+    private static readonly Color CarpetA = new("6d1819");
+    private static readonly Color CarpetB = new("861f1c");
+    private static readonly Color Panel = new("17120f");
+    private static readonly Color PanelInset = new("2a211a");
+    private static readonly Color PanelEdge = new("a16d35");
+    private static readonly Color Text = new("e6c78c");
+    private static readonly Color MutedText = new("a68159");
+    private static readonly Color Highlight = new("f0a83c");
 
     private PlayableSliceWorld _world = PlayableSliceWorld.CreateDemo();
 
@@ -134,49 +141,87 @@ public partial class Main : Node2D
 
     private void DrawWorld()
     {
-        DrawRect(new Rect2(0, 0, 240, 200), new Color("202a20"));
+        DrawRect(new Rect2(0, 0, 240, 200), Void);
+        DrawOutsideRock();
+        DrawBackWalls();
 
         for (var y = 0; y < PlayableSliceWorld.MapHeight; y++)
         {
             for (var x = 0; x < PlayableSliceWorld.MapWidth; x++)
             {
-                var colour = (x + y) % 2 == 0 ? GroundA : GroundB;
-                var rect = CellRect(new GridPosition(x, y));
-                DrawRect(rect, colour);
-                DrawRect(rect, Grid, filled: false, width: 1);
+                DrawFloorTile(new GridPosition(x, y));
             }
         }
 
-        foreach (var chest in _world.Chests)
+        // Ultima VIII's look depends on a painter's algorithm. Everything sharing
+        // the floor is emitted by diagonal depth so feet, furniture and bodies
+        // overlap naturally as the player moves through the room.
+        var maximumDepth = PlayableSliceWorld.MapWidth + PlayableSliceWorld.MapHeight;
+        for (var depth = 0; depth < maximumDepth; depth++)
         {
-            DrawChest(chest);
-        }
+            DrawDecorations(depth);
 
-        foreach (var monster in _world.Monsters)
-        {
-            DrawMonster(monster);
-        }
+            foreach (var chest in _world.Chests.Where(chest =>
+                         Depth(chest.Position) == depth))
+            {
+                DrawChest(chest);
+            }
 
-        DrawPlayer();
+            foreach (var monster in _world.Monsters.Where(monster =>
+                         Depth(monster.Position) == depth))
+            {
+                DrawMonster(monster);
+            }
+
+            if (Depth(_world.PlayerPosition) == depth)
+            {
+                DrawPlayer();
+            }
+        }
     }
 
     private void DrawPlayer()
     {
-        var rect = CellRect(_world.PlayerPosition);
-        DrawRect(
-            new Rect2(rect.Position + new Vector2(2, 4), new Vector2(8, 7)),
-            new Color("3c70c6"));
-        DrawRect(
-            new Rect2(rect.Position + new Vector2(4, 1), new Vector2(5, 4)),
-            new Color("e8bd8e"));
+        var at = Iso(_world.PlayerPosition) + new Vector2(0, 3);
+        DrawShadow(at, 7);
 
         // The backpack is always visible on the character's back.
         DrawRect(
-            new Rect2(rect.Position + new Vector2(1, 5), new Vector2(3, 5)),
-            new Color("855631"));
+            new Rect2(at + new Vector2(-7, -14), new Vector2(6, 10)),
+            new Color("694124"));
         DrawRect(
-            new Rect2(rect.Position + new Vector2(0, 6), new Vector2(2, 3)),
-            new Color("b07940"));
+            new Rect2(at + new Vector2(-6, -13), new Vector2(4, 2)),
+            new Color("b17a39"));
+
+        DrawRect(
+            new Rect2(at + new Vector2(-4, -6), new Vector2(3, 7)),
+            new Color("26364b"));
+        DrawRect(
+            new Rect2(at + new Vector2(2, -6), new Vector2(3, 7)),
+            new Color("1d293b"));
+        DrawColoredPolygon(
+            [
+                at + new Vector2(-6, -15),
+                at + new Vector2(1, -18),
+                at + new Vector2(6, -13),
+                at + new Vector2(5, -5),
+                at + new Vector2(-4, -5),
+            ],
+            new Color("315d85"));
+        DrawLine(
+            at + new Vector2(2, -15),
+            at + new Vector2(5, -6),
+            new Color("79a2bc"),
+            1);
+        DrawCircle(at + new Vector2(0, -20), 4, new Color("c6976d"));
+        DrawRect(
+            new Rect2(at + new Vector2(-4, -23), new Vector2(8, 3)),
+            new Color("3b2a20"));
+        DrawLine(
+            at + new Vector2(6, -13),
+            at + new Vector2(8, -5),
+            new Color("b7a58b"),
+            2);
 
         if (_world.Chests.Any(chest =>
                 _world.PlayerPosition.ManhattanDistance(chest.Position) <= 1) ||
@@ -184,57 +229,434 @@ public partial class Main : Node2D
                 monster.IsAlive &&
                 _world.PlayerPosition.ManhattanDistance(monster.Position) <= 1))
         {
-            DrawRect(rect.Grow(1), Highlight, filled: false, width: 1);
+            DrawPolyline(
+                Diamond(at + new Vector2(0, -2), 9, 4, close: true),
+                Highlight,
+                1);
         }
     }
 
     private void DrawChest(ChestState chest)
     {
-        var rect = CellRect(chest.Position);
+        var at = Iso(chest.Position) + new Vector2(0, 3);
         var isCorpse = chest.Id.StartsWith("remains-", StringComparison.Ordinal);
-        var body = isCorpse ? new Color("77716a") : new Color("83552f");
-        var edge = isCorpse ? new Color("b9b2a5") : new Color("d0a05d");
-
-        DrawRect(
-            new Rect2(rect.Position + new Vector2(1, 5), new Vector2(10, 6)),
-            body);
-
-        var lidY = chest.IsOpen ? rect.Position.Y + 1 : rect.Position.Y + 3;
-        DrawRect(new Rect2(rect.Position.X + 1, lidY, 10, 3), edge);
-        DrawRect(
-            new Rect2(rect.Position + new Vector2(5, 6), new Vector2(2, 3)),
-            new Color("e4c35f"));
-    }
-
-    private void DrawMonster(MonsterState monster)
-    {
-        var rect = CellRect(monster.Position);
-        if (!monster.IsAlive)
+        if (isCorpse)
         {
+            DrawShadow(at, 8);
             DrawLine(
-                rect.Position + new Vector2(2, 9),
-                rect.Position + new Vector2(10, 9),
-                new Color("803838"),
+                at + new Vector2(-7, -2),
+                at + new Vector2(6, -6),
+                new Color("aca694"),
+                3);
+            DrawCircle(at + new Vector2(7, -7), 3, new Color("c3bca7"));
+            DrawLine(
+                at + new Vector2(-2, -4),
+                at + new Vector2(-7, -9),
+                new Color("8b877a"),
                 2);
             return;
         }
 
-        var colour = monster.Id == "skeleton"
-            ? new Color("d2d0bd")
-            : new Color("9a4343");
-        DrawCircle(rect.Position + new Vector2(6, 6), 5, colour);
-        DrawRect(new Rect2(rect.Position + new Vector2(3, 4), new Vector2(2, 2)), Colors.Black);
-        DrawRect(new Rect2(rect.Position + new Vector2(7, 4), new Vector2(2, 2)), Colors.Black);
+        DrawShadow(at, 8);
+        DrawColoredPolygon(
+            [
+                at + new Vector2(-8, -7),
+                at + new Vector2(1, -3),
+                at + new Vector2(8, -7),
+                at + new Vector2(0, -11),
+            ],
+            new Color("9a6431"));
+        DrawColoredPolygon(
+            [
+                at + new Vector2(-8, -7),
+                at + new Vector2(1, -3),
+                at + new Vector2(1, 3),
+                at + new Vector2(-8, -1),
+            ],
+            new Color("69401f"));
+        DrawColoredPolygon(
+            [
+                at + new Vector2(1, -3),
+                at + new Vector2(8, -7),
+                at + new Vector2(8, -1),
+                at + new Vector2(1, 3),
+            ],
+            new Color("4a2d1b"));
+        DrawLine(
+            at + new Vector2(-7, -5),
+            at + new Vector2(7, -5),
+            new Color("d59a49"),
+            1);
+        DrawRect(
+            new Rect2(at + new Vector2(-1, -5), new Vector2(3, 4)),
+            new Color("e0b54e"));
 
-        var healthWidth = 10f * monster.Health / monster.MaxHealth;
-        DrawRect(new Rect2(rect.Position.X + 1, rect.Position.Y - 2, 10, 2), new Color("381616"));
-        DrawRect(new Rect2(rect.Position.X + 1, rect.Position.Y - 2, healthWidth, 2), new Color("d34b4b"));
+        if (chest.IsOpen)
+        {
+            DrawColoredPolygon(
+                [
+                    at + new Vector2(-8, -10),
+                    at + new Vector2(0, -16),
+                    at + new Vector2(8, -12),
+                    at + new Vector2(0, -7),
+                ],
+                new Color("a97336"));
+            DrawLine(
+                at + new Vector2(-7, -10),
+                at + new Vector2(7, -12),
+                new Color("e0aa59"),
+                1);
+        }
+    }
+
+    private void DrawMonster(MonsterState monster)
+    {
+        var at = Iso(monster.Position) + new Vector2(0, 3);
+        if (!monster.IsAlive)
+        {
+            DrawShadow(at, 7);
+            DrawLine(
+                at + new Vector2(-7, -2),
+                at + new Vector2(7, -5),
+                new Color("803838"),
+                3);
+            return;
+        }
+
+        if (monster.Id == "skeleton")
+        {
+            DrawSkeleton(at);
+        }
+        else
+        {
+            DrawCaveRat(at);
+        }
+
+        if (monster.Health < monster.MaxHealth)
+        {
+            var healthWidth = 14f * monster.Health / monster.MaxHealth;
+            DrawRect(
+                new Rect2(at.X - 7, at.Y - 27, 14, 2),
+                new Color("351212"));
+            DrawRect(
+                new Rect2(at.X - 7, at.Y - 27, healthWidth, 2),
+                new Color("b93b30"));
+        }
+    }
+
+    private void DrawOutsideRock()
+    {
+        for (var index = 0; index < 36; index++)
+        {
+            var x = (index * 47) % 238;
+            var y = (index * 29) % 198;
+            var width = 2 + ((index * 7) % 8);
+            var colour = index % 3 == 0
+                ? new Color("2d2119")
+                : new Color("211915");
+            DrawRect(new Rect2(x, y, width, 2), colour);
+        }
+    }
+
+    private void DrawBackWalls()
+    {
+        const int wallHeight = 22;
+
+        for (var x = 0; x < PlayableSliceWorld.MapWidth; x++)
+        {
+            var at = Iso(new GridPosition(x, 0));
+            var left = at + new Vector2(-TileHalfWidth, 0);
+            var top = at + new Vector2(0, -TileHalfHeight);
+            DrawColoredPolygon(
+            [
+                left,
+                top,
+                top + new Vector2(0, -wallHeight),
+                left + new Vector2(0, -wallHeight),
+            ],
+                x % 2 == 0 ? new Color("77362a") : new Color("693027"));
+            DrawWallCourses(left, top, wallHeight, x);
+        }
+
+        for (var y = 0; y < PlayableSliceWorld.MapHeight; y++)
+        {
+            var at = Iso(new GridPosition(0, y));
+            var top = at + new Vector2(0, -TileHalfHeight);
+            var right = at + new Vector2(TileHalfWidth, 0);
+            DrawColoredPolygon(
+            [
+                top,
+                right,
+                right + new Vector2(0, -wallHeight),
+                top + new Vector2(0, -wallHeight),
+            ],
+                y % 2 == 0 ? new Color("62352b") : new Color("583027"));
+            DrawWallCourses(top, right, wallHeight, y);
+        }
+
+        DrawWallPillar(Iso(new GridPosition(0, 0)) + new Vector2(0, -3));
+        DrawWallPillar(Iso(new GridPosition(7, 0)) + new Vector2(-5, -1));
+        DrawWallPillar(Iso(new GridPosition(14, 0)) + new Vector2(-5, -1));
+        DrawWallPillar(Iso(new GridPosition(0, 6)) + new Vector2(5, -1));
+    }
+
+    private void DrawWallCourses(
+        Vector2 start,
+        Vector2 end,
+        int wallHeight,
+        int offset)
+    {
+        for (var rise = 5; rise < wallHeight; rise += 6)
+        {
+            DrawLine(
+                start + new Vector2(0, -rise),
+                end + new Vector2(0, -rise),
+                new Color("3e2520"),
+                1);
+        }
+
+        var middle = start.Lerp(end, offset % 2 == 0 ? 0.35f : 0.65f);
+        DrawLine(
+            middle + new Vector2(0, -6),
+            middle + new Vector2(0, -11),
+            new Color("44251f"),
+            1);
+    }
+
+    private void DrawWallPillar(Vector2 at)
+    {
+        DrawRect(
+            new Rect2(at + new Vector2(-3, -24), new Vector2(7, 24)),
+            new Color("565251"));
+        DrawRect(
+            new Rect2(at + new Vector2(-1, -23), new Vector2(4, 22)),
+            new Color("81776a"));
+        DrawRect(
+            new Rect2(at + new Vector2(-5, -25), new Vector2(11, 3)),
+            new Color("9b8d78"));
+        DrawRect(
+            new Rect2(at + new Vector2(-5, -3), new Vector2(11, 3)),
+            new Color("3b3938"));
+    }
+
+    private void DrawFloorTile(GridPosition position)
+    {
+        var at = Iso(position);
+        Color colour;
+        if (position.X is >= 9 and <= 15 &&
+            position.Y is >= 7 and <= 10)
+        {
+            colour = (position.X + position.Y) % 2 == 0
+                ? CarpetA
+                : CarpetB;
+        }
+        else if (position.X <= 7 && position.Y <= 6)
+        {
+            colour = (position.X + position.Y) % 2 == 0
+                ? TimberA
+                : TimberB;
+        }
+        else
+        {
+            colour = (position.X + position.Y) % 2 == 0
+                ? StoneA
+                : StoneB;
+        }
+
+        var points = Diamond(at, TileHalfWidth, TileHalfHeight, close: false);
+        DrawColoredPolygon(points, colour);
+        DrawPolyline(
+            Diamond(at, TileHalfWidth, TileHalfHeight, close: true),
+            Mortar,
+            1);
+
+        var mark = ((position.X * 17) + (position.Y * 31)) % 7;
+        if (mark == 0)
+        {
+            DrawLine(
+                at + new Vector2(-3, 0),
+                at + new Vector2(2, 1),
+                colour.Lightened(0.12f),
+                1);
+        }
+
+        if (position.X is >= 9 and <= 15 &&
+            position.Y is >= 7 and <= 10 &&
+            (position.X is 9 or 15 || position.Y is 7 or 10))
+        {
+            DrawLine(
+                at + new Vector2(-5, 0),
+                at + new Vector2(5, 0),
+                new Color("d1903b"),
+                1);
+        }
+    }
+
+    private void DrawDecorations(int depth)
+    {
+        if (depth == Depth(new GridPosition(3, 2)))
+        {
+            DrawBarrel(Iso(new GridPosition(3, 2)) + new Vector2(0, 3));
+        }
+
+        if (depth == Depth(new GridPosition(11, 2)))
+        {
+            DrawAltar(Iso(new GridPosition(11, 2)) + new Vector2(0, 3));
+        }
+
+        if (depth == Depth(new GridPosition(1, 8)))
+        {
+            DrawBrazier(Iso(new GridPosition(1, 8)) + new Vector2(0, 3));
+        }
+
+        if (depth == Depth(new GridPosition(15, 4)))
+        {
+            DrawBrazier(Iso(new GridPosition(15, 4)) + new Vector2(0, 3));
+        }
+    }
+
+    private void DrawBarrel(Vector2 at)
+    {
+        DrawShadow(at, 7);
+        DrawRect(
+            new Rect2(at + new Vector2(-6, -12), new Vector2(12, 11)),
+            new Color("744922"));
+        DrawCircle(at + new Vector2(0, -12), 6, new Color("9a6a34"));
+        DrawLine(
+            at + new Vector2(-6, -8),
+            at + new Vector2(6, -8),
+            new Color("33261d"),
+            2);
+        DrawLine(
+            at + new Vector2(-5, -3),
+            at + new Vector2(5, -3),
+            new Color("33261d"),
+            2);
+    }
+
+    private void DrawAltar(Vector2 at)
+    {
+        DrawShadow(at, 10);
+        DrawColoredPolygon(
+        [
+            at + new Vector2(-11, -10),
+            at + new Vector2(0, -5),
+            at + new Vector2(11, -10),
+            at + new Vector2(0, -15),
+        ],
+            new Color("78736d"));
+        DrawRect(
+            new Rect2(at + new Vector2(-7, -9), new Vector2(14, 9)),
+            new Color("4d4b4b"));
+        DrawLine(
+            at + new Vector2(-6, -12),
+            at + new Vector2(6, -8),
+            new Color("7b2730"),
+            2);
+        DrawRect(
+            new Rect2(at + new Vector2(-1, -20), new Vector2(2, 7)),
+            new Color("e6d7a0"));
+        DrawCircle(at + new Vector2(0, -22), 2, new Color("f09328"));
+    }
+
+    private void DrawBrazier(Vector2 at)
+    {
+        DrawShadow(at, 5);
+        DrawLine(
+            at + new Vector2(0, -1),
+            at + new Vector2(0, -12),
+            new Color("77716b"),
+            3);
+        DrawColoredPolygon(
+        [
+            at + new Vector2(-5, -14),
+            at + new Vector2(5, -14),
+            at + new Vector2(3, -10),
+            at + new Vector2(-3, -10),
+        ],
+            new Color("5d5047"));
+        DrawCircle(at + new Vector2(0, -16), 4, new Color("9d301d"));
+        DrawCircle(at + new Vector2(0, -18), 3, new Color("ef7f24"));
+        DrawCircle(at + new Vector2(1, -20), 1.5f, new Color("ffe169"));
+    }
+
+    private void DrawSkeleton(Vector2 at)
+    {
+        DrawShadow(at, 7);
+        var bone = new Color("c9c1a5");
+        DrawLine(
+            at + new Vector2(0, -5),
+            at + new Vector2(0, -17),
+            bone,
+            3);
+        DrawLine(
+            at + new Vector2(-6, -13),
+            at + new Vector2(6, -10),
+            bone,
+            2);
+        DrawLine(
+            at + new Vector2(0, -6),
+            at + new Vector2(-5, 0),
+            bone,
+            2);
+        DrawLine(
+            at + new Vector2(0, -6),
+            at + new Vector2(5, 0),
+            bone,
+            2);
+        DrawCircle(at + new Vector2(0, -21), 5, bone);
+        DrawRect(
+            new Rect2(at + new Vector2(-3, -22), new Vector2(2, 2)),
+            new Color("201b18"));
+        DrawRect(
+            new Rect2(at + new Vector2(2, -22), new Vector2(2, 2)),
+            new Color("201b18"));
+        DrawLine(
+            at + new Vector2(6, -11),
+            at + new Vector2(8, -22),
+            new Color("8b8b85"),
+            1);
+    }
+
+    private void DrawCaveRat(Vector2 at)
+    {
+        DrawShadow(at, 7);
+        DrawColoredPolygon(
+        [
+            at + new Vector2(-7, -4),
+            at + new Vector2(-2, -9),
+            at + new Vector2(7, -7),
+            at + new Vector2(8, -2),
+            at + new Vector2(-3, 0),
+        ],
+            new Color("783f38"));
+        DrawCircle(at + new Vector2(7, -7), 3, new Color("995047"));
+        DrawLine(
+            at + new Vector2(-6, -4),
+            at + new Vector2(-11, -7),
+            new Color("a66e5d"),
+            1);
+        DrawRect(
+            new Rect2(at + new Vector2(8, -8), new Vector2(1, 1)),
+            new Color("f0b14b"));
+    }
+
+    private void DrawShadow(Vector2 at, float radius)
+    {
+        DrawColoredPolygon(
+            Diamond(at, radius, Math.Max(2, radius / 3), close: false),
+            new Color("120d0ba0"));
     }
 
     private void DrawHud()
     {
         DrawRect(new Rect2(240, 0, 80, 200), Panel);
-        DrawLine(new Vector2(240, 0), new Vector2(240, 200), PanelEdge);
+        DrawRect(new Rect2(242, 2, 76, 196), PanelInset);
+        DrawRect(
+            new Rect2(242, 2, 76, 196),
+            PanelEdge,
+            filled: false,
+            width: 1);
 
         DrawText(new Vector2(246, 13), "ASH", 12, Highlight);
         DrawText(
@@ -265,7 +687,8 @@ public partial class Main : Node2D
     private void DrawChestTransfer()
     {
         var chest = _world.ActiveChest!;
-        DrawRect(new Rect2(18, 18, 210, 145), new Color("111319e8"));
+        DrawRect(new Rect2(18, 18, 210, 145), new Color("17110de8"));
+        DrawRect(new Rect2(21, 21, 204, 139), PanelInset);
         DrawRect(new Rect2(18, 18, 210, 145), PanelEdge, filled: false, width: 1);
 
         DrawText(new Vector2(28, 34), "BACKPACK", 9, Highlight);
@@ -289,7 +712,12 @@ public partial class Main : Node2D
         for (var index = 0; index < rows; index++)
         {
             var y = origin.Y + (index * InventoryRowHeight);
-            DrawRect(new Rect2(origin.X, y, width, 10), new Color("252a31"));
+            DrawRect(new Rect2(origin.X, y, width, 10), new Color("38291d"));
+            DrawLine(
+                new Vector2(origin.X, y + 10),
+                new Vector2(origin.X + width, y + 10),
+                new Color("56402a"),
+                1);
             DrawText(
                 new Vector2(origin.X + 3, y + 8),
                 Shorten(inventory.Items[index], width < 80 ? 12 : 16),
@@ -358,10 +786,33 @@ public partial class Main : Node2D
     private static string Shorten(string value, int length) =>
         value.Length <= length ? value : $"{value[..(length - 1)]}…";
 
-    private static Rect2 CellRect(GridPosition position) =>
+    private static int Depth(GridPosition position) =>
+        position.X + position.Y;
+
+    private static Vector2 Iso(GridPosition position) =>
         new(
-            MapOriginX + (position.X * TileSize),
-            MapOriginY + (position.Y * TileSize),
-            TileSize,
-            TileSize);
+            IsoOriginX + ((position.X - position.Y) * TileHalfWidth),
+            IsoOriginY + ((position.X + position.Y) * TileHalfHeight));
+
+    private static Vector2[] Diamond(
+        Vector2 centre,
+        float halfWidth,
+        float halfHeight,
+        bool close)
+    {
+        var points = new List<Vector2>
+        {
+            centre + new Vector2(0, -halfHeight),
+            centre + new Vector2(halfWidth, 0),
+            centre + new Vector2(0, halfHeight),
+            centre + new Vector2(-halfWidth, 0),
+        };
+
+        if (close)
+        {
+            points.Add(points[0]);
+        }
+
+        return [.. points];
+    }
 }

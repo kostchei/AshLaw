@@ -164,6 +164,9 @@ covered by a software licence and need separate terms.
 
 ## Where to start reading
 
+The visual contract for new rooms and assets is
+[`docs/art-direction.md`](docs/art-direction.md).
+
 1. [`docs/build-plan.md`](docs/build-plan.md) — milestones, risks, and current status
    (§6 for where the project actually is).
 2. [`docs/adr/`](docs/adr/) — the five decisions that are expensive to reverse.

@@ -1,0 +1,54 @@
+# Art Direction: Ashen Ultima
+
+## Visual target
+
+Ashen Ultima uses a 320×200 presentation inspired by the readable, theatrical
+interiors of *Ultima VIII*: oblique rooms, tall figures, strong silhouettes,
+deep walls, dense props, and a restrained earth-tone palette. The game should
+look like a place rather than a visible gameplay grid.
+
+The reference is a design language, not a source of distributable assets.
+ScummVM and Pentagram may be studied for compatible behavior, file-format
+knowledge, projection, and object ordering. Their open-source licenses do not
+grant a license to redistribute the original *Ultima VIII* art, maps, audio, or
+other game data. Shipping assets must be original or separately licensed.
+
+## Rendering rules
+
+- Use a 2:1 oblique tile projection: 16×8 logical floor diamonds at the native
+  resolution.
+- Place actors by their feet. A normal human silhouette should be roughly
+  20–28 pixels tall, with equipment visible on the body.
+- Draw floor and architecture first, then emit characters, containers, corpses,
+  and furnishings in diagonal `x + y` depth order.
+- Use raised wall faces, pillars, furniture, rugs, lighting fixtures, and floor
+  variation to break up the underlying tile structure.
+- Keep interaction state in the simulation. The renderer projects that state
+  and must not become the authority for collision, inventory, or combat.
+- Avoid always-visible health bars and modern markers. Show them only as
+  transient feedback or when state has changed.
+- Preserve nearest-neighbor scaling and integer-aligned shapes at 320×200.
+
+## Palette and interface
+
+Rooms favor ochre timber, soot-dark stone, brick red, tarnished metal, bone,
+and small amber highlights. Black negative space frames the playable room.
+Interface panels use dark leather-brown fields with narrow bronze edges and
+warm text.
+
+The backpack, chest transfer, and combat feedback may use a fixed side panel
+while the interaction model is being proven. Later presentation should favor
+world-space containers and short, diegetic overlays where usability permits.
+
+## Current vertical slice
+
+`game/scripts/Main.cs` is the executable reference for:
+
+- the floor projection and diagonal painter ordering;
+- a raised two-sided room boundary;
+- depth-sorted props, chests, creatures, corpses, and the player;
+- an always-visible backpack on the player silhouette; and
+- the earth-tone HUD and transfer panel.
+
+Code-drawn art is temporary, but its scale, projection, layering, and palette
+are constraints for replacement sprites.
