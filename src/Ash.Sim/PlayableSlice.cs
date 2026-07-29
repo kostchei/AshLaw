@@ -222,11 +222,11 @@ public sealed class PlayableSliceWorld
                     maxHealth: 4,
                     loot: ["Rat Tail"]),
                 new MonsterState(
-                    "skeleton",
-                    "Skeleton",
+                    "many-eyed-tyrant",
+                    "Many-Eyed Tyrant",
                     new GridPosition(16, 7),
-                    maxHealth: 6,
-                    loot: ["Bone Charm", "8 Gold"]),
+                    maxHealth: 8,
+                    loot: ["Glass Eye", "Nullstone Shard"]),
             ]);
 
     public SliceActionResult MovePlayer(int deltaX, int deltaY)

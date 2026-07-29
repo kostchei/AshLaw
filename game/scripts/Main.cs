@@ -11,14 +11,14 @@ public partial class Main : Node2D
     private const int TileHalfHeight = 4;
     private const int InventoryRowHeight = 12;
 
-    private static readonly Color Void = new("100d0b");
-    private static readonly Color Mortar = new("332a24");
-    private static readonly Color StoneA = new("55483b");
-    private static readonly Color StoneB = new("4a4037");
-    private static readonly Color TimberA = new("71512f");
-    private static readonly Color TimberB = new("634529");
-    private static readonly Color CarpetA = new("6d1819");
-    private static readonly Color CarpetB = new("861f1c");
+    private static readonly Color Void = new("12110f");
+    private static readonly Color Mortar = new("36322e");
+    private static readonly Color StoneA = new("58534c");
+    private static readonly Color StoneB = new("4b4843");
+    private static readonly Color TimberA = new("685d4c");
+    private static readonly Color TimberB = new("5b5244");
+    private static readonly Color CarpetA = new("5d3938");
+    private static readonly Color CarpetB = new("70413d");
     private static readonly Color Panel = new("17120f");
     private static readonly Color PanelInset = new("2a211a");
     private static readonly Color PanelEdge = new("a16d35");
@@ -323,9 +323,9 @@ public partial class Main : Node2D
             return;
         }
 
-        if (monster.Id == "skeleton")
+        if (monster.Id == "many-eyed-tyrant")
         {
-            DrawSkeleton(at);
+            DrawManyEyedTyrant(at);
         }
         else
         {
@@ -352,8 +352,8 @@ public partial class Main : Node2D
             var y = (index * 29) % 198;
             var width = 2 + ((index * 7) % 8);
             var colour = index % 3 == 0
-                ? new Color("2d2119")
-                : new Color("211915");
+                ? new Color("292621")
+                : new Color("201e1b");
             DrawRect(new Rect2(x, y, width, 2), colour);
         }
     }
@@ -374,7 +374,7 @@ public partial class Main : Node2D
                 top + new Vector2(0, -wallHeight),
                 left + new Vector2(0, -wallHeight),
             ],
-                x % 2 == 0 ? new Color("77362a") : new Color("693027"));
+                x % 2 == 0 ? new Color("68504a") : new Color("5e4944"));
             DrawWallCourses(left, top, wallHeight, x);
         }
 
@@ -390,7 +390,7 @@ public partial class Main : Node2D
                 right + new Vector2(0, -wallHeight),
                 top + new Vector2(0, -wallHeight),
             ],
-                y % 2 == 0 ? new Color("62352b") : new Color("583027"));
+                y % 2 == 0 ? new Color("5d4c47") : new Color("51433f"));
             DrawWallCourses(top, right, wallHeight, y);
         }
 
@@ -411,7 +411,7 @@ public partial class Main : Node2D
             DrawLine(
                 start + new Vector2(0, -rise),
                 end + new Vector2(0, -rise),
-                new Color("3e2520"),
+                new Color("403733"),
                 1);
         }
 
@@ -419,7 +419,7 @@ public partial class Main : Node2D
         DrawLine(
             middle + new Vector2(0, -6),
             middle + new Vector2(0, -11),
-            new Color("44251f"),
+            new Color("453934"),
             1);
     }
 
@@ -580,42 +580,41 @@ public partial class Main : Node2D
         DrawCircle(at + new Vector2(1, -20), 1.5f, new Color("ffe169"));
     }
 
-    private void DrawSkeleton(Vector2 at)
+    private void DrawManyEyedTyrant(Vector2 at)
     {
-        DrawShadow(at, 7);
-        var bone = new Color("c9c1a5");
-        DrawLine(
-            at + new Vector2(0, -5),
-            at + new Vector2(0, -17),
-            bone,
-            3);
-        DrawLine(
-            at + new Vector2(-6, -13),
-            at + new Vector2(6, -10),
-            bone,
-            2);
-        DrawLine(
-            at + new Vector2(0, -6),
-            at + new Vector2(-5, 0),
-            bone,
-            2);
-        DrawLine(
-            at + new Vector2(0, -6),
-            at + new Vector2(5, 0),
-            bone,
-            2);
-        DrawCircle(at + new Vector2(0, -21), 5, bone);
+        DrawShadow(at, 9);
+        var shell = new Color("898679");
+        var shellDark = new Color("57584f");
+        var eye = new Color("b9a555");
+        var pupil = new Color("211d19");
+
+        DrawLine(at + new Vector2(-6, -14), at + new Vector2(-11, -23), shellDark, 2);
+        DrawLine(at + new Vector2(-3, -17), at + new Vector2(-4, -28), shellDark, 2);
+        DrawLine(at + new Vector2(3, -17), at + new Vector2(5, -28), shellDark, 2);
+        DrawLine(at + new Vector2(6, -13), at + new Vector2(12, -21), shellDark, 2);
+        DrawCircle(at + new Vector2(-11, -24), 2, eye);
+        DrawCircle(at + new Vector2(-4, -29), 2, eye);
+        DrawCircle(at + new Vector2(5, -29), 2, eye);
+        DrawCircle(at + new Vector2(12, -22), 2, eye);
+
+        DrawCircle(at + new Vector2(0, -13), 11, shellDark);
+        DrawCircle(at + new Vector2(0, -15), 10, shell);
+        DrawCircle(at + new Vector2(0, -16), 6, new Color("c2b66e"));
+        DrawCircle(at + new Vector2(0, -16), 3, pupil);
         DrawRect(
-            new Rect2(at + new Vector2(-3, -22), new Vector2(2, 2)),
-            new Color("201b18"));
-        DrawRect(
-            new Rect2(at + new Vector2(2, -22), new Vector2(2, 2)),
-            new Color("201b18"));
+            new Rect2(at + new Vector2(-6, -9), new Vector2(12, 2)),
+            new Color("392521"));
         DrawLine(
-            at + new Vector2(6, -11),
-            at + new Vector2(8, -22),
-            new Color("8b8b85"),
+            at + new Vector2(-5, -8),
+            at + new Vector2(5, -8),
+            new Color("d1c8ad"),
             1);
+
+        // The eye stalks retain the strongest color in an otherwise muted
+        // creature, keeping the threat readable against desaturated rooms.
+        DrawRect(
+            new Rect2(at + new Vector2(-1, -17), new Vector2(2, 2)),
+            new Color("e4ca55"));
     }
 
     private void DrawCaveRat(Vector2 at)

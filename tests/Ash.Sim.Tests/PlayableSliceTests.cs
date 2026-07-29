@@ -11,6 +11,9 @@ public sealed class PlayableSliceTests
         Assert.Contains("Rusty Sword", world.Backpack.Items);
         Assert.Equal(2, world.Chests.Count);
         Assert.Equal(2, world.Monsters.Count);
+        Assert.Contains(
+            world.Monsters,
+            monster => monster.Id == "many-eyed-tyrant");
         Assert.All(world.Monsters, monster => Assert.True(monster.IsAlive));
     }
 

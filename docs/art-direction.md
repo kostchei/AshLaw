@@ -13,6 +13,12 @@ knowledge, projection, and object ordering. Their open-source licenses do not
 grant a license to redistribute the original *Ultima VIII* art, maps, audio, or
 other game data. Shipping assets must be original or separately licensed.
 
+Private extractions from a legally owned installation may be used as reference
+boards. World tiles are reference for projection, edge behavior, footpads,
+height, occlusion, and material rhythm. Sprites are reference for scale,
+readability, anchoring, directional frames, and animation cadence. They are not
+paint-over bases for shipping art.
+
 ## Rendering rules
 
 - Use a 2:1 oblique tile projection: 16×8 logical floor diamonds at the native
@@ -31,10 +37,15 @@ other game data. Shipping assets must be original or separately licensed.
 
 ## Palette and interface
 
-Rooms favor ochre timber, soot-dark stone, brick red, tarnished metal, bone,
-and small amber highlights. Black negative space frames the playable room.
-Interface panels use dark leather-brown fields with narrow bronze edges and
-warm text.
+The world is deliberately more desaturated than *Ultima VIII*. Rooms favor
+weathered timber, ash-grey stone, dried brick, tarnished metal, old bone, and
+muted cloth. Hue and value variation should describe material without making
+the floor visually compete with actors.
+
+Characters may carry somewhat stronger local color. Monsters, loot, magic,
+fire, poison, and interaction feedback own the highest saturation and contrast.
+Black negative space frames the playable room. Interface panels use dark
+leather-brown fields with narrow bronze edges and warm text.
 
 The backpack, chest transfer, and combat feedback may use a fixed side panel
 while the interaction model is being proven. Later presentation should favor
@@ -52,3 +63,6 @@ world-space containers and short, diegetic overlays where usability permits.
 
 Code-drawn art is temporary, but its scale, projection, layering, and palette
 are constraints for replacement sprites.
+
+Creature silhouettes and encounter art follow
+[`bestiary-direction.md`](bestiary-direction.md).
