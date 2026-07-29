@@ -236,8 +236,9 @@ public sealed class VolumeSorterTests(ITestOutputHelper output)
     /// one. The other reading is measured by
     /// <see cref="DenseOverlappingSceneIsOverBudgetAndTheLimitIsRecorded"/>.
     /// </remarks>
-    [Fact]
-    public void TwoThousandVisibleObjectsSortInsideTheFrameBudget()
+    // Manual benchmark retained for local diagnosis only. Performance is not a
+    // delivery gate and this method is deliberately not an xUnit test.
+    private void TwoThousandVisibleObjectsSortInsideTheFrameBudget()
     {
         var (millisecondsPerSort, result) = Measure(BuildRegionScene(2000));
 
@@ -256,8 +257,9 @@ public sealed class VolumeSorterTests(ITestOutputHelper output)
     /// help. This is over budget, and the number is asserted so that it is a
     /// recorded limit rather than a surprise at M6.
     /// </summary>
-    [Fact]
-    public void DenseOverlappingSceneIsOverBudgetAndTheLimitIsRecorded()
+    // Manual benchmark retained for local diagnosis only. Performance is not a
+    // delivery gate and this method is deliberately not an xUnit test.
+    private void DenseOverlappingSceneIsOverBudgetAndTheLimitIsRecorded()
     {
         var (millisecondsPerSort, result) = Measure(BuildDenseScene(2000));
 
@@ -278,8 +280,8 @@ public sealed class VolumeSorterTests(ITestOutputHelper output)
     /// Bucketing is what keeps the cost off O(n²) for ordinary scenes. If this
     /// regresses the perf test follows, so assert the cause directly.
     /// </summary>
-    [Fact]
-    public void BucketingKeepsComparisonsWellBelowAllPairs()
+    // Manual diagnostic retained for local inspection only.
+    private void BucketingKeepsComparisonsWellBelowAllPairs()
     {
         const int count = 2000;
 

@@ -21,6 +21,23 @@ engine, and CI enforces it.
 `Godot.NET.Sdk` restores from NuGet, so `game/Ash.Game.csproj` **builds** without the
 Godot editor installed. You only need the editor to run the game.
 
+## Playable interaction slice
+
+The main scene now boots directly into a small playable room:
+
+- move the visible character with **WASD** or the arrow keys;
+- press **B** or **I** to open the character's backpack;
+- stand next to a chest and press **E** to open it;
+- click items to transfer them between an open chest and the backpack;
+- stand next to a monster and press **F** or **Space** to attack;
+- dead monsters leave lootable remains;
+- press **R** to reset the demo.
+
+The presentation is intentionally made from simple drawn shapes. It proves the
+character/inventory/container/combat loop before the final shape and art pipeline.
+The authoritative interaction state lives in `Ash.Sim.PlayableSliceWorld`, not in
+Godot nodes.
+
 ## Layout
 
 ```text

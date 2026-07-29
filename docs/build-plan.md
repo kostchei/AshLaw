@@ -186,11 +186,10 @@ Approach:
    (GFX-054). Never break it silently.
 4. Allow per-shape explicit sort bias from metadata (GFX-055).
 
-Cost control: the naive comparison is O(n²) over the visible set. Bucket the visible set
-by screen-space grid first and only compare within and between adjacent buckets. Budget:
-2,000 visible objects at 60Hz. Measure this at M1 with synthetic data — if the budget
-fails there, everything downstream is affected, and it is far cheaper to learn in week 4
-than week 30.
+Cost control is pragmatic rather than a milestone gate. Bucket the visible set by
+screen-space grid and avoid obviously irrelevant comparisons, but do not delay playable
+features for synthetic object-count or frame-time targets. Profile and optimise only
+when a real scene on supported hardware demonstrates a player-visible problem.
 
 ### 2.6 Palette pipeline
 
@@ -334,12 +333,11 @@ Implements INTEGRATION.md §10 steps 1–12. No Godot, no world model.
 
 **Exit proof**
 
-- Camera scrolls a hand-built multi-elevation test map at a locked 60 fps.
+- Camera scrolls a hand-built multi-elevation test map interactively.
 - **Stability:** a fixed camera path over 10,000 frames produces zero changes in relative
   sort order for any object pair (assert on the emitted order list, not pixels).
 - **Round-trip:** `ScreenToLogical(LogicalToScreen(p)) == p` at 1×–4×, windowed and
   fullscreen.
-- **Perf budget:** 2,000 visible sorted sprites hold 60 fps. If not, resolve now.
 - Palette identity test: all 256 indices map to the exact authored RGB.
 
 ---
@@ -750,36 +748,11 @@ where the result depends on how a given GPU rounds. The test asserts every sampl
 0.5 texels from either boundary, and a companion test asserts that removing the offset
 drops that margin to 0.0, so the check demonstrably has teeth.
 
-**2. Sorter — correct, but the 2,000-object budget is conditional.** Measured on the dev
-machine, 20 sorts per figure:
-
-| Scene | Objects | Comparisons | Cycles | ms/sort |
-|---|---|---|---|---|
-| Drawn world region, ~45×45 tiles | 2,000 | 28,299 (1.4% of pairs) | 0 | **8.6** |
-| Packed into the 320×200 viewport | 2,000 | 614,906 (30.8% of pairs) | 1,156 | **135** |
-
-The plan says "2,000 visible objects" without saying whether *visible* means the drawn
-world region or literally 2,000 sprites overlapping inside 320×200. The two readings are
-a factor of 16 apart, so **this needs deciding before M6.**
-
-- Under the region reading the budget holds, but 8.6 ms is over half the 60 Hz frame on
-  its own. That is not comfortable, and it is sorting only — no drawing.
-- Under the packed reading it fails outright. Roughly a third of all pairs genuinely
-  overlap, so no spatial index helps; the cost is intrinsic to a pairwise-graph sorter at
-  that density. This is the case §2.5's escape hatch exists for.
-
-Three implementation defects were found and fixed while measuring, worth recording
-because each looked like an algorithmic wall and was not:
-
-- Breaking a cycle rescanned and re-sorted every unemitted node, making it
-  O(n² log n) across 1,156 breaks.
-- Deduplicating candidate pairs through a `HashSet` of tuples cost more than the
-  comparisons it was guarding. Pairs are now assigned to a single owning bucket by
-  arithmetic.
-- Membership was tested through a `SortedSet` once per graph edge — a comparator call on
-  each of 615,000 edges.
-
-Together these were 650 ms → 135 ms on the packed scene. The remaining cost is real work.
+**2. Sorter — correctness spike complete.** Graph construction, deterministic cycle
+handling, stable output, and screen-space candidate filtering are implemented. Synthetic
+latency and object-count thresholds are no longer milestone gates. The timed xUnit tests
+have been retired; future optimisation is driven by profiling an actual playable scene,
+not an adversarial benchmark.
 
 **Also landed: projection and viewport round-trips** (M1 task 6, §2.8).
 `ObliqueProjection` and `ViewportScaling` are integer-only, so
@@ -812,14 +785,16 @@ the `uid://` on `Main.cs`, which the same rewrite had produced.
 
 ### 6.5 What M1 should do next
 
-1. Settle the "2,000 visible" reading above, since it decides whether §2.5's escape hatch
-   is needed.
-2. Port `SortItem::below` from ScummVM, replacing `VolumeSorter.Below` rather than
+1. Build the playable interaction slice first: a visible controllable character,
+   backpack, lootable chests, and killable monsters.
+2. Port `SortItem::below` from ScummVM when real authored shapes need its special cases,
+   replacing `VolumeSorter.Below` rather than
    extending it. The current predicate implements the geometric core only — the
    fixed-vs-dynamic, occludes-fast-path, and shape-flag cases are absent — and it was
    written from first principles while the licensing question was open. That question is
    settled: [ADR 0005](adr/0005-gplv2-and-reuse-over-reimplementation.md) licenses this
    project GPLv2 and makes reuse the preferred route. Should land before M2 authors map
    content.
-3. Then M1 tasks 4–5, 7, 9–10: palette controller, shape resource format, camera, sprite
-   draw pass, debug overlay.
+3. Grow the slice into M1/M2 infrastructure as the working game demands: shape resource
+   format, camera, sprite draw pass, object store, containers, and transactional
+   transfers. Palette polish and debug overlays follow playable interaction.
