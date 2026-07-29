@@ -50,6 +50,7 @@ public enum TraumaEffectKind
     ForcedMovement,
     DropHeldItem,
     BreakItem,
+    BreakBone,
     DisableLimb,
     DestroyEye,
 }

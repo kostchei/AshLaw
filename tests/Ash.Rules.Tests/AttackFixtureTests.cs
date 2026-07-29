@@ -9,6 +9,7 @@ public sealed class AttackFixtureTests
         {
             "greataxe-vs-plate.json",
             "grapple-vs-leather-corrected.json",
+            "greataxe-vs-chain-critical-walkthrough.json",
         };
 
     [Theory]

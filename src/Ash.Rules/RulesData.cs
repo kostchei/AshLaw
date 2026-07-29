@@ -81,12 +81,93 @@ public sealed class CriticalOutcome
     public IReadOnlyList<TraumaEffect> Effects { get; }
 }
 
-public sealed record SpellcastingRules(
-    bool ProvokesInMelee,
-    bool InterruptionOnCriticalOrStun,
-    int MishapRawD20,
-    string MishapEffect,
-    string MishapConsequence);
+public sealed class SpellcastingRules
+{
+    private readonly IReadOnlyDictionary<CastingTradition, ArmorRestriction> _armorRestrictions;
+
+    internal SpellcastingRules(
+        bool provokesInMelee,
+        bool interruptionOnCriticalOrStun,
+        int mishapRawD20,
+        string mishapEffect,
+        string mishapConsequence,
+        IDictionary<CastingTradition, ArmorRestriction> armorRestrictions,
+        ClericVirtueRequirement clericVirtues)
+    {
+        ProvokesInMelee = provokesInMelee;
+        InterruptionOnCriticalOrStun = interruptionOnCriticalOrStun;
+        MishapRawD20 = mishapRawD20;
+        MishapEffect = mishapEffect;
+        MishapConsequence = mishapConsequence;
+        _armorRestrictions = new ReadOnlyDictionary<CastingTradition, ArmorRestriction>(
+            new Dictionary<CastingTradition, ArmorRestriction>(armorRestrictions));
+        ClericVirtues = clericVirtues;
+    }
+
+    public bool ProvokesInMelee { get; }
+
+    public bool InterruptionOnCriticalOrStun { get; }
+
+    public int MishapRawD20 { get; }
+
+    public string MishapEffect { get; }
+
+    public string MishapConsequence { get; }
+
+    public IReadOnlyDictionary<CastingTradition, ArmorRestriction> ArmorRestrictions =>
+        _armorRestrictions;
+
+    public ClericVirtueRequirement ClericVirtues { get; }
+
+    public MishapLockoutScope MishapLockoutScope => MishapLockoutScope.ThatSpellOnly;
+
+    public MishapLockoutDuration MishapLockoutDuration => MishapLockoutDuration.UntilNextDawn;
+
+    public ArmorRestriction GetArmorRestriction(CastingTradition tradition) =>
+        _armorRestrictions.TryGetValue(tradition, out var restriction)
+            ? restriction
+            : throw new RulesResolutionException(
+                $"No armour restriction is defined for casting tradition '{tradition}'.");
+
+    /// <summary>
+    /// Checks whether <paramref name="tradition"/> may cast in this loadout.
+    /// Clerics additionally require <paramref name="clericVirtueScores"/>, which
+    /// must be supplied for <see cref="CastingTradition.Cleric"/> and must be
+    /// <see langword="null"/> otherwise.
+    /// </summary>
+    public SpellcastingCheck CanCast(
+        CastingTradition tradition,
+        ArmorType armor,
+        ShieldKind shield,
+        IReadOnlyCollection<int>? clericVirtueScores = null)
+    {
+        if (tradition == CastingTradition.Cleric)
+        {
+            if (clericVirtueScores is null)
+            {
+                throw new ArgumentNullException(
+                    nameof(clericVirtueScores),
+                    "Cleric spellcasting requires the deity virtue/vice scores.");
+            }
+        }
+        else if (clericVirtueScores is not null)
+        {
+            throw new ArgumentException(
+                $"Virtue/vice scores apply only to clerics; '{tradition}' supplied them.",
+                nameof(clericVirtueScores));
+        }
+
+        var armorCheck = GetArmorRestriction(tradition).Check(armor, shield);
+        if (!armorCheck.IsAllowed)
+        {
+            return armorCheck;
+        }
+
+        return clericVirtueScores is null
+            ? armorCheck
+            : ClericVirtues.Check(clericVirtueScores);
+    }
+}
 
 public sealed class RulesData
 {
@@ -98,7 +179,8 @@ public sealed class RulesData
         IDictionary<AttackCategoryId, AttackTable> attackTables,
         IDictionary<(CriticalTableId Table, CriticalTier Tier, int Index), CriticalOutcome>
             criticalOutcomes,
-        SpellcastingRules spellcasting)
+        SpellcastingRules spellcasting,
+        ClassProgressionTable classProgression)
     {
         _attackTables = new ReadOnlyDictionary<AttackCategoryId, AttackTable>(
             new Dictionary<AttackCategoryId, AttackTable>(attackTables));
@@ -107,11 +189,14 @@ public sealed class RulesData
                 new Dictionary<(CriticalTableId Table, CriticalTier Tier, int Index), CriticalOutcome>(
                     criticalOutcomes));
         Spellcasting = spellcasting;
+        ClassProgression = classProgression;
     }
 
     public IReadOnlyDictionary<AttackCategoryId, AttackTable> AttackTables => _attackTables;
 
     public SpellcastingRules Spellcasting { get; }
+
+    public ClassProgressionTable ClassProgression { get; }
 
     public AttackTable GetAttackTable(AttackCategoryId category) =>
         _attackTables.TryGetValue(category, out var table)

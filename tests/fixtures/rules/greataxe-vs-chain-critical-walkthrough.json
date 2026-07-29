@@ -1,0 +1,24 @@
+{
+  "name": "Greataxe vs Chain (critical walkthrough, corrected)",
+  "source": "critical_hits_system.md section 4 walkthrough, recomputed against the corrected AT-3 parameters",
+  "note": "The published section 4 quotes pre-correction AT-3 Chain parameters (hit_threshold 11, multiplier 2.0, base_crit_a 19) and trauma text that exists in no runtime table. The scenario inputs are retained; every expected value is recomputed from the authoritative combat_system_data.json and ct_2_slash_critical_table.csv. See PROVENANCE.md.",
+  "request": {
+    "raw_d20": 17,
+    "attack_category": "TwoHandedWeapons",
+    "attack_modifier": 6,
+    "defense_modifier": 2,
+    "armor": "Chain",
+    "critical_table": "Slash",
+    "is_spell": false
+  },
+  "expected": {
+    "hit": true,
+    "net_roll": 21,
+    "margin": 7,
+    "concussion_hits": 16,
+    "critical_tier": "A",
+    "trauma_index": 7,
+    "mishap": false,
+    "trauma_text": "Minor forearm wound. +4 hits. 2 hits per round. Stunned 1 round."
+  }
+}

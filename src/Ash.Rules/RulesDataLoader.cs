@@ -7,6 +7,41 @@ public static class RulesDataLoader
 {
     private const string JsonFileName = "combat_system_data.json";
     private const string AttackSummaryFileName = "attack_tables_summary.csv";
+    private const string ClassProgressionFileName = "class_progression.csv";
+
+    /// <summary>
+    /// Bracket rules from <c>class_progression_tables.md</c> §2. These derive the
+    /// curve; <c>class_progression.csv</c> is the authority it must reproduce.
+    /// </summary>
+    private static readonly ClassProgressionDefinition[] ClassProgressionDefinitions =
+    [
+        new(
+            CharacterClass.Fighter,
+            HardCap: 20,
+            ProgressionRate.OnePerLevel,
+            ProgressionRate.TwoThirdsPerLevel,
+            ProgressionRate.OneHalfPerLevel),
+        new(
+            CharacterClass.Cleric,
+            HardCap: 15,
+            ProgressionRate.TwoThirdsPerLevel,
+            ProgressionRate.OneHalfPerLevel,
+            ProgressionRate.OneThirdPerLevel),
+        new(
+            CharacterClass.Rogue,
+            HardCap: 10,
+            ProgressionRate.OneHalfPerLevel,
+            ProgressionRate.OneThirdPerLevel,
+            ProgressionRate.OneThirdPerLevel),
+        new(
+            CharacterClass.Wizard,
+            HardCap: 6,
+            ProgressionRate.OneThirdPerLevel,
+            ProgressionRate.OneThirdPerLevel,
+            ProgressionRate.Capped),
+    ];
+
+    private static readonly int[] BracketFirstLevels = [1, 11, 21];
 
     private static readonly CategoryDefinition[] CategoryDefinitions =
     [
@@ -74,8 +109,14 @@ public static class RulesDataLoader
 
             ValidateAttackSummary(summaryPath, attackTables);
             var criticalOutcomes = LoadCriticalTables(directory);
+            var classProgression = LoadClassProgression(
+                Path.Combine(directory, ClassProgressionFileName));
 
-            return new RulesData(attackTables, criticalOutcomes, spellcasting);
+            return new RulesData(
+                attackTables,
+                criticalOutcomes,
+                spellcasting,
+                classProgression);
         }
         catch (RulesDataException)
         {
@@ -282,8 +323,10 @@ public static class RulesDataLoader
         var interruption =
             RequireBoolean(attacks, "interruption_on_crit_or_stun", attacksPath);
 
-        ValidateArmorRestrictions(GetRequiredProperty(element, "armor_restrictions", path));
-        ValidateClericAlignment(GetRequiredProperty(element, "cleric_deity_alignment", path));
+        var armorRestrictions =
+            ParseArmorRestrictions(GetRequiredProperty(element, "armor_restrictions", path));
+        var clericVirtues =
+            ParseClericAlignment(GetRequiredProperty(element, "cleric_deity_alignment", path));
 
         var mishap = GetRequiredProperty(element, "mishap_rule", path);
         const string mishapPath = path + ".mishap_rule";
@@ -298,19 +341,33 @@ public static class RulesDataLoader
                 $"{mishapPath}.trigger must identify the natural-1 rule; found '{trigger}'.");
         }
 
-        return new SpellcastingRules(provokes, interruption, 1, effect, consequence);
+        return new SpellcastingRules(
+            provokes,
+            interruption,
+            1,
+            effect,
+            consequence,
+            armorRestrictions,
+            clericVirtues);
     }
 
-    private static void ValidateArmorRestrictions(JsonElement element)
+    private static IDictionary<CastingTradition, ArmorRestriction> ParseArmorRestrictions(
+        JsonElement element)
     {
         const string path = "$.combat_system_data.spellcasting_rules.armor_restrictions";
         RequireObject(element, path);
-        RequireExactProperties(element, path, "wizard", "druid", "cleric");
+        var traditions = Enum.GetValues<CastingTradition>();
+        RequireExactProperties(
+            element,
+            path,
+            traditions.Select(tradition => tradition.ToString().ToLowerInvariant()).ToArray());
 
-        foreach (var caster in new[] { "wizard", "druid", "cleric" })
+        var restrictions = new Dictionary<CastingTradition, ArmorRestriction>();
+        foreach (var tradition in traditions)
         {
-            var casterPath = $"{path}.{caster}";
-            var restriction = GetRequiredProperty(element, caster, path);
+            var key = tradition.ToString().ToLowerInvariant();
+            var casterPath = $"{path}.{key}";
+            var restriction = GetRequiredProperty(element, key, path);
             RequireObject(restriction, casterPath);
             RequireExactProperties(
                 restriction,
@@ -318,20 +375,46 @@ public static class RulesDataLoader
                 "allowed_armor",
                 "allowed_shields",
                 "description");
-            RequireNonEmptyString(restriction, "allowed_armor", casterPath);
-            RequireNonEmptyString(restriction, "description", casterPath);
 
-            var allowedShields =
-                GetRequiredProperty(restriction, "allowed_shields", casterPath);
-            if (allowedShields.ValueKind is not (JsonValueKind.True or JsonValueKind.False or JsonValueKind.String))
-            {
-                throw new RulesDataException(
-                    $"{casterPath}.allowed_shields must be a boolean or string.");
-            }
+            var allowedArmor = ParseAllowedArmor(
+                RequireNonEmptyString(restriction, "allowed_armor", casterPath),
+                $"{casterPath}.allowed_armor");
+            var description = RequireNonEmptyString(restriction, "description", casterPath);
+            var allowedShields = ParseAllowedShields(
+                GetRequiredProperty(restriction, "allowed_shields", casterPath),
+                $"{casterPath}.allowed_shields");
+
+            restrictions.Add(
+                tradition,
+                new ArmorRestriction(tradition, allowedArmor, allowedShields, description));
         }
+
+        return restrictions;
     }
 
-    private static void ValidateClericAlignment(JsonElement element)
+    private static AllowedArmor ParseAllowedArmor(string value, string path) => value switch
+    {
+        "none" => AllowedArmor.None,
+        "non_metal" => AllowedArmor.NonMetal,
+        "all" => AllowedArmor.All,
+        _ => throw new RulesDataException($"{path} contains unknown allowed-armor value '{value}'."),
+    };
+
+    private static AllowedShields ParseAllowedShields(JsonElement element, string path) =>
+        element.ValueKind switch
+        {
+            JsonValueKind.True => AllowedShields.All,
+            JsonValueKind.False => AllowedShields.None,
+            JsonValueKind.String => element.GetString() switch
+            {
+                "wooden_only" => AllowedShields.WoodenOnly,
+                var other => throw new RulesDataException(
+                    $"{path} contains unknown allowed-shield value '{other}'."),
+            },
+            _ => throw new RulesDataException($"{path} must be a boolean or string."),
+        };
+
+    private static ClericVirtueRequirement ParseClericAlignment(JsonElement element)
     {
         const string path = "$.combat_system_data.spellcasting_rules.cleric_deity_alignment";
         RequireObject(element, path);
@@ -342,18 +425,44 @@ public static class RulesDataLoader
             "primary_threshold",
             "secondary_threshold",
             "failure_effect");
-        RequirePositiveInteger(element, "required_virtues_or_vices_count", path);
-        RequireNonEmptyString(element, "failure_effect", path);
+        var requiredCount =
+            RequirePositiveInteger(element, "required_virtues_or_vices_count", path);
+        var failureEffect = RequireNonEmptyString(element, "failure_effect", path);
 
-        foreach (var thresholdName in new[] { "primary_threshold", "secondary_threshold" })
+        var primary = ParseVirtueThreshold(element, "primary_threshold", path);
+        var secondary = ParseVirtueThreshold(element, "secondary_threshold", path);
+
+        if (primary.MinimumScore < secondary.MinimumScore)
         {
-            var thresholdPath = $"{path}.{thresholdName}";
-            var threshold = GetRequiredProperty(element, thresholdName, path);
-            RequireObject(threshold, thresholdPath);
-            RequireExactProperties(threshold, thresholdPath, "min_score", "required_count");
-            RequirePositiveInteger(threshold, "min_score", thresholdPath);
-            RequirePositiveInteger(threshold, "required_count", thresholdPath);
+            throw new RulesDataException(
+                $"{path}: primary_threshold.min_score ({primary.MinimumScore}) must not be " +
+                $"below secondary_threshold.min_score ({secondary.MinimumScore}).");
         }
+
+        var totalRequired = checked(primary.RequiredCount + secondary.RequiredCount);
+        if (totalRequired > requiredCount)
+        {
+            throw new RulesDataException(
+                $"{path}: the thresholds require {totalRequired} virtues but only " +
+                $"{requiredCount} are selected.");
+        }
+
+        return new ClericVirtueRequirement(requiredCount, primary, secondary, failureEffect);
+    }
+
+    private static VirtueThreshold ParseVirtueThreshold(
+        JsonElement element,
+        string propertyName,
+        string path)
+    {
+        var thresholdPath = $"{path}.{propertyName}";
+        var threshold = GetRequiredProperty(element, propertyName, path);
+        RequireObject(threshold, thresholdPath);
+        RequireExactProperties(threshold, thresholdPath, "min_score", "required_count");
+
+        return new VirtueThreshold(
+            RequirePositiveInteger(threshold, "min_score", thresholdPath),
+            RequirePositiveInteger(threshold, "required_count", thresholdPath));
     }
 
     private static void ValidateAttackSummary(
@@ -525,12 +634,116 @@ public static class RulesDataLoader
                             tier,
                             traumaIndex,
                             text,
-                            TraumaEffectParser.Parse(text)));
+                            TraumaEffectParser.Parse(
+                                text,
+                                $"{path}:{rowNumber}: {definition.Id} Tier {tier} index {traumaIndex}")));
                 }
             }
         }
 
         return outcomes;
+    }
+
+    private static ClassProgressionTable LoadClassProgression(string path)
+    {
+        if (!File.Exists(path))
+        {
+            throw new RulesDataException($"Missing required rules file: {path}");
+        }
+
+        var rows = CsvDocument.Parse(File.ReadAllText(path), path);
+        var classNames = Enum.GetNames<CharacterClass>();
+        var expectedHeader = new[] { "Level" }.Concat(classNames).ToArray();
+        RequireCsvHeader(rows[0], expectedHeader, path);
+
+        var expectedRowCount =
+            ClassProgressionTable.MaximumLevel - ClassProgressionTable.MinimumLevel + 1;
+        if (rows.Count != expectedRowCount + 1)
+        {
+            throw new RulesDataException(
+                $"{path}: expected one header and {expectedRowCount} level rows; found {rows.Count} rows.");
+        }
+
+        var modifiers = new Dictionary<(CharacterClass Class, int Level), int>();
+        var seenLevels = new HashSet<int>();
+        for (var rowIndex = 1; rowIndex < rows.Count; rowIndex++)
+        {
+            var row = rows[rowIndex];
+            var rowNumber = rowIndex + 1;
+            RequireCsvColumnCount(row, expectedHeader.Length, path, rowNumber);
+
+            var level = ParseCsvInt(row[0], path, rowNumber, "Level");
+            if (level < ClassProgressionTable.MinimumLevel ||
+                level > ClassProgressionTable.MaximumLevel ||
+                !seenLevels.Add(level))
+            {
+                throw new RulesDataException(
+                    $"{path}:{rowNumber}: Level must be unique and between " +
+                    $"{ClassProgressionTable.MinimumLevel} and {ClassProgressionTable.MaximumLevel}; found {level}.");
+            }
+
+            if (level != rowIndex)
+            {
+                throw new RulesDataException(
+                    $"{path}:{rowNumber}: rows must ascend by level; expected {rowIndex}, found {level}.");
+            }
+
+            for (var column = 0; column < classNames.Length; column++)
+            {
+                var characterClass = Enum.Parse<CharacterClass>(classNames[column]);
+                var modifier = ParseCsvInt(row[column + 1], path, rowNumber, classNames[column]);
+                if (modifier < 0)
+                {
+                    throw new RulesDataException(
+                        $"{path}:{rowNumber}: {classNames[column]} attack modifier must not be negative; found {modifier}.");
+                }
+
+                modifiers.Add((characterClass, level), modifier);
+            }
+        }
+
+        var rules = new Dictionary<CharacterClass, ClassProgressionRules>();
+        foreach (var definition in ClassProgressionDefinitions)
+        {
+            var brackets = definition.Rates
+                .Select((rate, index) => new ProgressionBracket(BracketFirstLevels[index], rate))
+                .ToArray();
+            rules.Add(
+                definition.Class,
+                new ClassProgressionRules(definition.Class, definition.HardCap, brackets));
+        }
+
+        foreach (var characterClass in Enum.GetValues<CharacterClass>())
+        {
+            if (!rules.ContainsKey(characterClass))
+            {
+                throw new RulesDataException(
+                    $"{path}: no bracket rules are defined for '{characterClass}'.");
+            }
+
+            var cap = rules[characterClass].HardCap;
+            for (var level = ClassProgressionTable.MinimumLevel;
+                 level <= ClassProgressionTable.MaximumLevel;
+                 level++)
+            {
+                var modifier = modifiers[(characterClass, level)];
+                if (modifier > cap)
+                {
+                    throw new RulesDataException(
+                        $"{path}: {characterClass} attack modifier +{modifier} at level {level} " +
+                        $"exceeds the published hard cap of +{cap}.");
+                }
+
+                if (level > ClassProgressionTable.MinimumLevel &&
+                    modifier < modifiers[(characterClass, level - 1)])
+                {
+                    throw new RulesDataException(
+                        $"{path}: {characterClass} attack modifier decreases from level {level - 1} to {level}.");
+                }
+            }
+        }
+
+        return new ClassProgressionTable(modifiers, rules);
     }
 
     private static void ValidateExamples(JsonElement element, string path)
@@ -724,4 +937,23 @@ public static class RulesDataLoader
         string CsvId);
 
     private sealed record CriticalTableDefinition(CriticalTableId Id, string FileName);
+
+    private sealed record ClassProgressionDefinition
+    {
+        public ClassProgressionDefinition(
+            CharacterClass Class,
+            int HardCap,
+            params ProgressionRate[] Rates)
+        {
+            this.Class = Class;
+            this.HardCap = HardCap;
+            this.Rates = Rates;
+        }
+
+        public CharacterClass Class { get; }
+
+        public int HardCap { get; }
+
+        public IReadOnlyList<ProgressionRate> Rates { get; }
+    }
 }

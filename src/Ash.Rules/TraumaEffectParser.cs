@@ -2,30 +2,62 @@ using System.Text.RegularExpressions;
 
 namespace Ash.Rules;
 
+/// <summary>
+/// Converts trauma prose from the <c>ct_*.csv</c> tables into structured effects,
+/// once at import.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Build plan M0 task 5 requires that a trauma line the parser cannot fully
+/// account for is a build error rather than a silently-dropped effect. The parser
+/// therefore records the span of every phrase it consumes, and then scans what is
+/// left for <see cref="UnaccountedMechanicRegex"/> — a deliberately small set of
+/// markers that can only denote a game mechanic (a signed modifier, a number
+/// bound to a mechanical unit, or a state-change verb such as <c>broken</c> or
+/// <c>stunned</c>).
+/// </para>
+/// <para>
+/// Residual descriptive prose is expected and allowed: every line opens with an
+/// injury description, and phrases like "Artery severed" or "Tendons torn"
+/// narrate a mechanic that the accompanying bleed or activity penalty already
+/// quantifies. The check targets the actual risk — a mechanic present in the text
+/// that produces no <see cref="TraumaEffect"/> — rather than attempting to
+/// classify every English phrase.
+/// </para>
+/// </remarks>
 internal static partial class TraumaEffectParser
 {
-    public static IReadOnlyList<TraumaEffect> Parse(string text)
+    public static IReadOnlyList<TraumaEffect> Parse(string text, string source)
     {
         var effects = new List<TraumaEffect>();
-        var unconditionalText = ConditionalClauseRegex().Replace(
-            text,
-            match =>
-            {
-                var condition = ParseCondition(match.Groups["condition"].Value);
-                ParseClause(match.Groups["clause"].Value, condition, effects);
-                return string.Empty;
-            });
+        var covered = new bool[text.Length];
+        var unconditional = text.ToCharArray();
 
-        ParseClause(unconditionalText, TraumaEffectCondition.Always, effects);
+        foreach (Match match in ConditionalClauseRegex().Matches(text))
+        {
+            var condition = ParseCondition(match.Groups["condition"].Value);
+            var clause = match.Groups["clause"];
+            ParseClause(Isolate(text, clause.Index, clause.Length), condition, effects, covered);
+
+            // The "If no <thing>:" lead-in is structural, and is accounted for by
+            // the condition attached to every effect the clause produced.
+            Mark(covered, match.Index, clause.Index - match.Index);
+            Blank(unconditional, match.Index, match.Length);
+        }
+
+        ParseClause(new string(unconditional), TraumaEffectCondition.Always, effects, covered);
+        RequireNoUnaccountedMechanics(text, covered, source);
+
         return Array.AsReadOnly(effects.ToArray());
     }
 
     private static void ParseClause(
         string clause,
         TraumaEffectCondition condition,
-        ICollection<TraumaEffect> effects)
+        ICollection<TraumaEffect> effects,
+        bool[] covered)
     {
-        foreach (Match match in BleedingRegex().Matches(clause))
+        foreach (var match in MatchAll(BleedingRegex(), clause, covered))
         {
             effects.Add(new TraumaEffect(
                 TraumaEffectKind.Bleeding,
@@ -33,8 +65,16 @@ internal static partial class TraumaEffectParser
                 AppliesWhen: condition));
         }
 
-        var withoutBleeding = BleedingRegex().Replace(clause, string.Empty);
-        foreach (Match match in AdditionalHitsRegex().Matches(withoutBleeding))
+        // "N hits per round" must not also read as an additional-hits total, so the
+        // bleed spans are blanked before the additional-hits pass. Blanking keeps
+        // the string length intact so match indices stay aligned with the original.
+        var withoutBleeding = clause.ToCharArray();
+        foreach (Match match in BleedingRegex().Matches(clause))
+        {
+            Blank(withoutBleeding, match.Index, match.Length);
+        }
+
+        foreach (var match in MatchAll(AdditionalHitsRegex(), new string(withoutBleeding), covered))
         {
             effects.Add(new TraumaEffect(
                 TraumaEffectKind.AdditionalHits,
@@ -42,7 +82,7 @@ internal static partial class TraumaEffectParser
                 AppliesWhen: condition));
         }
 
-        foreach (Match match in ActivityPenaltyRegex().Matches(clause))
+        foreach (var match in MatchAll(ActivityPenaltyRegex(), clause, covered))
         {
             effects.Add(new TraumaEffect(
                 TraumaEffectKind.ActivityPenalty,
@@ -54,7 +94,7 @@ internal static partial class TraumaEffectParser
                 AppliesWhen: condition));
         }
 
-        foreach (Match match in StunRegex().Matches(clause))
+        foreach (var match in MatchAll(StunRegex(), clause, covered))
         {
             effects.Add(new TraumaEffect(
                 TraumaEffectKind.Stun,
@@ -63,7 +103,7 @@ internal static partial class TraumaEffectParser
                 AppliesWhen: condition));
         }
 
-        foreach (Match match in UnconsciousRegex().Matches(clause))
+        foreach (var match in MatchAll(UnconsciousRegex(), clause, covered))
         {
             effects.Add(new TraumaEffect(
                 TraumaEffectKind.Unconscious,
@@ -74,38 +114,37 @@ internal static partial class TraumaEffectParser
                 AppliesWhen: condition));
         }
 
-        if (ProneRegex().IsMatch(clause))
+        foreach (var _ in MatchAll(ProneRegex(), clause, covered))
         {
-            effects.Add(new TraumaEffect(
-                TraumaEffectKind.Prone,
-                AppliesWhen: condition));
+            effects.Add(new TraumaEffect(TraumaEffectKind.Prone, AppliesWhen: condition));
         }
 
-        if (DeathRegex().IsMatch(clause))
+        foreach (var _ in MatchAll(DeathRegex(), clause, covered))
         {
-            effects.Add(new TraumaEffect(
-                TraumaEffectKind.Death,
-                AppliesWhen: condition));
+            effects.Add(new TraumaEffect(TraumaEffectKind.Death, AppliesWhen: condition));
         }
 
-        foreach (Match match in ForcedMovementRegex().Matches(clause))
+        foreach (var match in MatchAll(ForcedMovementRegex(), clause, covered))
         {
             effects.Add(new TraumaEffect(
                 TraumaEffectKind.ForcedMovement,
                 Magnitude: ParseInt(match, "distance"),
                 AppliesWhen: condition,
-                Detail: match.Groups["direction"].Value.Trim()));
+                Detail: Normalize(
+                    match.Groups["trailing"].Success
+                        ? match.Groups["trailing"].Value
+                        : match.Groups["direction"].Value)));
         }
 
-        foreach (Match match in DropItemRegex().Matches(clause))
+        foreach (var match in MatchAll(DropItemRegex(), clause, covered))
         {
             effects.Add(new TraumaEffect(
                 TraumaEffectKind.DropHeldItem,
                 AppliesWhen: condition,
-                Detail: match.Groups["item"].Value.Trim().ToLowerInvariant()));
+                Detail: Normalize(match.Groups["item"].Value)));
         }
 
-        if (BreakItemRegex().IsMatch(clause))
+        foreach (var _ in MatchAll(BreakItemRegex(), clause, covered))
         {
             effects.Add(new TraumaEffect(
                 TraumaEffectKind.BreakItem,
@@ -113,16 +152,25 @@ internal static partial class TraumaEffectParser
                 Detail: "shield"));
         }
 
-        if (DisableLimbRegex().IsMatch(clause))
+        foreach (var match in MatchAll(BreakBoneRegex(), clause, covered))
+        {
+            effects.Add(new TraumaEffect(
+                TraumaEffectKind.BreakBone,
+                AppliesWhen: condition,
+                DurationUnit: TraumaDurationUnit.Permanent,
+                Detail: Normalize(match.Groups["part"].Value)));
+        }
+
+        foreach (var match in MatchAll(DisableLimbRegex(), clause, covered))
         {
             effects.Add(new TraumaEffect(
                 TraumaEffectKind.DisableLimb,
                 AppliesWhen: condition,
                 DurationUnit: TraumaDurationUnit.Permanent,
-                Detail: DisableLimbRegex().Match(clause).Groups["limb"].Value.ToLowerInvariant()));
+                Detail: Normalize(match.Groups["limb"].Value)));
         }
 
-        if (DestroyEyeRegex().IsMatch(clause))
+        foreach (var _ in MatchAll(DestroyEyeRegex(), clause, covered))
         {
             effects.Add(new TraumaEffect(
                 TraumaEffectKind.DestroyEye,
@@ -131,6 +179,79 @@ internal static partial class TraumaEffectParser
                 Detail: "eye"));
         }
     }
+
+    private static void RequireNoUnaccountedMechanics(string text, bool[] covered, string source)
+    {
+        var residue = new char[text.Length];
+        for (var index = 0; index < text.Length; index++)
+        {
+            residue[index] = covered[index] ? ' ' : text[index];
+        }
+
+        var unaccounted = UnaccountedMechanicRegex()
+            .Matches(new string(residue))
+            .Select(match => match.Value.Trim())
+            .ToArray();
+        if (unaccounted.Length == 0)
+        {
+            return;
+        }
+
+        throw new RulesDataException(
+            $"{source}: trauma text contains mechanical phrase(s) that produce no effect: " +
+            $"[{string.Join("; ", unaccounted)}] in \"{text}\". Extend TraumaEffectParser to " +
+            "handle them rather than letting them drop.");
+    }
+
+    /// <summary>
+    /// Runs <paramref name="regex"/> over <paramref name="input"/>, marking every
+    /// matched span as accounted for. <paramref name="input"/> must be the same
+    /// length as the original trauma text so indices stay aligned.
+    /// </summary>
+    private static List<Match> MatchAll(Regex regex, string input, bool[] covered)
+    {
+        var matches = new List<Match>();
+        foreach (Match match in regex.Matches(input))
+        {
+            Mark(covered, match.Index, match.Length);
+            matches.Add(match);
+        }
+
+        return matches;
+    }
+
+    /// <summary>
+    /// Returns a string the same length as <paramref name="text"/> containing only
+    /// the requested span, with everything else blanked to spaces.
+    /// </summary>
+    private static string Isolate(string text, int start, int length)
+    {
+        var isolated = new char[text.Length];
+        Array.Fill(isolated, ' ');
+        text.AsSpan(start, length).CopyTo(isolated.AsSpan(start));
+        return new string(isolated);
+    }
+
+    private static void Blank(char[] buffer, int start, int length)
+    {
+        for (var index = start; index < start + length; index++)
+        {
+            buffer[index] = ' ';
+        }
+    }
+
+    private static void Mark(bool[] covered, int start, int length)
+    {
+        for (var index = start; index < start + length; index++)
+        {
+            covered[index] = true;
+        }
+    }
+
+    private static string Normalize(string value) =>
+        string.Join(' ', value.ToLowerInvariant().Split(
+            (char[]?)null,
+            StringSplitOptions.RemoveEmptyEntries));
 
     private static TraumaEffectCondition ParseCondition(string value) =>
         value.Trim().ToLowerInvariant() switch
@@ -189,7 +310,7 @@ internal static partial class TraumaEffectParser
     private static partial Regex DeathRegex();
 
     [GeneratedRegex(
-        @"(?<direction>knocked(?:\s+back)?|sideways)\s+(?<distance>\d+)\s*(?:feet|foot|ft|')",
+        @"(?<direction>knocked(?:\s+back)?|sideways)\s+(?<distance>\d+)\s*(?:feet|foot|ft|')(?:\s+(?<trailing>sideways|backwards?|forwards?))?",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ForcedMovementRegex();
 
@@ -203,6 +324,16 @@ internal static partial class TraumaEffectParser
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex BreakItemRegex();
 
+    /// <summary>
+    /// A broken bone stated on its own. The negative lookahead defers "arm broken
+    /// &amp; useless" to <see cref="DisableLimbRegex"/>, which models the stronger
+    /// outcome.
+    /// </summary>
+    [GeneratedRegex(
+        @"\bbreaks?\s+(?:bone\s+in\s+)?(?<part>(?:lower\s+|upper\s+)?(?:leg|arm)|hip|shoulder|ribs?|collarbone|jaw|elbow|knee|forearm)\b|\b(?<part>bone|hip|shoulder|ribs?|skull|collarbone|jaw|(?:lower\s+|upper\s+)?(?:leg|arm)|forearm|elbow|knee)\s+broken\b(?!\s*(?:&|and)\s*useless)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex BreakBoneRegex();
+
     [GeneratedRegex(
         @"\b(?:(?<limb>arm|leg)\s+(?:broken(?:\s*[&]\s*|\s+and\s+))?useless|sever\s+(?<limb>hand)|shatter\s+(?<limb>elbow|knee))\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
@@ -212,5 +343,22 @@ internal static partial class TraumaEffectParser
         @"\bdestroys one eye\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DestroyEyeRegex();
-}
 
+    /// <summary>
+    /// Markers that can only denote an unparsed game mechanic: a signed modifier,
+    /// a number bound to a mechanical unit, a state-change verb, or an "If no ..."
+    /// lead-in whose condition was not recognised. Injury nouns ("severed",
+    /// "torn", "damage") are deliberately excluded — they narrate mechanics that
+    /// the numeric effects on the same line already quantify.
+    /// </summary>
+    /// <remarks>
+    /// The <c>if no</c> marker matters because an unrecognised condition would
+    /// otherwise degrade silently: <see cref="ConditionalClauseRegex"/> would not
+    /// match it, the clause would be parsed as unconditional, and its effects
+    /// would apply unconditionally instead of being gated.
+    /// </remarks>
+    [GeneratedRegex(
+        @"[+-]\s*\d+|\b\d+\s*(?:hits?|rounds?|rnds?|rds?|hours?|feet|foot|ft|')|\bif\s+no\b|\b(?:broken|useless|crushed|stunned|unconscious|prone|dies|death|killed|paralyz(?:ed|es)|blinded|deafened|bleeds?|bleeding|drops?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex UnaccountedMechanicRegex();
+}

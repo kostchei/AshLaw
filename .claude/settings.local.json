@@ -6,7 +6,12 @@
       "Bash(python tools/import/gen_attack_tables.py)",
       "Bash(python tools/import/gen_attack_tables.py --check)",
       "Bash(echo \"=== exit: $? ===\")",
-      "Bash(python -)"
+      "Bash(python -)",
+      "Bash(git checkout *)",
+      "Bash(dotnet --version)",
+      "Bash(dotnet --list-sdks)",
+      "Bash(dotnet build *)",
+      "Bash(dotnet test *)"
     ]
   }
 }

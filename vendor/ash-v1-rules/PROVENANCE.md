@@ -74,6 +74,29 @@ generated from `combat_system_data.json` by `tools/import/gen_attack_tables.py`,
 also validates the fit against `tools/import/merp_reference.json`. Do not edit the CSV
 directly; run the generator. This is what prevents the two files diverging again.
 
+### 2026-07-29 — class progression transcribed to CSV
+
+`rules/class_progression_tables.md` §3 publishes the Lv 1–30 attack-modifier curve for
+Fighter, Cleric, Rogue, and Wizard as a Markdown table only. It is now also carried as
+`data/class_progression.csv`, a **verbatim transcription** of that table — no value was
+recomputed, reinterpreted, or filled in.
+
+The Markdown table remains the authority. The CSV exists so the runtime can load the
+curve as data rather than hard-coding it, per build plan M0 task 8.
+
+`ClassProgressionTests.BracketRulesDeriveThePublishedTable` independently derives all 120
+cells from the §2 bracket rates and asserts they reproduce the CSV exactly, so a
+transcription error in either direction fails the build. The derivation also reproduces
+the four cap-reached levels quoted in §2 and §4 (Fighter 26, Cleric 29, Rogue 26,
+Wizard 19).
+
+One derivation detail is worth recording because it is not stated in §1: no single
+rounding mode reproduces the published table. The `+2/3` rate grants its first point on
+the **opening** level of a bracket, whereas `+1/2` and `+1/3` grant theirs on the
+**closing** level of each period. The rates are therefore encoded as explicit per-period
+gain patterns (`+1/+0/+1`, `+0/+1`, `+0/+0/+1`) rather than as rounded arithmetic on
+`levels × rate`.
+
 ### Known-unvalidated table
 
 `environmental_fall_crush` has no supplied source table. It carries the same
