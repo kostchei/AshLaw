@@ -1,8 +1,8 @@
 namespace Ash.Core;
 
 /// <summary>
-/// Maps between physical window pixels and the logical 320x200 canvas
-/// (build plan §2.8): integer scale, aspect kept, letterboxed.
+/// Maps between physical window pixels and the logical 640x400 canvas:
+/// integer scale, aspect kept, letterboxed.
 /// </summary>
 /// <remarks>
 /// Godot's <c>viewport</c> stretch mode already does this for mouse input. The
@@ -13,8 +13,8 @@ namespace Ash.Core;
 /// </remarks>
 public sealed class ViewportScaling
 {
-    public const int LogicalWidth = 320;
-    public const int LogicalHeight = 200;
+    public const int LogicalWidth = 640;
+    public const int LogicalHeight = 400;
 
     private ViewportScaling(int scale, int offsetX, int offsetY, int windowWidth, int windowHeight)
     {

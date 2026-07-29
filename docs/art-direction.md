@@ -2,7 +2,7 @@
 
 ## Visual target
 
-Ashen Ultima uses a 320×200 presentation inspired by the readable, theatrical
+Ashen Ultima uses a 640×400 logical presentation inspired by the readable, theatrical
 interiors of *Ultima VIII*: oblique rooms, tall figures, strong silhouettes,
 deep walls, dense props, and a restrained earth-tone palette. The game should
 look like a place rather than a visible gameplay grid.
@@ -24,7 +24,7 @@ paint-over bases for shipping art.
 - Use a 2:1 oblique tile projection: 16×8 logical floor diamonds at the native
   resolution.
 - Place actors by their feet. A normal human silhouette should be roughly
-  20–28 pixels tall, with equipment visible on the body.
+  46–52 pixels tall, with equipment visible on the body.
 - Draw floor and architecture first, then emit characters, containers, corpses,
   and furnishings in diagonal `x + y` depth order.
 - Use raised wall faces, pillars, furniture, rugs, lighting fixtures, and floor
@@ -33,7 +33,11 @@ paint-over bases for shipping art.
   and must not become the authority for collision, inventory, or combat.
 - Avoid always-visible health bars and modern markers. Show them only as
   transient feedback or when state has changed.
-- Preserve nearest-neighbor scaling and integer-aligned shapes at 320×200.
+- Preserve nearest-neighbor scaling and integer-aligned shapes at 640×400.
+- Open the Windows build at 1280×800 by default: an exact 2× display scale.
+- Target a normal human at approximately 50 pixels tall, or one eighth of the
+  logical screen height. Wider action frames may extend well beyond the idle
+  silhouette.
 
 ## Palette and interface
 

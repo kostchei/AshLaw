@@ -5,6 +5,7 @@ namespace Ash.Game;
 
 public partial class Main : Node2D
 {
+    private const float RenderScale = 2;
     private const int IsoOriginX = 100;
     private const int IsoOriginY = 27;
     private const int TileHalfWidth = 8;
@@ -35,6 +36,12 @@ public partial class Main : Node2D
 
     public override void _Draw()
     {
+        // Author in compact pixel-art units, then rasterize into the 640x400
+        // logical framebuffer at 2x. Windows displays that framebuffer at 2x.
+        DrawSetTransform(
+            Vector2.Zero,
+            rotation: 0,
+            scale: new Vector2(RenderScale, RenderScale));
         DrawWorld();
         DrawHud();
 
@@ -51,7 +58,7 @@ public partial class Main : Node2D
             InputEventKey key when key.Pressed && !key.Echo => HandleKey(key.Keycode),
             InputEventMouseButton mouse when
                 mouse.Pressed && mouse.ButtonIndex == MouseButton.Left =>
-                HandleClick(mouse.Position),
+                HandleClick(mouse.Position / RenderScale),
             _ => false,
         };
 

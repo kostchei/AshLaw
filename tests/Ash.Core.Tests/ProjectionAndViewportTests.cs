@@ -87,13 +87,13 @@ public sealed class ProjectionAndViewportTests
     public static TheoryData<int, int, int> WindowSizes =>
         new()
         {
-            { 320, 200, 1 },
-            { 640, 400, 2 },
-            { 960, 600, 3 },
-            { 1280, 800, 4 },
-            { 1920, 1080, 5 },
-            { 1366, 768, 3 },
-            { 800, 1200, 2 },
+            { 640, 400, 1 },
+            { 1280, 800, 2 },
+            { 1920, 1200, 3 },
+            { 2560, 1600, 4 },
+            { 1920, 1080, 2 },
+            { 1366, 768, 1 },
+            { 800, 1200, 1 },
         };
 
     [Theory]
@@ -172,9 +172,9 @@ public sealed class ProjectionAndViewportTests
     {
         var viewport = ViewportScaling.ForWindow(1920, 1080);
 
-        // 1920 - 320*5 = 320 total horizontal slack, 160 each side.
-        Assert.Equal(160, viewport.OffsetX);
-        Assert.Equal(40, viewport.OffsetY);
+        // 1920 - 640*2 = 640 total horizontal slack, 320 each side.
+        Assert.Equal(320, viewport.OffsetX);
+        Assert.Equal(140, viewport.OffsetY);
 
         Assert.False(viewport.IsInsideCanvas(new Vec2i(0, 0)));
         Assert.Throws<ArgumentOutOfRangeException>(
@@ -184,7 +184,7 @@ public sealed class ProjectionAndViewportTests
     [Fact]
     public void WindowSmallerThanTheLogicalCanvasIsRejected()
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => ViewportScaling.ForWindow(319, 200));
-        Assert.Throws<ArgumentOutOfRangeException>(() => ViewportScaling.ForWindow(320, 199));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ViewportScaling.ForWindow(639, 400));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ViewportScaling.ForWindow(640, 399));
     }
 }

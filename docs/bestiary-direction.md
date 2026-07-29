@@ -14,7 +14,7 @@ and mechanics rather than copying published art or stat blocks.
 
 ## Rendering constraints
 
-- A human is approximately 20–28 pixels tall at 320×200.
+- A human is approximately 46–52 pixels tall at 640×400.
 - Small creatures occupy one footpad; large creatures may cover several
   logical tiles while retaining a single depth anchor at their foremost feet.
 - Every creature needs a readable idle silhouette, movement cycle, attack tell,
