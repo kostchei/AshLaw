@@ -630,6 +630,9 @@ and soft leather diverge meaningfully on some tables — AT-1 caps at 22 vs 25, 
 32 vs 36 — so if leather armour is meant to be a progression rather than one item
 class, the fifth column should be restored before equipment data is authored.
 
+The collapse and its reversal cost are recorded in
+[ADR 0004](adr/0004-armour-column-collapse.md).
+
 ### 5.2 Concussion-hit vitality model — blocks M6
 
 The vendored rules define an accumulating "hits" pool with no stated maximum, no per-actor
@@ -658,16 +661,88 @@ track as art.
 
 ---
 
-## 6. Immediate next steps
+## 6. Status — M0 complete, M1 entry
 
-1. `git init` in `E:\U8_Ash`, add a `.gitignore` for `.godot/`, `bin/`, `obj/`, and
-   `.mono/`. The repo is currently untracked.
-2. Create the solution and the `src\` / `tests\` project skeleton against the TFM Godot
-   4.7 generates.
-3. Write ADRs for §2.1 (integer coordinates), §2.5 (sorting), §2.9 (MoonSharp) — the
-   three decisions that are painful to reverse later.
-4. Start **M0**. It is self-contained, has no engine dependency, and will immediately
-   force the §5.1 data conflict to a decision.
-5. In parallel, spike **M1's two riskiest items only**: the palette shader identity test
-   and the 2,000-sprite sort perf budget. Both are a day each and both can invalidate
-   assumptions in this plan.
+### 6.1 M0 completion checklist
+
+All twelve M0 tasks and all four exit proofs are done. See §M0 for the task text.
+
+| # | M0 task | Status | Where |
+|---|---|---|---|
+| 1 | `Ash.Rules` project and combat enums | Done | `src/Ash.Rules/CombatModels.cs` |
+| 2 | Strict JSON loader; unknown keys and out-of-range values throw | Done | `RulesDataLoader.cs` |
+| 3 | Four `ct_*.csv` trauma tables into `[tier, index]` | Done | `RulesDataLoader.LoadCriticalTables` |
+| 4 | Cross-source consistency check against `attack_tables_summary.csv` | Done | `RulesDataLoader.ValidateAttackSummary` |
+| 5 | Trauma prose → structured effects, unaccounted text is a build error | Done | `TraumaEffectParser.cs` |
+| 6 | `AttackRequest` / `AttackResult` per INTEGRATION.md §3–4 | Done | `CombatModels.cs` |
+| 7 | Pure `Resolve`, no RNG inside | Done | `AttackResolver.cs` |
+| 8 | Class progression as data, derived from bracket rules in a test | Done | `class_progression.csv`, `ClassProgressionTests.cs` |
+| 9 | Spellcasting constraints: armour, cleric virtues, natural-1 lockout | Done | `SpellcastingConstraints.cs` |
+| — | Scale factor as a named constant with the row-146-150 check (§5.1) | Done | `merp_reference.json`, `analyze_attack_table_shape.py` |
+
+| Exit proof | Status | Where |
+|---|---|---|
+| §5 Scenario 1 (Greataxe vs Plate) as a fixture | Done — 8 hits, not the published 7; see below | `greataxe-vs-plate.json` |
+| §5 Scenario 2 (tentacle vs Leather) as a fixture | Retired and replaced | `grapple-vs-leather-corrected.json` |
+| `critical_hits_system.md` §4 walkthrough as a fixture | Recomputed and replaced; see below | `greataxe-vs-chain-critical-walkthrough.json` |
+| 10,000-case golden file, byte-identical across runs | Done | `GoldenResolutionTests.cs`, `attack-resolution.golden` |
+| Editing a vendored threshold changes results with no code change | Done | `RulesDataLoaderTests.cs` |
+
+**Three published worked examples did not survive contact with the data.** All three
+are recorded in `PROVENANCE.md` rather than quietly reconciled:
+
+- §5 Scenario 1 now yields 8 hits, not 7 — an arithmetic consequence of the AT-3 Plate
+  correction, not a resolver change.
+- §5 Scenario 2 quoted attack parameters and trauma text present in no runtime table.
+  Retired; a corrected AT-6 Leather illustration replaces it.
+- `critical_hits_system.md` §4 has the same defect: it quotes pre-correction AT-3 Chain
+  parameters (threshold 11, multiplier 2.0, base crit A 19) and trauma text found in no
+  CT table. Its scenario inputs are kept and every expected value recomputed, which
+  moves the result from Tier B to Tier A.
+
+**Two defects surfaced from making unparsed trauma text a build error**, which is the
+main argument for having done M0 task 5 strictly rather than leniently:
+
+- `shoulder broken`, `Lower leg broken` and `bone broken` produced no effect at all.
+  They are now a `BreakBone` effect.
+- An unrecognised `If no <thing>` condition parsed as *unconditional*, so its effects
+  would have applied to every target instead of only unarmoured ones.
+
+### 6.2 Carried into later milestones
+
+These are open, deliberately, and each is already recorded in the section named:
+
+| Item | Blocks | Section |
+|---|---|---|
+| `environmental_fall_crush` has no source chart — deferred and enforced | M6 | §5.1c note, `PROVENANCE.md` |
+| Fifth armour column (rigid vs soft leather) | M6 | §5.1c |
+| Concussion-hit vitality model, death threshold | M6 | §5.2 |
+| Rounds → real-time constant | M6 | §5.3 |
+| Open-ended rolls, weapon fumbles, size and bolt caps | M6 | §5.1, audit doc |
+
+### 6.3 M1 entry criteria
+
+M0 is self-contained and has no engine dependency, so M1 does not wait on it. M1 may
+start when:
+
+1. CI is green on `main` — the headless job (four test projects, architecture check,
+   generated-data check, curve analysis) and the Godot build job. **Met.**
+2. The three painful-to-reverse decisions have ADRs: §2.1 integer coordinates, §2.5
+   volume-graph sorting, §2.9 MoonSharp. **Met** — `docs/adr/0001`–`0003`.
+3. The Godot project builds headlessly from the solution. **Met.**
+
+### 6.4 Start M1 with the two risk spikes, not with general gameplay
+
+Both can invalidate assumptions in this plan, and both are cheap relative to what they
+de-risk. Do them before M1 tasks 4–10.
+
+1. **Palette shader + exact 256-index identity test** (§2.6, M1 task 3). Assert all 256
+   indices map to the authored RGB with zero tolerance. Catches filtering, sRGB, and
+   texture-format errors that are otherwise found late and cosmetically.
+2. **Volume-graph sorter + 2,000-sprite performance budget** (§2.5, M1 tasks 8–9).
+   Measure with synthetic data. If the budget does not hold, resolve it now — the
+   escape hatch in §2.5 is only cheap before the world model depends on sort order.
+
+Then M1 task 6: oblique projection and its inverse in one file, with the
+`ScreenToLogical(LogicalToScreen(p)) == p` round-trip asserted at 1×–4×, windowed and
+fullscreen.
