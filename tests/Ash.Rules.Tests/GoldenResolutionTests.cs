@@ -150,7 +150,11 @@ public sealed class GoldenResolutionTests
             DefenseModifier: (index % 17) - 3,
             Armor: armors[(index / 7) % armors.Length],
             CriticalTable: wantsDefault ? null : criticalTables[(index / 3) % criticalTables.Length],
-            IsSpell: index % 11 == 0);
+            IsSpell: index % 11 == 0,
+
+            // The corpus deliberately sweeps every category, including the
+            // deferred environmental table, so it opts in explicitly.
+            AllowUnvalidatedTable: !table.IsSourceValidated);
     }
 
     private static string Render(int index, AttackRequest request, AttackResult result)
@@ -163,7 +167,8 @@ public sealed class GoldenResolutionTests
         builder.Append(CultureInfo.InvariantCulture, $"def{request.DefenseModifier}|");
         builder.Append(CultureInfo.InvariantCulture, $"{request.Armor}|");
         builder.Append(CultureInfo.InvariantCulture, $"{Or(request.CriticalTable)}|");
-        builder.Append(CultureInfo.InvariantCulture, $"spell{(request.IsSpell ? 1 : 0)}");
+        builder.Append(CultureInfo.InvariantCulture, $"spell{(request.IsSpell ? 1 : 0)}|");
+        builder.Append(CultureInfo.InvariantCulture, $"unval{(request.AllowUnvalidatedTable ? 1 : 0)}");
         builder.Append(" => ");
         builder.Append(CultureInfo.InvariantCulture, $"hit{(result.Hit ? 1 : 0)}|");
         builder.Append(CultureInfo.InvariantCulture, $"net{result.NetRoll}|");

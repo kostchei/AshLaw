@@ -22,6 +22,7 @@ public sealed class AttackTable
         string defaultCriticalType,
         CriticalTableId? defaultCriticalTable,
         bool canUseShield,
+        bool isSourceValidated,
         IDictionary<ArmorType, ArmorTarget> armorTargets)
     {
         Id = id;
@@ -31,6 +32,7 @@ public sealed class AttackTable
         DefaultCriticalType = defaultCriticalType;
         DefaultCriticalTable = defaultCriticalTable;
         CanUseShield = canUseShield;
+        IsSourceValidated = isSourceValidated;
         _armorTargets = new ReadOnlyDictionary<ArmorType, ArmorTarget>(
             new Dictionary<ArmorType, ArmorTarget>(armorTargets));
     }
@@ -48,6 +50,20 @@ public sealed class AttackTable
     public CriticalTableId? DefaultCriticalTable { get; }
 
     public bool CanUseShield { get; }
+
+    /// <summary>
+    /// Whether this table's damage curve has been checked against a supplied
+    /// source chart.
+    /// </summary>
+    /// <remarks>
+    /// AT-1 through AT-8 are all validated: AT-1..AT-6 against the final-row
+    /// values in <c>tools/import/merp_reference.json</c>, and AT-7/AT-8 across
+    /// their usable ranges by <c>analyze_attack_table_shape.py</c>. Only
+    /// <see cref="AttackCategoryId.EnvironmentalFallCrush"/> has no source chart
+    /// at all, so its numbers are unverified authored values. See
+    /// <c>vendor/ash-v1-rules/PROVENANCE.md</c>.
+    /// </remarks>
+    public bool IsSourceValidated { get; }
 
     public IReadOnlyDictionary<ArmorType, ArmorTarget> ArmorTargets => _armorTargets;
 

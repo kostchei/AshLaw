@@ -97,11 +97,36 @@ the **opening** level of a bracket, whereas `+1/2` and `+1/3` grant theirs on th
 gain patterns (`+1/+0/+1`, `+0/+1`, `+0/+0/+1`) rather than as rounded arithmetic on
 `levels × rate`.
 
-### Known-unvalidated table
+### Deferred table — `environmental_fall_crush`
 
-`environmental_fall_crush` has no supplied source table. It carries the same
-reversed-threshold signature as the earlier AT-3/AT-4 defect (Plate 12, Chain 10,
-Leather 8, None 6) and should be treated as suspect until checked against a source.
+`environmental_fall_crush` has no supplied source table, and none exists in the
+material to hand: `docs/reference/merp-attack-tables.csv` transcribes AT-1 through
+AT-8 only, and the supplied BMP charts carry no environmental table. It therefore
+**cannot be sourced, and is explicitly deferred** rather than accepted.
+
+Deferred means enforced, not merely noted. `AttackTable.IsSourceValidated` is false
+for this category alone, and `AttackResolver.Resolve` throws unless the caller sets
+`AttackRequest.AllowUnvalidatedTable`. Nothing can consume these numbers by accident
+as though they were sourced. `UnvalidatedTableTests` holds this in place.
+
+**Correction to the earlier note.** A previous revision of this section claimed the
+table "carries the same reversed-threshold signature as the earlier AT-3/AT-4
+defect". That reasoning does not hold. A hit threshold that falls from Plate to None
+is not by itself a defect signature: AT-5 (12/13/12/10) and AT-8 (4/5/6/2) both fall
+and both are validated against the source charts, which show damage beginning
+earliest against unarmoured targets for those two tables. Direction alone proves
+nothing.
+
+The evidence that the table was never fitted is different and specific:
+`environmental_fall_crush` is the **only** table whose `hit_threshold` equals its
+`damage_origin` in every armour column (12/12, 10/10, 8/8, 6/6). Separating those two
+fields was the whole point of the 2026-07-29 curve fit; all eight fitted tables
+separate them. This one retains its pre-fit shape, so its damage curve, hit
+threshold, and critical thresholds are all unverified authored values.
+
+To retire the deferral, supply an environmental source table, extend
+`docs/reference/merp-attack-tables.csv` and `analyze_attack_table_shape.py` to cover
+it, then remove the category from `UnsourcedCategories` in `RulesDataLoader`.
 
 ### 2026-07-29 — full AT-1 through AT-8 chart transcription and curve fit
 

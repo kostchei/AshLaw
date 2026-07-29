@@ -87,7 +87,14 @@ public sealed record AttackRequest(
     int DefenseModifier,
     ArmorType Armor,
     CriticalTableId? CriticalTable = null,
-    bool IsSpell = false);
+    bool IsSpell = false,
+    /// <summary>
+    /// Opt in to resolving against a table whose curve has never been checked
+    /// against a source chart. Defaults to <see langword="false"/> so an
+    /// unvalidated table cannot be consumed by accident as if it were sourced.
+    /// See <see cref="AttackTable.IsSourceValidated"/>.
+    /// </summary>
+    bool AllowUnvalidatedTable = false);
 
 public sealed record AttackResult
 {

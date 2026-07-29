@@ -14,6 +14,16 @@ public static class AttackResolver
         }
 
         var table = rules.GetAttackTable(request.AttackCategory);
+        if (!table.IsSourceValidated && !request.AllowUnvalidatedTable)
+        {
+            throw new RulesResolutionException(
+                $"Attack category '{table.StableId}' has no supplied source chart, so its " +
+                "damage curve, hit threshold, and critical thresholds are unverified authored " +
+                "values. This table is deliberately deferred, not accepted -- see " +
+                "vendor/ash-v1-rules/PROVENANCE.md. Set AttackRequest.AllowUnvalidatedTable " +
+                "to resolve against it anyway.");
+        }
+
         var target = table.ForArmor(request.Armor);
         int netRoll;
         try

@@ -2,29 +2,29 @@
 # Regenerate only when the rules data or resolver changes deliberately:
 #   ASH_REGENERATE_GOLDEN=1 dotnet test tests/Ash.Rules.Tests
 # See GoldenResolutionTests for the corpus definition.
-sha256 4bdbaff587ac03b9f0b75662190d93e36c0b9a8b4a82e14a3b45304c4d757c51
-sample 2 0|d1|OneHandedSlashing|atk-5|def-3|Plate|-|spell1 => hit0|net-1|margin-11|hits0|tier-|ct-|ti-|mishap1|total0|fx[]|msg2
-sample 402 400|d1|TwoHandedWeapons|atk4|def6|Chain|Slash|spell0 => hit0|net-1|margin-15|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
-sample 802 800|d1|ToothAndClaw|atk13|def-2|Leather|Puncture|spell0 => hit1|net16|margin4|hits5|tier-|ct-|ti-|mishap0|total5|fx[]|msg3
-sample 1202 1200|d1|SpellBolts|atk-1|def7|None|Crush|spell0 => hit0|net-7|margin-20|hits0|tier-|ct-|ti-|mishap1|total0|fx[]|msg2
-sample 1602 1600|d1|EnvironmentalFallCrush|atk8|def-1|Plate|-|spell0 => hit0|net10|margin-2|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
-sample 2002 2000|d1|OneHandedConcussion|atk17|def8|Chain|-|spell0 => hit1|net10|margin1|hits2|tier-|ct-|ti-|mishap0|total2|fx[]|msg3
-sample 2402 2400|d1|MissileWeapons|atk3|def0|Leather|-|spell0 => hit0|net4|margin-13|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
-sample 2802 2800|d1|GrapplingUnbalancing|atk12|def9|Plate|-|spell0 => hit0|net4|margin-8|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
-sample 3202 3200|d1|SpellBalls|atk-2|def1|Chain|Puncture|spell0 => hit0|net-2|margin-7|hits0|tier-|ct-|ti-|mishap1|total0|fx[]|msg2
-sample 3602 3600|d1|OneHandedSlashing|atk7|def10|Leather|-|spell0 => hit0|net-2|margin-15|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
-sample 4002 4000|d1|TwoHandedWeapons|atk16|def2|None|Slash|spell0 => hit0|net15|margin-2|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
-sample 4402 4400|d1|ToothAndClaw|atk2|def11|Plate|Puncture|spell1 => hit0|net-8|margin-20|hits0|tier-|ct-|ti-|mishap1|total0|fx[]|msg2
-sample 4802 4800|d1|SpellBolts|atk11|def3|Chain|Crush|spell0 => hit0|net9|margin0|hits0|tier-|ct-|ti-|mishap1|total0|fx[]|msg2
-sample 5202 5200|d1|EnvironmentalFallCrush|atk-3|def12|Leather|-|spell0 => hit0|net-14|margin-22|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
-sample 5602 5600|d1|OneHandedConcussion|atk6|def4|Plate|-|spell0 => hit0|net3|margin-4|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
-sample 6002 6000|d1|MissileWeapons|atk15|def13|Chain|-|spell0 => hit0|net3|margin-13|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
-sample 6402 6400|d1|GrapplingUnbalancing|atk1|def5|Leather|-|spell0 => hit0|net-3|margin-17|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
-sample 6802 6800|d1|SpellBalls|atk10|def-3|None|Puncture|spell0 => hit0|net14|margin12|hits0|tier-|ct-|ti-|mishap1|total0|fx[]|msg2
-sample 7202 7200|d1|OneHandedSlashing|atk-4|def6|Plate|-|spell0 => hit0|net-9|margin-19|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
-sample 7602 7600|d1|TwoHandedWeapons|atk5|def-2|Chain|Slash|spell0 => hit0|net8|margin-6|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
-sample 8002 8000|d1|ToothAndClaw|atk14|def7|Leather|Puncture|spell0 => hit0|net8|margin-4|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
-sample 8402 8400|d1|SpellBolts|atk0|def-1|Plate|Crush|spell0 => hit0|net2|margin-6|hits0|tier-|ct-|ti-|mishap1|total0|fx[]|msg2
-sample 8802 8800|d1|EnvironmentalFallCrush|atk9|def8|Chain|-|spell1 => hit0|net2|margin-8|hits0|tier-|ct-|ti-|mishap1|total0|fx[]|msg2
-sample 9202 9200|d1|OneHandedConcussion|atk-5|def0|Leather|-|spell0 => hit0|net-4|margin-18|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
-sample 9602 9600|d1|MissileWeapons|atk4|def9|None|-|spell0 => hit0|net-4|margin-23|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
+sha256 a2f8a8b2f4b6a017fd11b7c0a1ce447b69f9f195b34cd7f7892b18eee583fb87
+sample 2 0|d1|OneHandedSlashing|atk-5|def-3|Plate|-|spell1|unval0 => hit0|net-1|margin-11|hits0|tier-|ct-|ti-|mishap1|total0|fx[]|msg2
+sample 402 400|d1|TwoHandedWeapons|atk4|def6|Chain|Slash|spell0|unval0 => hit0|net-1|margin-15|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
+sample 802 800|d1|ToothAndClaw|atk13|def-2|Leather|Puncture|spell0|unval0 => hit1|net16|margin4|hits5|tier-|ct-|ti-|mishap0|total5|fx[]|msg3
+sample 1202 1200|d1|SpellBolts|atk-1|def7|None|Crush|spell0|unval0 => hit0|net-7|margin-20|hits0|tier-|ct-|ti-|mishap1|total0|fx[]|msg2
+sample 1602 1600|d1|EnvironmentalFallCrush|atk8|def-1|Plate|-|spell0|unval1 => hit0|net10|margin-2|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
+sample 2002 2000|d1|OneHandedConcussion|atk17|def8|Chain|-|spell0|unval0 => hit1|net10|margin1|hits2|tier-|ct-|ti-|mishap0|total2|fx[]|msg3
+sample 2402 2400|d1|MissileWeapons|atk3|def0|Leather|-|spell0|unval0 => hit0|net4|margin-13|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
+sample 2802 2800|d1|GrapplingUnbalancing|atk12|def9|Plate|-|spell0|unval0 => hit0|net4|margin-8|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
+sample 3202 3200|d1|SpellBalls|atk-2|def1|Chain|Puncture|spell0|unval0 => hit0|net-2|margin-7|hits0|tier-|ct-|ti-|mishap1|total0|fx[]|msg2
+sample 3602 3600|d1|OneHandedSlashing|atk7|def10|Leather|-|spell0|unval0 => hit0|net-2|margin-15|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
+sample 4002 4000|d1|TwoHandedWeapons|atk16|def2|None|Slash|spell0|unval0 => hit0|net15|margin-2|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
+sample 4402 4400|d1|ToothAndClaw|atk2|def11|Plate|Puncture|spell1|unval0 => hit0|net-8|margin-20|hits0|tier-|ct-|ti-|mishap1|total0|fx[]|msg2
+sample 4802 4800|d1|SpellBolts|atk11|def3|Chain|Crush|spell0|unval0 => hit0|net9|margin0|hits0|tier-|ct-|ti-|mishap1|total0|fx[]|msg2
+sample 5202 5200|d1|EnvironmentalFallCrush|atk-3|def12|Leather|-|spell0|unval1 => hit0|net-14|margin-22|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
+sample 5602 5600|d1|OneHandedConcussion|atk6|def4|Plate|-|spell0|unval0 => hit0|net3|margin-4|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
+sample 6002 6000|d1|MissileWeapons|atk15|def13|Chain|-|spell0|unval0 => hit0|net3|margin-13|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
+sample 6402 6400|d1|GrapplingUnbalancing|atk1|def5|Leather|-|spell0|unval0 => hit0|net-3|margin-17|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
+sample 6802 6800|d1|SpellBalls|atk10|def-3|None|Puncture|spell0|unval0 => hit0|net14|margin12|hits0|tier-|ct-|ti-|mishap1|total0|fx[]|msg2
+sample 7202 7200|d1|OneHandedSlashing|atk-4|def6|Plate|-|spell0|unval0 => hit0|net-9|margin-19|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
+sample 7602 7600|d1|TwoHandedWeapons|atk5|def-2|Chain|Slash|spell0|unval0 => hit0|net8|margin-6|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
+sample 8002 8000|d1|ToothAndClaw|atk14|def7|Leather|Puncture|spell0|unval0 => hit0|net8|margin-4|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
+sample 8402 8400|d1|SpellBolts|atk0|def-1|Plate|Crush|spell0|unval0 => hit0|net2|margin-6|hits0|tier-|ct-|ti-|mishap1|total0|fx[]|msg2
+sample 8802 8800|d1|EnvironmentalFallCrush|atk9|def8|Chain|-|spell1|unval1 => hit0|net2|margin-8|hits0|tier-|ct-|ti-|mishap1|total0|fx[]|msg2
+sample 9202 9200|d1|OneHandedConcussion|atk-5|def0|Leather|-|spell0|unval0 => hit0|net-4|margin-18|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
+sample 9602 9600|d1|MissileWeapons|atk4|def9|None|-|spell0|unval0 => hit0|net-4|margin-23|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3

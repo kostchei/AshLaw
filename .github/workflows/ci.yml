@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  # Everything that must never depend on Godot. The solution file includes
+  # game/Ash.Game.csproj, so this job addresses projects individually rather than
+  # building Ash.sln -- a missing Godot SDK must not be able to block it.
+  headless:
+    name: Headless build, test and data checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Restore headless projects
+        run: |
+          for project in \
+            src/Ash.Core/Ash.Core.csproj \
+            src/Ash.Rules/Ash.Rules.csproj \
+            src/Ash.Content/Ash.Content.csproj \
+            src/Ash.Sim/Ash.Sim.csproj \
+            src/Ash.Script/Ash.Script.csproj \
+            tests/Ash.Rules.Tests/Ash.Rules.Tests.csproj \
+            tests/Ash.Content.Tests/Ash.Content.Tests.csproj \
+            tests/Ash.Sim.Tests/Ash.Sim.Tests.csproj \
+            tests/Ash.Script.Tests/Ash.Script.Tests.csproj
+          do
+            dotnet restore "$project"
+          done
+
+      - name: Architecture check (src must not reference Godot)
+        shell: pwsh
+        run: ./tools/check-architecture.ps1
+
+      - name: Test Ash.Rules
+        run: dotnet test tests/Ash.Rules.Tests/Ash.Rules.Tests.csproj --configuration Release --no-restore
+
+      - name: Test Ash.Content
+        run: dotnet test tests/Ash.Content.Tests/Ash.Content.Tests.csproj --configuration Release --no-restore
+
+      - name: Test Ash.Sim
+        run: dotnet test tests/Ash.Sim.Tests/Ash.Sim.Tests.csproj --configuration Release --no-restore
+
+      - name: Test Ash.Script
+        run: dotnet test tests/Ash.Script.Tests/Ash.Script.Tests.csproj --configuration Release --no-restore
+
+      # attack_tables_summary.csv is generated from combat_system_data.json. This
+      # fails if the two have diverged, or if anyone hand-edited the CSV.
+      - name: Generated-data check
+        run: python tools/import/gen_attack_tables.py --check
+
+      - name: Attack-curve analysis
+        run: python tools/import/analyze_attack_table_shape.py
+
+      # A regenerated golden file or summary CSV must be committed, not left to
+      # appear as a CI-only diff.
+      - name: Assert the working tree is clean
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Working tree is dirty after the checks above:"
+            git status --porcelain
+            git diff
+            exit 1
+          fi
+
+  # Isolated so that a missing or broken Godot SDK cannot block the headless job.
+  godot:
+    name: Godot project build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # Godot.NET.Sdk resolves from NuGet, so this does not need the Godot editor
+      # installed. It does need the SDK version in game/Ash.Game.csproj to exist
+      # on nuget.org.
+      - name: Restore Godot project
+        run: dotnet restore game/Ash.Game.csproj
+
+      - name: Build Godot project
+        run: dotnet build game/Ash.Game.csproj --configuration Release --no-restore

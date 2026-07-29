@@ -33,6 +33,19 @@ quadratic term. See:
 The current runtime has four armour types. Its Leather result is fitted to the
 arithmetic mean of the source's Rigid Leather and Soft Leather columns.
 
+## Deferred: environmental fall/crush
+
+`environmental_fall_crush` is the ninth category in the runtime data and the only
+one with no source chart anywhere in the supplied material. It is explicitly
+deferred: `AttackTable.IsSourceValidated` is false for it, and `AttackResolver`
+refuses to resolve against it unless the caller sets
+`AttackRequest.AllowUnvalidatedTable`.
+
+It is the only table whose `hit_threshold` equals its `damage_origin` in every
+armour column, which is the signature of a table that predates the curve fit. See
+[`PROVENANCE.md`](../../vendor/ash-v1-rules/PROVENANCE.md) for the full reasoning
+and for what would retire the deferral.
+
 ## Source mechanics not currently implemented
 
 These are visible in the reference charts but are not represented by the current

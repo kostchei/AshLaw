@@ -43,6 +43,16 @@ public static class RulesDataLoader
 
     private static readonly int[] BracketFirstLevels = [1, 11, 21];
 
+    /// <summary>
+    /// Categories with no supplied source chart. Their parameters are authored
+    /// values that no validation step has ever checked, so resolving against them
+    /// requires an explicit opt-in. See <c>PROVENANCE.md</c> "Deferred table".
+    /// </summary>
+    private static readonly AttackCategoryId[] UnsourcedCategories =
+    [
+        AttackCategoryId.EnvironmentalFallCrush,
+    ];
+
     private static readonly CategoryDefinition[] CategoryDefinitions =
     [
         new(
@@ -224,6 +234,7 @@ public static class RulesDataLoader
                     defaultCriticalType,
                     defaultCriticalTable,
                     canUseShield,
+                    !UnsourcedCategories.Contains(definition.Id),
                     targets));
         }
 
