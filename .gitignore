@@ -1,0 +1,40 @@
+# Godot
+.godot/
+.mono/
+
+# Godot exports
+export/
+build/
+
+# .NET
+**/bin/
+**/obj/
+artifacts/
+*.user
+*.suo
+*.userprefs
+*.nupkg
+*.snupkg
+
+# Test and coverage output
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+# IDEs and operating systems
+.vs/
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+.ssh/
+*.key
+*.pem
+*.pfx
+*.p12

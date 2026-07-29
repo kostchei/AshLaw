@@ -31,10 +31,10 @@ built for that eventuality.
 | Python | 3.13.5 | Data import/validation scripts, CSV→JSON conversion |
 | Git | 2.55.0 | Not yet initialised in `E:\U8_Ash` — do this first |
 
-Target the TFM that Godot 4.7's generated `.csproj` uses — read it from the file Godot
-creates on first C# build rather than assuming. Pin every project to that same TFM;
-mismatched TFMs across the solution are the most common Godot/.NET failure and produce
-misleading load errors at runtime rather than build errors.
+Target **.NET 10 (`net10.0`)**, the current stable LTS available on this machine.
+Godot 4.7 accepts .NET 8 or later, and the complete Godot-hosted solution is verified
+against .NET 10. Pin every project to the same TFM; mismatched TFMs across the solution
+are a common source of misleading runtime load errors.
 
 ### 0.2 Language policy
 

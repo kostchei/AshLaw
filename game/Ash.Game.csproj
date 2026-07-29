@@ -1,0 +1,15 @@
+<Project Sdk="Godot.NET.Sdk/4.7.0">
+  <PropertyGroup>
+    <RootNamespace>Ash.Game</RootNamespace>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\src\Ash.Content\Ash.Content.csproj" />
+    <ProjectReference Include="..\src\Ash.Core\Ash.Core.csproj" />
+    <ProjectReference Include="..\src\Ash.Rules\Ash.Rules.csproj" />
+    <ProjectReference Include="..\src\Ash.Script\Ash.Script.csproj" />
+    <ProjectReference Include="..\src\Ash.Sim\Ash.Sim.csproj" />
+  </ItemGroup>
+</Project>
+

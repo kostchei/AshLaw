@@ -1,0 +1,9 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ash.Content\Ash.Content.csproj" />
+    <ProjectReference Include="..\Ash.Core\Ash.Core.csproj" />
+    <ProjectReference Include="..\Ash.Rules\Ash.Rules.csproj" />
+  </ItemGroup>
+
+</Project>
