@@ -1,0 +1,123 @@
+namespace Ash.Rules;
+
+public static class AttackResolver
+{
+    public static AttackResult Resolve(RulesData rules, AttackRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+        if (request.RawD20 is < 1 or > 20)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request),
+                request.RawD20,
+                "Raw d20 must be between 1 and 20.");
+        }
+
+        var table = rules.GetAttackTable(request.AttackCategory);
+        var target = table.ForArmor(request.Armor);
+        int netRoll;
+        try
+        {
+            netRoll = checked(request.RawD20 + request.AttackModifier - request.DefenseModifier);
+        }
+        catch (OverflowException exception)
+        {
+            throw new RulesResolutionException(
+                $"Net roll overflowed for raw {request.RawD20}, attack modifier " +
+                $"{request.AttackModifier}, defense modifier {request.DefenseModifier}: " +
+                exception.Message);
+        }
+
+        var margin = checked(netRoll - target.HitThreshold);
+        var messages = new List<string>
+        {
+            FormattableString.Invariant($"Net roll = {request.RawD20} + {request.AttackModifier} - {request.DefenseModifier} = {netRoll}."),
+        };
+
+        var isSpell = request.IsSpell ||
+            request.AttackCategory is AttackCategoryId.SpellBolts or AttackCategoryId.SpellBalls;
+        if (isSpell && request.RawD20 == rules.Spellcasting.MishapRawD20)
+        {
+            messages.Add(
+                $"{rules.Spellcasting.MishapEffect}: {rules.Spellcasting.MishapConsequence}");
+            return new AttackResult
+            {
+                Hit = false,
+                RawD20 = request.RawD20,
+                NetRoll = netRoll,
+                Margin = margin,
+                ConcussionHits = 0,
+                Mishap = true,
+                Messages = Array.AsReadOnly(messages.ToArray()),
+            };
+        }
+
+        var hit = netRoll >= target.HitThreshold;
+        var damageDistance = Math.Max(0, netRoll - target.DamageOrigin);
+        var concussionHits = hit
+            ? checked((int)decimal.Floor(
+                damageDistance * target.Multiplier +
+                damageDistance * damageDistance * target.Quadratic))
+            : 0;
+        messages.Add(
+            FormattableString.Invariant(
+                $"Hits = max(0, floor({target.Multiplier} * z + {target.Quadratic} * z^2)), where z = max(0, {netRoll} - {target.DamageOrigin}) = {damageDistance}; hits = {concussionHits}."));
+
+        CriticalTier? criticalTier = null;
+        CriticalTableId? criticalTable = null;
+        int? traumaIndex = null;
+        CriticalOutcome? outcome = null;
+
+        if (hit && netRoll >= target.BaseCriticalA)
+        {
+            var numericTier = checked((int)decimal.Floor(
+                (netRoll - target.BaseCriticalA) / target.CriticalInterval));
+            criticalTier = (CriticalTier)Math.Min(numericTier, (int)CriticalTier.E);
+            criticalTable = request.CriticalTable ??
+                table.DefaultCriticalTable;
+            if (criticalTable is null)
+            {
+                throw new RulesResolutionException(
+                    $"Attack category '{table.StableId}' has critical type " +
+                    $"'{table.DefaultCriticalType}', which does not select one physical table. " +
+                    "Supply AttackRequest.CriticalTable from the weapon, creature attack, or spell.");
+            }
+
+            traumaIndex = request.RawD20 % 10;
+            if (traumaIndex == 0)
+            {
+                traumaIndex = 10;
+            }
+
+            outcome = rules.GetCriticalOutcome(
+                criticalTable.Value,
+                criticalTier.Value,
+                traumaIndex.Value);
+            messages.Add(
+                FormattableString.Invariant($"Critical tier = floor(({netRoll} - {target.BaseCriticalA}) / {target.CriticalInterval}) = {numericTier}, capped at Tier {criticalTier}."));
+            messages.Add(
+                $"Trauma = {criticalTable} Tier {criticalTier}, index {traumaIndex}: {outcome.Text}");
+        }
+        else
+        {
+            messages.Add(
+                FormattableString.Invariant($"No critical: net roll {netRoll} is below Base Crit A {target.BaseCriticalA}."));
+        }
+
+        return new AttackResult
+        {
+            Hit = hit,
+            RawD20 = request.RawD20,
+            NetRoll = netRoll,
+            Margin = margin,
+            ConcussionHits = concussionHits,
+            CriticalTier = criticalTier,
+            CriticalTable = criticalTable,
+            TraumaIndex = traumaIndex,
+            TraumaText = outcome?.Text,
+            TraumaEffects = outcome?.Effects ?? Array.Empty<TraumaEffect>(),
+            Mishap = false,
+            Messages = Array.AsReadOnly(messages.ToArray()),
+        };
+    }
+}

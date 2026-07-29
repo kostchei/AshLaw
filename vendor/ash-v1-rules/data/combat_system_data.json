@@ -16,26 +16,34 @@
         "description": "Swords and 1-handed bladed weapons. Highly lethal against unarmored targets (high multiplier, low threshold), but energy is deflected by heavy plate armor.",
         "armor_targets": {
           "Plate": {
-            "hit_threshold": 8,
-            "multiplier": 0.55,
+            "hit_threshold": 10,
+            "damage_origin": 8,
+            "multiplier": 0.581,
+            "quadratic": 0,
             "base_crit_a": 23,
             "crit_interval": 2
           },
           "Chain": {
-            "hit_threshold": 10,
-            "multiplier": 0.9,
+            "hit_threshold": 11,
+            "damage_origin": 10,
+            "multiplier": 0.931,
+            "quadratic": 0,
             "base_crit_a": 21,
             "crit_interval": 2
           },
           "Leather": {
-            "hit_threshold": 12,
-            "multiplier": 1.3,
+            "hit_threshold": 13,
+            "damage_origin": 11,
+            "multiplier": 1.251,
+            "quadratic": 0,
             "base_crit_a": 18,
             "crit_interval": 2
           },
           "None": {
-            "hit_threshold": 12,
-            "multiplier": 1.65,
+            "hit_threshold": 16,
+            "damage_origin": 13,
+            "multiplier": 1.808,
+            "quadratic": 0,
             "base_crit_a": 17,
             "crit_interval": 2
           }
@@ -55,25 +63,33 @@
         "armor_targets": {
           "Plate": {
             "hit_threshold": 7,
-            "multiplier": 0.7,
+            "damage_origin": 7,
+            "multiplier": 0.728,
+            "quadratic": 0,
             "base_crit_a": 22,
             "crit_interval": 2
           },
           "Chain": {
-            "hit_threshold": 8,
-            "multiplier": 1.0,
+            "hit_threshold": 9,
+            "damage_origin": 7,
+            "multiplier": 0.960,
+            "quadratic": 0,
             "base_crit_a": 20,
             "crit_interval": 2
           },
           "Leather": {
-            "hit_threshold": 12,
-            "multiplier": 1.1,
+            "hit_threshold": 14,
+            "damage_origin": 11,
+            "multiplier": 1.071,
+            "quadratic": 0,
             "base_crit_a": 18,
             "crit_interval": 2
           },
           "None": {
-            "hit_threshold": 13,
-            "multiplier": 1.35,
+            "hit_threshold": 17,
+            "damage_origin": 13,
+            "multiplier": 1.403,
+            "quadratic": 0,
             "base_crit_a": 19,
             "crit_interval": 2
           }
@@ -96,26 +112,34 @@
         "description": "Includes all 2-handed weapons, halberds, pikes, and lances. Cannot be used with a shield. The heaviest damage curve in the system: a solid blow registers against plate at a low net roll but is largely absorbed, while an unarmored target takes nothing until a real hit lands and then takes catastrophic damage.",
         "armor_targets": {
           "Plate": {
-            "hit_threshold": 10,
-            "multiplier": 1.1,
+            "hit_threshold": 12,
+            "damage_origin": 10,
+            "multiplier": 1.121,
+            "quadratic": 0,
             "base_crit_a": 22,
             "crit_interval": 2
           },
           "Chain": {
-            "hit_threshold": 12,
-            "multiplier": 1.8,
+            "hit_threshold": 14,
+            "damage_origin": 12,
+            "multiplier": 1.869,
+            "quadratic": 0,
             "base_crit_a": 20,
             "crit_interval": 2
           },
           "Leather": {
-            "hit_threshold": 14,
-            "multiplier": 2.6,
+            "hit_threshold": 15,
+            "damage_origin": 13,
+            "multiplier": 2.429,
+            "quadratic": 0,
             "base_crit_a": 17,
             "crit_interval": 2
           },
           "None": {
-            "hit_threshold": 15,
-            "multiplier": 3.2,
+            "hit_threshold": 17,
+            "damage_origin": 14,
+            "multiplier": 3.010,
+            "quadratic": 0,
             "base_crit_a": 17,
             "crit_interval": 2
           }
@@ -134,26 +158,34 @@
         "description": "Ranged attacks. The flattest spread in the system: plate absorbs most of an arrow's energy and caps out low, while soft targets take steadily escalating puncture damage. An unarmored target is hard to score on at all until the shot truly lands.",
         "armor_targets": {
           "Plate": {
-            "hit_threshold": 14,
-            "multiplier": 1.0,
+            "hit_threshold": 15,
+            "damage_origin": 13,
+            "multiplier": 0.920,
+            "quadratic": 0,
             "base_crit_a": 22,
             "crit_interval": 2
           },
           "Chain": {
-            "hit_threshold": 15,
-            "multiplier": 1.6,
+            "hit_threshold": 16,
+            "damage_origin": 14,
+            "multiplier": 1.583,
+            "quadratic": 0,
             "base_crit_a": 20,
             "crit_interval": 2
           },
           "Leather": {
-            "hit_threshold": 15,
-            "multiplier": 1.7,
+            "hit_threshold": 17,
+            "damage_origin": 14,
+            "multiplier": 1.673,
+            "quadratic": 0,
             "base_crit_a": 18,
             "crit_interval": 2
           },
           "None": {
-            "hit_threshold": 18,
-            "multiplier": 2.2,
+            "hit_threshold": 19,
+            "damage_origin": 16,
+            "multiplier": 2.003,
+            "quadratic": 0,
             "base_crit_a": 19,
             "crit_interval": 2
           }
@@ -172,26 +204,34 @@
         "description": "Natural creature attacks like bites, claws, and horns.",
         "armor_targets": {
           "Plate": {
-            "hit_threshold": 10,
-            "multiplier": 1.2,
+            "hit_threshold": 12,
+            "damage_origin": 10,
+            "multiplier": 0.227,
+            "quadratic": 0.050,
             "base_crit_a": 21,
             "crit_interval": 2
           },
           "Chain": {
-            "hit_threshold": 11,
-            "multiplier": 1.4,
+            "hit_threshold": 13,
+            "damage_origin": 9,
+            "multiplier": 0.055,
+            "quadratic": 0.062,
             "base_crit_a": 20,
             "crit_interval": 2
           },
           "Leather": {
-            "hit_threshold": 11,
-            "multiplier": 1.8,
+            "hit_threshold": 12,
+            "damage_origin": 9,
+            "multiplier": 0.314,
+            "quadratic": 0.059,
             "base_crit_a": 18,
             "crit_interval": 2
           },
           "None": {
-            "hit_threshold": 9,
-            "multiplier": 1.9,
+            "hit_threshold": 10,
+            "damage_origin": 7,
+            "multiplier": 0.336,
+            "quadratic": 0.062,
             "base_crit_a": 16,
             "crit_interval": 2
           }
@@ -210,26 +250,34 @@
         "description": "Unarmed holds, tackles, and creature constrictions. Heavy plate armor increases vulnerability to unbalancing, lowering the Base Crit threshold compared to unarmored targets.",
         "armor_targets": {
           "Plate": {
-            "hit_threshold": 11,
-            "multiplier": 0.9,
+            "hit_threshold": 12,
+            "damage_origin": 10,
+            "multiplier": 0.151,
+            "quadratic": 0.035,
             "base_crit_a": 14,
             "crit_interval": 3.5
           },
           "Chain": {
-            "hit_threshold": 13,
-            "multiplier": 1.3,
+            "hit_threshold": 14,
+            "damage_origin": 12,
+            "multiplier": 0.355,
+            "quadratic": 0.050,
             "base_crit_a": 17,
             "crit_interval": 3
           },
           "Leather": {
-            "hit_threshold": 13,
-            "multiplier": 1.6,
+            "hit_threshold": 14,
+            "damage_origin": 12,
+            "multiplier": 0.553,
+            "quadratic": 0.056,
             "base_crit_a": 20,
             "crit_interval": 2.5
           },
           "None": {
-            "hit_threshold": 12,
-            "multiplier": 1.8,
+            "hit_threshold": 13,
+            "damage_origin": 15,
+            "multiplier": 2.077,
+            "quadratic": 0,
             "base_crit_a": 21,
             "crit_interval": 3
           }
@@ -248,26 +296,34 @@
         "description": "Single-target elemental bolt rays. Different bolt types cap at specific MERP thresholds (Shock: Net Roll 18, Water: 22, Ice: 26, Fire & Lightning: 30).",
         "armor_targets": {
           "Plate": {
-            "hit_threshold": 7,
-            "multiplier": 0.8,
+            "hit_threshold": 8,
+            "damage_origin": 5,
+            "multiplier": 0.698,
+            "quadratic": 0,
             "base_crit_a": 13,
             "crit_interval": 4
           },
           "Chain": {
-            "hit_threshold": 8,
-            "multiplier": 1.0,
+            "hit_threshold": 9,
+            "damage_origin": 10,
+            "multiplier": 1.052,
+            "quadratic": 0,
             "base_crit_a": 15,
             "crit_interval": 3.5
           },
           "Leather": {
-            "hit_threshold": 10,
-            "multiplier": 1.3,
+            "hit_threshold": 11,
+            "damage_origin": 11,
+            "multiplier": 1.391,
+            "quadratic": 0,
             "base_crit_a": 15,
             "crit_interval": 3
           },
           "None": {
-            "hit_threshold": 12,
-            "multiplier": 2.0,
+            "hit_threshold": 13,
+            "damage_origin": 10,
+            "multiplier": 1.808,
+            "quadratic": 0,
             "base_crit_a": 13,
             "crit_interval": 2.2
           }
@@ -285,26 +341,34 @@
         "description": "Area-of-effect elemental explosions. Envelops targets in thermal energy, triggering criticals at low rolls.",
         "armor_targets": {
           "Plate": {
-            "hit_threshold": 3,
-            "multiplier": 1.3,
+            "hit_threshold": 4,
+            "damage_origin": 1,
+            "multiplier": 0.939,
+            "quadratic": 0,
             "base_crit_a": 7,
             "crit_interval": 3.5
           },
           "Chain": {
-            "hit_threshold": 4,
-            "multiplier": 1.3,
+            "hit_threshold": 5,
+            "damage_origin": 2,
+            "multiplier": 0.936,
+            "quadratic": 0,
             "base_crit_a": 8,
             "crit_interval": 3.2
           },
           "Leather": {
-            "hit_threshold": 5,
-            "multiplier": 1.35,
+            "hit_threshold": 6,
+            "damage_origin": 3,
+            "multiplier": 0.910,
+            "quadratic": 0,
             "base_crit_a": 9,
             "crit_interval": 3
           },
           "None": {
             "hit_threshold": 2,
-            "multiplier": 1.9,
+            "damage_origin": 1,
+            "multiplier": 1.251,
+            "quadratic": 0,
             "base_crit_a": 5,
             "crit_interval": 3.8
           }
@@ -323,25 +387,33 @@
         "armor_targets": {
           "Plate": {
             "hit_threshold": 12,
+            "damage_origin": 12,
             "multiplier": 1.5,
+            "quadratic": 0,
             "base_crit_a": 17,
             "crit_interval": 3
           },
           "Chain": {
             "hit_threshold": 10,
+            "damage_origin": 10,
             "multiplier": 1.5,
+            "quadratic": 0,
             "base_crit_a": 16,
             "crit_interval": 3
           },
           "Leather": {
             "hit_threshold": 8,
+            "damage_origin": 8,
             "multiplier": 1.5,
+            "quadratic": 0,
             "base_crit_a": 15,
             "crit_interval": 3
           },
           "None": {
             "hit_threshold": 6,
+            "damage_origin": 6,
             "multiplier": 1.5,
+            "quadratic": 0,
             "base_crit_a": 14,
             "crit_interval": 3
           }

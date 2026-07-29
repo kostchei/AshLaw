@@ -26,8 +26,8 @@ This system adapts MERP's critical severity tables (**A** through **E**) to a **
 |                  |                                       |                        |
 |                  v                                       v                        |
 |      1. Standard Damage (Hits)               2. Critical Severity (Tier)          |
-|   Hits = (Net Roll - Hit Threshold)          Crit Tier = (Net Roll - Base Crit)   |
-|          * Multiplier                                    / Crit Interval          |
+|   z = max(0, Net Roll - Damage Origin)       Crit Tier = (Net Roll - Base Crit)   |
+|   Hits = Linear*z + Quadratic*z^2                         / Crit Interval          |
 |                                                          |                        |
 |                                                          v                        |
 |                                              3. Trauma Result (1-10)              |
@@ -41,7 +41,8 @@ This system adapts MERP's critical severity tables (**A** through **E**) to a **
    $$\text{Net Roll} = \text{d20} + \text{Attack Mod} - \text{Defense Mod}$$
 
 2. **Standard Damage (Hits):**
-   $$\text{Hits} = \max\left(0, \lfloor (\text{Net Roll} - \text{Hit Threshold}) \times \text{Multiplier} \rfloor\right)$$
+   $$z = \max(0, \text{Net Roll} - \text{Damage Origin})$$
+   $$\text{Hits} = \max\left(0, \lfloor \text{Multiplier}z + \text{Quadratic}z^2 \rfloor\right)$$
 
 3. **Critical Severity Tier:**
    $$\text{Crit Tier} = \left\lfloor \frac{\text{Net Roll} - \text{Base Crit Threshold}}{\text{Crit Interval}} \right\rfloor$$
@@ -313,4 +314,3 @@ All elemental spells resolve using the **standard d20 Net Roll equations**:
 | **8** | Hair stands up. Stun 1 rd. | Violent jolt. Stun 2 rds, drop all items. | Severe electrical burns. +4 bleed/rd (arc), Stun 3 rds. | Internal organs cooked by arc. +10 bleed/rd, dies in 2 rds. | Disintegrated into smoking ash. Instant death. |
 | **9** | Spine tingle. -5 act. | Spine shock. Stun 1 rd, fall prone, -15 act. | Spinal cord shorted. Stun 3 rds, temporary paralysis 1 hour. | Spinal nerves burned through. Stun 5 rds, permanent paralysis. | Spine vaporized by arc. Instant death. |
 | **10** | Foot shock. -5 move. | Ankle spasm. Stun 1 rd, -15 move. | Achilles tendon charred. Stun 2 rds, down, -50 move. | Central nervous system fried. Stun 5 rds, coma. | Complete nervous system collapse. Instant death. |
-

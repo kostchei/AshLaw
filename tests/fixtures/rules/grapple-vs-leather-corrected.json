@@ -1,0 +1,23 @@
+{
+  "name": "Grapple vs Leather (corrected replacement)",
+  "source": "combat_engine_rules.md section 5 retired scenario 2 replacement",
+  "request": {
+    "raw_d20": 17,
+    "attack_category": "GrapplingUnbalancing",
+    "attack_modifier": 5,
+    "defense_modifier": 0,
+    "armor": "Leather",
+    "critical_table": null,
+    "is_spell": false
+  },
+  "expected": {
+    "hit": true,
+    "net_roll": 22,
+    "margin": 8,
+    "concussion_hits": 11,
+    "critical_tier": "A",
+    "trauma_index": 7,
+    "mishap": false,
+    "trauma_text": "Blow to shield arm. +5 hits. Shield torn away. If no shield: +8 hits and stunned 2 rounds."
+  }
+}

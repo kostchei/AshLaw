@@ -1,0 +1,22 @@
+{
+  "name": "Greataxe vs Plate",
+  "source": "combat_engine_rules.md section 5 scenario 1",
+  "request": {
+    "raw_d20": 18,
+    "attack_category": "TwoHandedWeapons",
+    "attack_modifier": 0,
+    "defense_modifier": 0,
+    "armor": "Plate",
+    "critical_table": "Slash",
+    "is_spell": false
+  },
+  "expected": {
+    "hit": true,
+    "net_roll": 18,
+    "margin": 6,
+    "concussion_hits": 8,
+    "critical_tier": null,
+    "trauma_index": null,
+    "mishap": false
+  }
+}

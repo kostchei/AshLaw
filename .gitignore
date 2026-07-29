@@ -38,3 +38,6 @@ Thumbs.db
 *.pem
 *.pfx
 *.p12
+
+# Source reference scans (transcribed to docs/reference/)
+docs/*.bmp
