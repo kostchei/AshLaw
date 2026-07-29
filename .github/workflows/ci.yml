@@ -48,6 +48,14 @@ jobs:
             dotnet restore "$project"
           done
 
+      # First, because a target-framework mismatch makes every later failure
+      # misleading: it surfaces as NU1201 during restore, which reads like an
+      # unresolvable package rather than a TFM problem. The Godot editor causes it by
+      # writing net8.0 into game/Ash.Game.csproj.
+      - name: Target framework check (all projects must agree)
+        shell: pwsh
+        run: ./tools/check-target-frameworks.ps1
+
       - name: Architecture check (src must not reference Godot)
         shell: pwsh
         run: ./tools/check-architecture.ps1

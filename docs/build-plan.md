@@ -36,6 +36,34 @@ Godot 4.7 accepts .NET 8 or later, and the complete Godot-hosted solution is ver
 against .NET 10. Pin every project to the same TFM; mismatched TFMs across the solution
 are a common source of misleading runtime load errors.
 
+**This happened, on 30 July 2026, exactly as warned.** The Godot editor rewrote
+`game/Ash.Game.csproj` and set `<TargetFramework>net8.0</TargetFramework>` — Godot 4.x's
+own default — while every shared project targets `net10.0`. A net8.0 project cannot
+reference net10.0 assemblies.
+
+The failure cost real time because it does not look like what it is. It surfaces as
+`NU1201` during restore, a NuGet error code whose text names the *project references* and
+never mentions the target framework, so it reads as a broken dependency or an
+unresolvable Godot SDK. It was initially diagnosed as the latter, which is wrong: the SDK
+resolved fine.
+
+Three things now prevent a repeat:
+
+- `game/Ash.Game.csproj` states its TFM **explicitly** rather than inheriting it. An
+  inherited value leaves the editor an empty slot to fill silently; an explicit one is at
+  least a visible diff.
+- `tools/check-target-frameworks.ps1` asserts every project agrees with
+  `Directory.Build.props`. It is a text check, so it runs in the headless CI job with no
+  Godot SDK present, and it runs **first** — before any step whose failure it would
+  otherwise disguise.
+- `tools/preflight.ps1` distinguishes this from a genuinely unresolvable SDK, so the two
+  stop being confused. They need opposite responses: one is a repo bug, the other is an
+  environment limitation that should just be routed around via
+  `tools/test-headless.ps1`.
+
+The standing rule: **never resolve a TFM complaint by downgrading the shared libraries.**
+`net10.0` is pinned in `global.json` deliberately.
+
 ### 0.2 Language policy
 
 **C# for everything.** GDScript is permitted only inside `@tool` editor plugins where

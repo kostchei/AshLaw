@@ -1,5 +1,19 @@
 <Project Sdk="Godot.NET.Sdk/4.7.0">
   <PropertyGroup>
+    <!--
+      Stated explicitly, not inherited from Directory.Build.props, because the Godot
+      editor rewrites this file and writes its own default TargetFramework (net8.0 for
+      Godot 4.x) when it does. An inherited value gives it an empty slot to fill; an
+      explicit one is at least a visible diff.
+
+      A net8.0 game project referencing net10.0 libraries fails to build, and the error
+      names the references rather than the framework, so it reads like a broken
+      dependency or an unresolvable SDK. Build plan §0.1 flags mismatched TFMs as "a
+      common source of misleading runtime load errors". This is that.
+
+      tools/check-target-frameworks.ps1 asserts this still matches Directory.Build.props.
+    -->
+    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Ash.Game</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>

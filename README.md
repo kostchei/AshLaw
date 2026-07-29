@@ -56,28 +56,110 @@ docs/         Build plan, ADRs, specs, and attack-chart reference material
 
 ## Build and test
 
-Build everything, including the Godot project:
+**Start here.** Reports what this machine can build, and why not:
+
+```bash
+pwsh ./tools/preflight.ps1
+```
+
+**The everyday command.** Runs exactly what CI's headless job runs — five test projects
+and four checks — so green here means green there. It does not touch Godot:
+
+```bash
+pwsh ./tools/test-headless.ps1
+```
+
+Build everything *including* the Godot project. This is the only command here that needs
+the Godot .NET SDK:
 
 ```bash
 dotnet build Ash.sln
 ```
 
-Build and test only the headless libraries — this is what CI's first job does, and it
-does not need the Godot SDK:
+### Prefer the scripts over `Ash.sln` for library work
+
+`Ash.sln` includes `game/Ash.Game.csproj`, which needs the Godot SDK. Nothing under
+`src/` or `tests/` does. Running library work through the solution couples it to the
+engine toolchain for no benefit — and when that coupling breaks, the error points
+somewhere else entirely (see Troubleshooting).
+
+A single test project still works fine on its own:
 
 ```bash
 dotnet test tests/Ash.Rules.Tests/Ash.Rules.Tests.csproj
 ```
 
-Run every test project:
+## Troubleshooting
+
+### `NU1201: Project Ash.Core is not compatible with net8.0`
+
+**Cause: the Godot editor rewrote `game/Ash.Game.csproj` and set `net8.0`.** Godot 4.x
+defaults to net8.0; every project here targets net10.0, and a net8.0 project cannot
+reference net10.0 assemblies.
+
+This error is genuinely misleading. `NU1201` is a NuGet code raised during restore and
+its text names the *project references*, never the framework — so it reads like a broken
+dependency or an SDK that will not resolve. It is neither. Build plan §0.1 predicted
+exactly this: mismatched TFMs are "a common source of misleading runtime load errors."
+
+Diagnose and fix:
 
 ```bash
-for p in Ash.Core Ash.Rules Ash.Content Ash.Sim Ash.Script; do dotnet test "tests/$p.Tests/$p.Tests.csproj"; done
+pwsh ./tools/check-target-frameworks.ps1
 ```
+
+Set `<TargetFramework>` in `game/Ash.Game.csproj` back to match `Directory.Build.props`.
+**Do not downgrade the shared libraries to net8.0** — they target net10.0 deliberately,
+pinned in `global.json`. This check runs first in CI for the same reason.
+
+### An aggregate `dotnet build`/`dotnet test` fails only at the game project
+
+Two different causes, and they need opposite responses:
+
+1. **`NU1201`** — the target-framework mismatch above. A real bug in the repo. Fix it.
+2. **The Godot SDK genuinely will not resolve** — a cold NuGet cache with no network, or
+   a sandboxed shell. Not a repo bug. Use `pwsh ./tools/test-headless.ps1`, which never
+   needs Godot. `pwsh ./tools/preflight.ps1` tells you which of the two you have.
+
+Neither is a reason to stop testing the libraries.
+
+### Godot is not installed at all
+
+Fine for everything except running the game. `Godot.NET.Sdk` restores from NuGet, so
+`game/Ash.Game.csproj` still *builds* without the editor. CI keeps the Godot build in a
+separate job so a missing SDK cannot block library testing.
+
+## Export a playable build
+
+Install the official Godot 4.7 Mono export templates once, then run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/export-game.ps1
+```
+
+This produces two ignored, local distributions:
+
+- `artifacts/builds/windows-client/AshLaw.exe` is the normal Windows game;
+- `artifacts/builds/windows-headless/AshLaw.Headless.exe` is the same simulation
+  exported for display-free execution;
+- `Run Headless Smoke Test.cmd` launches the headless build for two frames and
+  reports its exit status.
+
+The headless export is currently a verification build, not a network server. The
+world simulation runs without a display, but multiplayer and a persistent server
+loop have not been implemented.
 
 ## Checks
 
-All five run in CI and should pass before a push.
+All of these run in CI and should pass before a push. `pwsh ./tools/test-headless.ps1`
+runs the whole set for you; they are listed individually here for when you want one.
+
+Assert every project targets the same framework. Run this **first** when anything looks
+broken — a mismatch makes every other error misleading:
+
+```bash
+pwsh ./tools/check-target-frameworks.ps1
+```
 
 Assert no headless project has taken a Godot dependency:
 
