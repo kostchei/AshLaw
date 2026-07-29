@@ -143,7 +143,9 @@ This produces two ignored, local distributions:
 - `artifacts/builds/windows-headless/AshLaw.Headless.exe` is the same simulation
   exported for display-free execution;
 - `Run Headless Smoke Test.cmd` launches the headless build for two frames and
-  reports its exit status.
+  reports its exit status;
+- `AshLaw-Windows-Test.zip` and `AshLaw-Windows-Headless.zip` are the portable
+  packages. Keep each package's contents together after extraction.
 
 The headless export is currently a verification build, not a network server. The
 world simulation runs without a display, but multiplayer and a persistent server
