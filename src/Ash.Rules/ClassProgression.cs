@@ -6,6 +6,14 @@ public enum CharacterClass
     Cleric,
     Rogue,
     Wizard,
+    Bard,
+    Barbarian,
+    Sorcerer,
+    Paladin,
+    CelestialWarlock,
+    Monk,
+    Ranger,
+    Assassin,
 }
 
 /// <summary>

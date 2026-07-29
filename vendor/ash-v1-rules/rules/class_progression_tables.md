@@ -1,6 +1,10 @@
 # Class Attack Modifier Progression Specification
 
-This document defines the level-based Attack Modifier ($\text{OB}$) progression curves for character classes (Fighter, Cleric, Rogue, Wizard). It blends AD&D 1st/2nd Edition class archetypes with Rolemaster 10-level diminishing brackets and hard caps.
+This document defines four level-based Attack Modifier ($\text{OB}$) progression
+curves. Fighter, Cleric, Rogue, and Wizard are the curve archetypes; the eight
+additional playable classes reuse those curves as described below. The system
+blends AD&D 1st/2nd Edition class archetypes with Rolemaster 10-level diminishing
+brackets and hard caps.
 
 For combat resolution rules and damage calculation, see [combat_engine_rules.md](combat_engine_rules.md) and [critical_hits_system.md](critical_hits_system.md). Complete data is configured in [combat_system_data.json](../data/combat_system_data.json).
 
@@ -32,6 +36,23 @@ For combat resolution rules and damage calculation, see [combat_engine_rules.md]
 | **Cleric** | $+2/3 / \text{lv}$ | $+1/2 / \text{lv}$ | $+1/3 / \text{lv}$ | **+15** | Level 29 |
 | **Rogue** | $+1/2 / \text{lv}$ | $+1/3 / \text{lv}$ | $+1/3 / \text{lv}$ | **+10** | Level 26 |
 | **Wizard** | $+1/3 / \text{lv}$ | $+1/3 / \text{lv}$ | *Capped* | **+6** | Level 19 |
+
+### 2.1 Additional class curve mapping
+
+| Added class | Reused curve | Reason |
+| :--- | :---: | :--- |
+| **Bard** | Cleric | Martial/druidic hybrid |
+| **Barbarian** | Fighter | Prime martial |
+| **Sorcerer** | Wizard | Full defiler caster |
+| **Paladin** | Fighter | Prime martial with late divine magic |
+| **Celestial Warlock** | Wizard | Full pact caster |
+| **Monk** | Cleric | Secondary martial progression |
+| **Ranger** | Fighter | Prime martial |
+| **Assassin** | Rogue | Thief subclass |
+
+The published CSV repeats the selected archetype's values in a named column for
+each added class. This is intentional: callers resolve a concrete character
+class without needing a second alias lookup.
 
 ---
 

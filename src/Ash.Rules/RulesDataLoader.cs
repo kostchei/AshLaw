@@ -39,6 +39,54 @@ public static class RulesDataLoader
             ProgressionRate.OneThirdPerLevel,
             ProgressionRate.OneThirdPerLevel,
             ProgressionRate.Capped),
+        new(
+            CharacterClass.Bard,
+            HardCap: 15,
+            ProgressionRate.TwoThirdsPerLevel,
+            ProgressionRate.OneHalfPerLevel,
+            ProgressionRate.OneThirdPerLevel),
+        new(
+            CharacterClass.Barbarian,
+            HardCap: 20,
+            ProgressionRate.OnePerLevel,
+            ProgressionRate.TwoThirdsPerLevel,
+            ProgressionRate.OneHalfPerLevel),
+        new(
+            CharacterClass.Sorcerer,
+            HardCap: 6,
+            ProgressionRate.OneThirdPerLevel,
+            ProgressionRate.OneThirdPerLevel,
+            ProgressionRate.Capped),
+        new(
+            CharacterClass.Paladin,
+            HardCap: 20,
+            ProgressionRate.OnePerLevel,
+            ProgressionRate.TwoThirdsPerLevel,
+            ProgressionRate.OneHalfPerLevel),
+        new(
+            CharacterClass.CelestialWarlock,
+            HardCap: 6,
+            ProgressionRate.OneThirdPerLevel,
+            ProgressionRate.OneThirdPerLevel,
+            ProgressionRate.Capped),
+        new(
+            CharacterClass.Monk,
+            HardCap: 15,
+            ProgressionRate.TwoThirdsPerLevel,
+            ProgressionRate.OneHalfPerLevel,
+            ProgressionRate.OneThirdPerLevel),
+        new(
+            CharacterClass.Ranger,
+            HardCap: 20,
+            ProgressionRate.OnePerLevel,
+            ProgressionRate.TwoThirdsPerLevel,
+            ProgressionRate.OneHalfPerLevel),
+        new(
+            CharacterClass.Assassin,
+            HardCap: 10,
+            ProgressionRate.OneHalfPerLevel,
+            ProgressionRate.OneThirdPerLevel,
+            ProgressionRate.OneThirdPerLevel),
     ];
 
     private static readonly int[] BracketFirstLevels = [1, 11, 21];

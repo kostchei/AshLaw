@@ -198,6 +198,12 @@ public sealed class RulesData
 
     public ClassProgressionTable ClassProgression { get; }
 
+    public IReadOnlyCollection<ClassAdvancementPlan> ClassAdvancements =>
+        ClassAdvancementCatalog.All;
+
+    public ClassAdvancementPlan GetClassAdvancement(CharacterClass characterClass) =>
+        ClassAdvancementCatalog.For(characterClass);
+
     public AttackTable GetAttackTable(AttackCategoryId category) =>
         _attackTables.TryGetValue(category, out var table)
             ? table

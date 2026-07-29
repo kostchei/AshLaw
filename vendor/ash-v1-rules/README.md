@@ -13,7 +13,7 @@ critical severity, and the trauma-table index.
 Read the package in this order:
 
 1. [Class progression tables](rules/class_progression_tables.md)
-   - Fighter, Cleric, Rogue, and Wizard attack-modifier progressions.
+   - Four attack-modifier curve archetypes shared by twelve playable classes.
    - Level brackets, caps, spellcasting constraints, and class talent tables.
 
 2. [Combat engine rules](rules/combat_engine_rules.md)
@@ -35,6 +35,7 @@ Read the package in this order:
 
 5. CSV tables in [`data/`](data/)
    - Compact attack-table summary.
+   - Twelve-class attack-progression table.
    - Four physical critical-trauma tables.
 
 ## Package layout
@@ -51,6 +52,7 @@ ash-v1-rules/
   data/
     combat_system_data.json
     attack_tables_summary.csv
+    class_progression.csv
     ct_1_crush_critical_table.csv
     ct_2_slash_critical_table.csv
     ct_3_puncture_critical_table.csv

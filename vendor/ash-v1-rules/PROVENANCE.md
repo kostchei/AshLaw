@@ -77,9 +77,10 @@ directly; run the generator. This is what prevents the two files diverging again
 ### 2026-07-29 — class progression transcribed to CSV
 
 `rules/class_progression_tables.md` §3 publishes the Lv 1–30 attack-modifier curve for
-Fighter, Cleric, Rogue, and Wizard as a Markdown table only. It is now also carried as
-`data/class_progression.csv`, a **verbatim transcription** of that table — no value was
-recomputed, reinterpreted, or filled in.
+Fighter, Cleric, Rogue, and Wizard as a Markdown table only. The first five columns of
+`data/class_progression.csv` are a **verbatim transcription** of that table — no
+original value was recomputed, reinterpreted, or filled in. Later columns are documented
+separately below.
 
 The Markdown table remains the authority. The CSV exists so the runtime can load the
 curve as data rather than hard-coding it, per build plan M0 task 8.
@@ -96,6 +97,24 @@ the **opening** level of a bracket, whereas `+1/2` and `+1/3` grant theirs on th
 **closing** level of each period. The rates are therefore encoded as explicit per-period
 gain patterns (`+1/+0/+1`, `+0/+1`, `+0/+0/+1`) rather than as rounded arithmetic on
 `levels × rate`.
+
+### 2026-07-29 — eight additional class columns
+
+`data/class_progression.csv` now also names Bard, Barbarian, Sorcerer, Paladin,
+CelestialWarlock, Monk, Ranger, and Assassin. Each new column deliberately
+duplicates one of the four validated curve archetypes:
+
+- Fighter: Barbarian, Paladin, Ranger
+- Cleric: Bard, Monk
+- Rogue: Assassin
+- Wizard: Sorcerer, CelestialWarlock
+
+These repeated columns are authored integration data, not a verbatim
+transcription from the original source package. The runtime derives every
+column from its declared bracket rules and tests all 240 additional cells.
+Pinned level abilities and 2d6 talent tables are authored Ash adaptations in
+`src/Ash.Rules/ClassAdvancement.cs`, summarized in
+`docs/extra-classes.md`.
 
 ### Known-unvalidated table
 

@@ -53,6 +53,14 @@ public sealed class ClassProgressionTests
     [InlineData(CharacterClass.Cleric, 15, 29)]
     [InlineData(CharacterClass.Rogue, 10, 26)]
     [InlineData(CharacterClass.Wizard, 6, 19)]
+    [InlineData(CharacterClass.Bard, 15, 29)]
+    [InlineData(CharacterClass.Barbarian, 20, 26)]
+    [InlineData(CharacterClass.Sorcerer, 6, 19)]
+    [InlineData(CharacterClass.Paladin, 20, 26)]
+    [InlineData(CharacterClass.CelestialWarlock, 6, 19)]
+    [InlineData(CharacterClass.Monk, 15, 29)]
+    [InlineData(CharacterClass.Ranger, 20, 26)]
+    [InlineData(CharacterClass.Assassin, 10, 26)]
     public void PublishedTableReachesEachHardCapAtTheDocumentedLevel(
         CharacterClass characterClass,
         int expectedCap,
@@ -94,6 +102,14 @@ public sealed class ClassProgressionTests
     [InlineData(CharacterClass.Cleric, 75)]
     [InlineData(CharacterClass.Rogue, 50)]
     [InlineData(CharacterClass.Wizard, 30)]
+    [InlineData(CharacterClass.Bard, 75)]
+    [InlineData(CharacterClass.Barbarian, 100)]
+    [InlineData(CharacterClass.Sorcerer, 30)]
+    [InlineData(CharacterClass.Paladin, 100)]
+    [InlineData(CharacterClass.CelestialWarlock, 30)]
+    [InlineData(CharacterClass.Monk, 75)]
+    [InlineData(CharacterClass.Ranger, 100)]
+    [InlineData(CharacterClass.Assassin, 50)]
     public void HardCapsMatchTheirMerpOffensiveBonusEquivalents(
         CharacterClass characterClass,
         int expectedMerpOffensiveBonus)
@@ -114,5 +130,28 @@ public sealed class ClassProgressionTests
             () => progression.GetAttackModifier(CharacterClass.Fighter, level));
         Assert.Throws<ArgumentOutOfRangeException>(
             () => progression.GetRules(CharacterClass.Fighter).DeriveAttackModifier(level));
+    }
+
+    [Theory]
+    [InlineData(CharacterClass.Bard, CharacterClass.Cleric)]
+    [InlineData(CharacterClass.Barbarian, CharacterClass.Fighter)]
+    [InlineData(CharacterClass.Sorcerer, CharacterClass.Wizard)]
+    [InlineData(CharacterClass.Paladin, CharacterClass.Fighter)]
+    [InlineData(CharacterClass.CelestialWarlock, CharacterClass.Wizard)]
+    [InlineData(CharacterClass.Monk, CharacterClass.Cleric)]
+    [InlineData(CharacterClass.Ranger, CharacterClass.Fighter)]
+    [InlineData(CharacterClass.Assassin, CharacterClass.Rogue)]
+    public void ExtraClassUsesTheChosenExistingHitCurve(
+        CharacterClass extraClass,
+        CharacterClass referenceClass)
+    {
+        for (var level = ClassProgressionTable.MinimumLevel;
+             level <= ClassProgressionTable.MaximumLevel;
+             level++)
+        {
+            Assert.Equal(
+                Progression.GetAttackModifier(referenceClass, level),
+                Progression.GetAttackModifier(extraClass, level));
+        }
     }
 }
