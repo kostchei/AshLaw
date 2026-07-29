@@ -25,7 +25,7 @@ Godot editor installed. You only need the editor to run the game.
 
 ```text
 src/          Headless libraries. No Godot references, ever.
-  Ash.Core      Shared primitives
+  Ash.Core      Shared primitives: palette, depth sorter, projection, viewport
   Ash.Rules     Combat resolution: loader, attack resolver, trauma parser
   Ash.Content   Content loading
   Ash.Sim       Simulation
@@ -55,7 +55,7 @@ dotnet test tests/Ash.Rules.Tests/Ash.Rules.Tests.csproj
 Run every test project:
 
 ```bash
-for p in Ash.Rules Ash.Content Ash.Sim Ash.Script; do dotnet test "tests/$p.Tests/$p.Tests.csproj"; done
+for p in Ash.Core Ash.Rules Ash.Content Ash.Sim Ash.Script; do dotnet test "tests/$p.Tests/$p.Tests.csproj"; done
 ```
 
 ## Checks

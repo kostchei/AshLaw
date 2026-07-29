@@ -731,18 +731,65 @@ start when:
    volume-graph sorting, §2.9 MoonSharp. **Met** — `docs/adr/0001`–`0003`.
 3. The Godot project builds headlessly from the solution. **Met.**
 
-### 6.4 Start M1 with the two risk spikes, not with general gameplay
+### 6.4 M1 risk spikes — done, with one budget finding
 
-Both can invalidate assumptions in this plan, and both are cheap relative to what they
-de-risk. Do them before M1 tasks 4–10.
+Both spikes are landed in `Ash.Core` and run in CI. They are headless: no Godot
+reference, so the M1 risks are testable without an engine.
 
-1. **Palette shader + exact 256-index identity test** (§2.6, M1 task 3). Assert all 256
-   indices map to the authored RGB with zero tolerance. Catches filtering, sRGB, and
-   texture-format errors that are otherwise found late and cosmetically.
-2. **Volume-graph sorter + 2,000-sprite performance budget** (§2.5, M1 tasks 8–9).
-   Measure with synthetic data. If the budget does not hold, resolve it now — the
-   escape hatch in §2.5 is only cheap before the world model depends on sort order.
+**1. Palette identity — passes.** `PaletteShaderModel` replicates the §2.6 fragment
+shader's arithmetic in 32-bit float, and `game/shaders/palette.gdshader` is written
+against it. All 256 indices resolve to their exact authored RGB.
 
-Then M1 task 6: oblique projection and its inverse in one file, with the
-`ScreenToLogical(LogicalToScreen(p)) == p` round-trip asserted at 1×–4×, windowed and
-fullscreen.
+The test asserts the invariant that actually matters, which is **not** that each index
+selects the right texel. Without the `+0.5` half-texel offset the arithmetic still lands
+on the correct integer — it just lands *exactly on the boundary* between two texels,
+where the result depends on how a given GPU rounds. The test asserts every sample sits
+0.5 texels from either boundary, and a companion test asserts that removing the offset
+drops that margin to 0.0, so the check demonstrably has teeth.
+
+**2. Sorter — correct, but the 2,000-object budget is conditional.** Measured on the dev
+machine, 20 sorts per figure:
+
+| Scene | Objects | Comparisons | Cycles | ms/sort |
+|---|---|---|---|---|
+| Drawn world region, ~45×45 tiles | 2,000 | 28,299 (1.4% of pairs) | 0 | **8.6** |
+| Packed into the 320×200 viewport | 2,000 | 614,906 (30.8% of pairs) | 1,156 | **135** |
+
+The plan says "2,000 visible objects" without saying whether *visible* means the drawn
+world region or literally 2,000 sprites overlapping inside 320×200. The two readings are
+a factor of 16 apart, so **this needs deciding before M6.**
+
+- Under the region reading the budget holds, but 8.6 ms is over half the 60 Hz frame on
+  its own. That is not comfortable, and it is sorting only — no drawing.
+- Under the packed reading it fails outright. Roughly a third of all pairs genuinely
+  overlap, so no spatial index helps; the cost is intrinsic to a pairwise-graph sorter at
+  that density. This is the case §2.5's escape hatch exists for.
+
+Three implementation defects were found and fixed while measuring, worth recording
+because each looked like an algorithmic wall and was not:
+
+- Breaking a cycle rescanned and re-sorted every unemitted node, making it
+  O(n² log n) across 1,156 breaks.
+- Deduplicating candidate pairs through a `HashSet` of tuples cost more than the
+  comparisons it was guarding. Pairs are now assigned to a single owning bucket by
+  arithmetic.
+- Membership was tested through a `SortedSet` once per graph edge — a comparator call on
+  each of 615,000 edges.
+
+Together these were 650 ms → 135 ms on the packed scene. The remaining cost is real work.
+
+**Also landed: projection and viewport round-trips** (M1 task 6, §2.8).
+`ObliqueProjection` and `ViewportScaling` are integer-only, so
+`ScreenToWorld(WorldToScreen(p)) == p` and `ScreenToLogical(LogicalToScreen(p)) == p`
+hold **exactly** — the tests use no epsilon. The viewport round-trip is asserted over
+every logical pixel at 1×–5×, windowed and letterboxed.
+
+### 6.5 What M1 should do next
+
+1. Settle the "2,000 visible" reading above, since it decides whether §2.5's escape hatch
+   is needed.
+2. Port `SortItem::below`'s special cases from ScummVM. `VolumeSorter.Below` currently
+   implements the geometric core only; the fixed-vs-dynamic, occludes-fast-path, and
+   shape-flag cases are not in yet, and they should land before M2 authors map content.
+3. Then M1 tasks 4–5, 7, 9–10: palette controller, shape resource format, camera, sprite
+   draw pass, debug overlay.
