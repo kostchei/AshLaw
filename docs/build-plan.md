@@ -175,7 +175,10 @@ Approach:
 1. Port the pairwise `Below(a, b)` predicate from ScummVM's
    `ultima8/world/sort_item.h` (`SortItem::below`) — it is the behavioural reference the
    spec names in §18, and it encodes years of special cases (flat items, sprites, fixed
-   vs. dynamic, the "occludes" fast path) that are not worth rediscovering.
+   vs. dynamic, the "occludes" fast path) that are not worth rediscovering. Porting it is
+   licensed by [ADR 0005](adr/0005-gplv2-and-reuse-over-reimplementation.md): this project
+   is GPLv2, matching ScummVM. Ported code carries an attribution comment naming the
+   upstream file.
 2. Build a DAG over the visible set from pairwise comparisons and **topologically sort
    with explicit cycle detection**.
 3. On a detected cycle, break it deterministically on a stable key
@@ -811,8 +814,12 @@ the `uid://` on `Main.cs`, which the same rewrite had produced.
 
 1. Settle the "2,000 visible" reading above, since it decides whether §2.5's escape hatch
    is needed.
-2. Port `SortItem::below`'s special cases from ScummVM. `VolumeSorter.Below` currently
-   implements the geometric core only; the fixed-vs-dynamic, occludes-fast-path, and
-   shape-flag cases are not in yet, and they should land before M2 authors map content.
+2. Port `SortItem::below` from ScummVM, replacing `VolumeSorter.Below` rather than
+   extending it. The current predicate implements the geometric core only — the
+   fixed-vs-dynamic, occludes-fast-path, and shape-flag cases are absent — and it was
+   written from first principles while the licensing question was open. That question is
+   settled: [ADR 0005](adr/0005-gplv2-and-reuse-over-reimplementation.md) licenses this
+   project GPLv2 and makes reuse the preferred route. Should land before M2 authors map
+   content.
 3. Then M1 tasks 4–5, 7, 9–10: palette controller, shape resource format, camera, sprite
    draw pass, debug overlay.

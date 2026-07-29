@@ -13,15 +13,20 @@ namespace Ash.Core;
 /// an explicit topological sort rather than a comparison sort.
 /// </para>
 /// <para>
-/// <strong>Status: first cut.</strong> <see cref="Below"/> implements the
-/// geometric core — separation on Z, then Y, then X, with flat items and sprites
-/// handled explicitly. ADR 0002 names ScummVM's
-/// <c>ultima8/world/sort_item.h</c> <c>SortItem::below</c> as the behavioural
-/// reference, and the accumulated special cases there (fixed vs dynamic items,
-/// the "occludes" fast path, and several shape-flag exceptions) have not been
-/// ported line by line. Do that before M2 authors real map content. The graph
-/// construction, cycle handling, determinism, and cost characteristics below are
-/// independent of that work and are what this spike exists to prove.
+/// <strong>Status: <see cref="Below"/> is due to be replaced, not extended.</strong>
+/// It implements the geometric core only — separation on Z, then Y, then X, with
+/// flat items and sprites handled explicitly — and was derived from first
+/// principles while the project's licensing was undecided. ADR 0005 settled that:
+/// this project is GPLv2, matching ScummVM, so <c>SortItem::below</c> from
+/// <c>ultima8/world/sort_item.h</c> should be ported directly, with an attribution
+/// comment. It encodes special cases this does not have (fixed vs dynamic items,
+/// the "occludes" fast path, several shape-flag exceptions). Port it before M2
+/// authors real map content.
+/// </para>
+/// <para>
+/// The graph construction, cycle handling, determinism and cost characteristics
+/// below are independent of the predicate and are what this spike proved; they
+/// survive the port.
 /// </para>
 /// </remarks>
 public static class VolumeSorter

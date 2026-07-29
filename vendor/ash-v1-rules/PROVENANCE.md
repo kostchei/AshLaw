@@ -11,6 +11,14 @@ No external license was present in the source directory. This package is
 therefore treated as internal project material; no third-party redistribution
 permission is asserted by this manifest.
 
+> **Open issue — blocks public distribution.** As of 2026-07-29 the repository is
+> licensed GPL-2.0
+> ([ADR 0005](../../docs/adr/0005-gplv2-and-reuse-over-reimplementation.md)).
+> Distributing the repository distributes this directory with it, and this
+> directory still has no licence of its own. It is the project owner's own
+> material, so it is theirs to license — but it must be licensed explicitly and
+> this section updated before any public release.
+
 ## Included artifacts
 
 | Source artifact | Destination | Source SHA-256 |

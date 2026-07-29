@@ -24,6 +24,13 @@ The renderer will:
 Candidate comparisons are reduced with screen-space buckets. M1 must benchmark 2,000
 visible objects at 60 Hz before this design is considered proven.
 
+**Amended 2026-07-29.** [ADR 0005](0005-gplv2-and-reuse-over-reimplementation.md) licenses
+this project under GPLv2, which makes porting `SortItem::below` directly from ScummVM
+permitted and preferred. The current `VolumeSorter.Below` is a from-scratch geometric
+predicate written while that question was open; it should be replaced by a real port
+carrying an attribution comment. See build plan §6.4 for what it currently omits, and
+§6.4 for the measured performance, which is independent of this.
+
 ## Consequences
 
 - Fixed input produces stable draw order, including ambiguous arrangements.

@@ -126,11 +126,30 @@ Two things worth knowing before you rely on a number:
   `AttackResolver` refuses to use it unless the caller sets
   `AttackRequest.AllowUnvalidatedTable`.
 
+## Licence
+
+**GPL-2.0.** Full text in [`LICENSE`](LICENSE). See
+[ADR 0005](docs/adr/0005-gplv2-and-reuse-over-reimplementation.md) for why, and for what
+it commits the project to.
+
+The short version: the specification names Pentagram and ScummVM's Ultima VIII engine as
+the behavioural reference, and this project **ports** from ScummVM rather than
+reimplementing what it already solves. ScummVM is GPL-2.0-or-later, so this project is
+GPLv2 to match. Ported code carries a comment naming the upstream file it came from.
+
+Nothing here uses Ultima VIII's own content — no Origin data files are read, the art is
+original, and the rules are an unrelated MERP/AD&D blend. The relationship is one of
+genre and behaviour.
+
+Two licensing questions are **open and block public distribution**, both recorded in
+ADR 0005: `vendor/ash-v1-rules` carries no licence of its own, and game assets are not
+covered by a software licence and need separate terms.
+
 ## Where to start reading
 
 1. [`docs/build-plan.md`](docs/build-plan.md) — milestones, risks, and current status
    (§6 for where the project actually is).
-2. [`docs/adr/`](docs/adr/) — the four decisions that are expensive to reverse.
+2. [`docs/adr/`](docs/adr/) — the five decisions that are expensive to reverse.
 3. [`vendor/ash-v1-rules/INTEGRATION.md`](vendor/ash-v1-rules/INTEGRATION.md) — the
    proposed boundary between rules and engine.
 4. [`src/Ash.Rules/README.md`](src/Ash.Rules/README.md) — how resolution works.
