@@ -5,7 +5,7 @@ namespace Ash.Game;
 
 public partial class Main : Node2D
 {
-    private const float RenderScale = 2;
+    private const float RenderScale = 4;
     private const int IsoOriginX = 100;
     private const int IsoOriginY = 27;
     private const int TileHalfWidth = 8;
@@ -36,8 +36,8 @@ public partial class Main : Node2D
 
     public override void _Draw()
     {
-        // Author in compact pixel-art units, then rasterize into the 640x400
-        // logical framebuffer at 2x. Windows displays that framebuffer at 2x.
+        // Author in compact pixel-art units, then rasterize into the 1280x800
+        // logical framebuffer at 4x. Windows displays that framebuffer at 2x.
         DrawSetTransform(
             Vector2.Zero,
             rotation: 0,

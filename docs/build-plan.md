@@ -232,10 +232,10 @@ archive. Do not build that first.
 ### 2.8 Viewport and scaling
 
 - Project settings: `display/window/stretch/mode = viewport`,
-  `stretch/aspect = keep`, `stretch/scale_mode = integer`, base resolution **640×400**.
-- The initial Windows window is **1280×800**, an exact 2× display scale.
+  `stretch/aspect = keep`, `stretch/scale_mode = integer`, base resolution **1280×800**.
+- The initial Windows window is **2560×1600**, an exact 2× display scale.
 - Every texture: `Nearest` filtering, mipmaps off.
-- Gumps render **inside** the same 640×400 viewport — they are pixel art, not modern UI.
+- Gumps render **inside** the same 1280×800 viewport — they are pixel art, not modern UI.
   An optional high-legibility text mode (UI-054) renders a second text pass at native
   resolution, and is the only thing permitted outside the logical canvas.
 
@@ -318,7 +318,7 @@ Implements INTEGRATION.md §10 steps 1–12. No Godot, no world model.
 **Tasks**
 
 1. Godot project in `game\`; solution wiring; the no-`using Godot` CI check.
-2. 640×400 viewport, 1280×800 initial window, integer scaling, letterbox, nearest
+2. 1280×800 viewport, 2560×1600 initial window, integer scaling, letterbox, nearest
    filtering everywhere.
 3. Palette shader per §2.6 + identity-image verification test.
 4. Palette controller: fade to/from colour, global tint, index-range cycling, reserved UI
@@ -768,7 +768,7 @@ M1 task 2 was recorded as done but was not. `game/project.godot` carried
 `window/stretch/mode="canvas_items"`, and `stretch/aspect` and `stretch/scale_mode` were
 absent entirely, so Godot was falling back to `ignore` and `fractional`. Nearest
 filtering and the former 320×200 base-resolution settings were internally consistent.
-The project now intentionally uses 640×400.
+The project now intentionally uses 1280×800.
 
 That combination is quietly wrong rather than visibly broken: `canvas_items` scales
 drawing commands instead of the framebuffer, giving sub-pixel sprite positions, and

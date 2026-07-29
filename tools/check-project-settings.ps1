@@ -24,14 +24,14 @@ if (-not (Test-Path -LiteralPath $projectFile)) {
 # Fully-qualified setting name -> required literal value, exactly as written in the
 # file (quotes included for string settings).
 $expected = [ordered]@{
-    # "viewport" scales the whole 320x200 framebuffer. "canvas_items" would scale
+    # "viewport" scales the whole 1280x800 framebuffer. "canvas_items" would scale
     # drawing commands instead, giving sub-pixel sprite positions.
     "display/window/stretch/mode"                            = '"viewport"'
     "display/window/stretch/aspect"                          = '"keep"'
     # Forbids fractional scales, so slack goes to the letterbox, not the pixel grid.
     "display/window/stretch/scale_mode"                      = '"integer"'
-    "display/window/size/viewport_width"                     = "320"
-    "display/window/size/viewport_height"                    = "200"
+    "display/window/size/viewport_width"                     = "1280"
+    "display/window/size/viewport_height"                    = "800"
     # 0 is Nearest, with no mipmaps.
     "rendering/textures/canvas_textures/default_texture_filter" = "0"
 }

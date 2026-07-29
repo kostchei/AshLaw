@@ -231,7 +231,7 @@ public sealed class VolumeSorterTests(ITestOutputHelper output)
     /// </summary>
     /// <remarks>
     /// "Visible" is read as the drawn world region, which is larger than the
-    /// 640x400 viewport — that is how Ashen Ultima culls, and it is the only
+    /// 1280x800 viewport — that is how Ashen Ultima culls, and it is the only
     /// reading under which 2,000 objects is a normal scene rather than an extreme
     /// one. The other reading is measured by
     /// <see cref="DenseOverlappingSceneIsOverBudgetAndTheLimitIsRecorded"/>.
@@ -252,7 +252,7 @@ public sealed class VolumeSorterTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// The adversarial reading: 2,000 objects packed into the 640x400 viewport, so
+    /// The adversarial reading: 2,000 objects packed into the 1280x800 viewport, so
     /// roughly a third of all pairs genuinely overlap and no spatial index can
     /// help. This is over budget, and the number is asserted so that it is a
     /// recorded limit rather than a surprise at M6.
@@ -355,12 +355,12 @@ public sealed class VolumeSorterTests(ITestOutputHelper output)
 
     /// <summary>
     /// A scene whose objects are genuinely <em>visible</em>: every one projects
-    /// inside the 640x400 logical viewport.
+    /// inside the 1280x800 logical viewport.
     /// </summary>
     /// <remarks>
     /// This matters more than it looks. Spreading 2,000 objects over a large world
     /// area makes the sort trivially cheap, because almost nothing overlaps —
-    /// which would be a meaningless pass. Packing 2,000 objects into 256,000 screen
+    /// which would be a meaningless pass. Packing 2,000 objects into 1,024,000 screen
     /// pixels forces the heavy mutual overlap that the §2.5 budget is actually
     /// about. Elevation is varied so the graph has depth as well as breadth.
     /// </remarks>
@@ -403,7 +403,7 @@ public sealed class VolumeSorterTests(ITestOutputHelper output)
 
                         // Visible means "touches the viewport", as it does at
                         // runtime — partially on-screen objects still get sorted.
-                        var viewport = new VolumeSorter.ScreenRect(-320, 320, -200, 200);
+                        var viewport = new VolumeSorter.ScreenRect(-640, 640, -400, 400);
                         if (!VolumeSorter.ProjectToScreen(volume).Overlaps(viewport))
                         {
                             continue;

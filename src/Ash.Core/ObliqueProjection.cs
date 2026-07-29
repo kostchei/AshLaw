@@ -6,7 +6,7 @@ public readonly record struct Vec3i(int X, int Y, int Z)
     public static Vec3i Zero => new(0, 0, 0);
 }
 
-/// <summary>Integer screen position in the logical 640x400 canvas.</summary>
+/// <summary>Integer screen position in the logical 1280x800 canvas.</summary>
 public readonly record struct Vec2i(int X, int Y)
 {
     public static Vec2i Zero => new(0, 0);

@@ -15,12 +15,12 @@ run/main_scene="res://scenes/main.tscn"
 
 [display]
 
-window/size/viewport_width=640
-window/size/viewport_height=400
-window/size/window_width_override=1280
-window/size/window_height_override=800
+window/size/viewport_width=1280
+window/size/viewport_height=800
+window/size/window_width_override=2560
+window/size/window_height_override=1600
 
-; "viewport" renders the game at 640x400, then displays that framebuffer at an
+; "viewport" renders the game at 1280x800, then displays that framebuffer at an
 ; initial 2x on Windows. "integer" forbids fractional scales, so letterboxing
 ; absorbs slack rather than distorting the pixel grid.
 window/stretch/mode="viewport"

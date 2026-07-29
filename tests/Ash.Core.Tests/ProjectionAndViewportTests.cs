@@ -87,13 +87,13 @@ public sealed class ProjectionAndViewportTests
     public static TheoryData<int, int, int> WindowSizes =>
         new()
         {
-            { 640, 400, 1 },
-            { 1280, 800, 2 },
-            { 1920, 1200, 3 },
-            { 2560, 1600, 4 },
-            { 1920, 1080, 2 },
-            { 1366, 768, 1 },
-            { 800, 1200, 1 },
+            { 1280, 800, 1 },
+            { 2560, 1600, 2 },
+            { 3840, 2400, 3 },
+            { 5120, 3200, 4 },
+            { 1920, 1080, 1 },
+            { 2560, 1440, 1 },
+            { 1600, 2400, 1 },
         };
 
     [Theory]
@@ -172,7 +172,7 @@ public sealed class ProjectionAndViewportTests
     {
         var viewport = ViewportScaling.ForWindow(1920, 1080);
 
-        // 1920 - 640*2 = 640 total horizontal slack, 320 each side.
+        // 1920 - 1280 = 640 total horizontal slack, 320 each side.
         Assert.Equal(320, viewport.OffsetX);
         Assert.Equal(140, viewport.OffsetY);
 
@@ -184,7 +184,7 @@ public sealed class ProjectionAndViewportTests
     [Fact]
     public void WindowSmallerThanTheLogicalCanvasIsRejected()
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => ViewportScaling.ForWindow(639, 400));
-        Assert.Throws<ArgumentOutOfRangeException>(() => ViewportScaling.ForWindow(640, 399));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ViewportScaling.ForWindow(1279, 800));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ViewportScaling.ForWindow(1280, 799));
     }
 }

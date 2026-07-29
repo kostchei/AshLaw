@@ -47,7 +47,7 @@ hosting) is the part of the problem that is well-trodden elsewhere.
 | **GFX-040..044** indexed-colour pipeline, palette fades, palette cycling, colour transforms | No custom shader access. Palette cycling and tinting must be pre-baked as separate texture frames or approximated with `ImageColor3` (multiply-only). A true 256-entry LUT pipeline is not expressible. This is a hard failure, not a workaround. |
 | **GFX-050..055** volume-based depth sort with stable tie-breaks and explicit overrides | Expressible via per-frame `ZIndex` assignment on `ImageLabel`s, but you are writing thousands of Instance properties per frame from Luau. The GUI renderer is not built for that; expect hundreds of sprites, not thousands. The 3D alternative (textured quads) hands sorting to Roblox's per-object transparency sort, which is exactly the wrong sort. |
 | **GFX-033 / INT-002** sprite-aware hit testing that ignores transparent pixels | GUI hit testing is rectangular. Alpha-mask testing must be done manually in Luau against `EditableImage` data every pointer move. |
-| **GFX-001..005** fixed 640x400 logical canvas, integer scaling, exact logical/physical pointer transform | Achievable (`ResampleMode = Pixelated`, letterbox frame). This one is fine. |
+| **GFX-001..005** fixed 1280x800 logical canvas, integer scaling, exact logical/physical pointer transform | Achievable (`ResampleMode = Pixelated`, letterbox frame). This one is fine. |
 | **§14** shape-metadata, map, and script authoring tools | Roblox Studio plugins are workable but you are authoring U8 content inside a 3D IDE that has no concept of your object model. |
 | Content | The critical tables in `vendor/ash-v1-rules` describe decapitation, severed limbs, crushed skulls, and bleed rates. Roblox moderation restricts realistic gore even under age-rated experiences. This is a live product risk, not a technical one. |
 | Distribution | Roblox client only. No Steam, no offline, no owning your own store page, Robux-only monetisation. |
@@ -179,7 +179,7 @@ Implements INTEGRATION.md §10 steps 1–12.
 yields identical output; changing a JSON value changes results with no code change.
 
 ### M1 — Visual substrate (spec Stage 1)
-Logical 640×400 viewport, integer scaling, letterbox, palette shader (index texture +
+Logical 1280×800 viewport, integer scaling, letterbox, palette shader (index texture +
 LUT uniform, fade/cycle/tint as LUT mutations), shape/frame resource format with
 origins, oblique projection, camera, first depth sort.
 
