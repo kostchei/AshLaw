@@ -7,7 +7,8 @@ derived file is what produced the AT-3/AT-4 divergence this script exists to pre
 
 Validation: for each armour column with MERP reference data, the fitted curve
 
-    hits = floor((net_roll - hit_threshold) * multiplier)
+    z = max(0, net_roll - damage_origin)
+    hits = floor(multiplier * z + quadratic * z**2)
 
 is evaluated at net_roll = 30 (MERP table row 146-150) and compared against the
 published MERP damage value. Anything outside tolerance is a hard failure.
@@ -41,7 +42,9 @@ CSV_HEADER = [
     "Category_Name",
     "Armor_Type",
     "Hit_Threshold",
+    "Damage_Origin",
     "Multiplier",
+    "Quadratic",
     "Base_Crit_A",
     "Crit_Interval",
 ]
@@ -66,7 +69,14 @@ def category_name(name: str) -> str:
 
 
 def predicted_hits(target: dict, net_roll: int) -> int:
-    return max(0, math.floor((net_roll - target["hit_threshold"]) * target["multiplier"]))
+    distance = max(0, net_roll - target["damage_origin"])
+    return max(
+        0,
+        math.floor(
+            distance * target["multiplier"]
+            + distance * distance * target["quadratic"]
+        ),
+    )
 
 
 def collapse_leather(max_hits: dict) -> float:
@@ -92,16 +102,29 @@ def validate(tables: dict, ref: dict) -> list[str]:
         if unknown:
             raise ValidationError(f"{key}: unknown armour columns {unknown}")
         for armour, t in targets.items():
-            for field in ("hit_threshold", "multiplier", "base_crit_a", "crit_interval"):
+            for field in (
+                "hit_threshold",
+                "damage_origin",
+                "multiplier",
+                "quadratic",
+                "base_crit_a",
+                "crit_interval",
+            ):
                 if field not in t:
                     raise ValidationError(f"{key}/{armour}: missing '{field}'")
-            if t["multiplier"] <= 0:
-                raise ValidationError(f"{key}/{armour}: multiplier must be positive")
+            if t["multiplier"] < 0:
+                raise ValidationError(f"{key}/{armour}: multiplier must not be negative")
+            if t["quadratic"] < 0:
+                raise ValidationError(f"{key}/{armour}: quadratic must not be negative")
+            if t["multiplier"] == 0 and t["quadratic"] == 0:
+                raise ValidationError(
+                    f"{key}/{armour}: multiplier or quadratic must be positive"
+                )
             if t["crit_interval"] <= 0:
                 raise ValidationError(f"{key}/{armour}: crit_interval must be positive")
 
         if key in ref["unvalidated"]:
-            report.append(f"  {key}: SKIPPED (no MERP reference supplied)")
+            report.append(f"  {key}: SKIPPED (not covered by the final-row check)")
             continue
         if key not in ref["tables"]:
             raise ValidationError(
@@ -150,7 +173,9 @@ def write_csv(tables: dict) -> None:
                     cname,
                     armour,
                     t["hit_threshold"],
+                    t["damage_origin"],
                     t["multiplier"],
+                    t["quadratic"],
                     t["base_crit_a"],
                     t["crit_interval"],
                 ]

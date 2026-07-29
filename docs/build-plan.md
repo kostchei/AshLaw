@@ -91,6 +91,8 @@ These are cheap now and extremely expensive at M4. Each should get an ADR in `do
 
 ### 2.1 Integer world coordinates
 
+Decision record: [ADR 0001](adr/0001-integer-world-coordinates.md).
+
 World position is `int32` in **world units**, with `1 tile = 256 units` and `1 vertical
 level = 8 units` (tune the constants, keep them powers of two). Velocities are
 units-per-tick. No floats in `Ash.Sim` — anywhere.
@@ -154,6 +156,8 @@ exist, and code that wants one must ask for its root container's position explic
 Resisting the temptation to keep a stale `x,y,z` "for convenience" is the whole point.
 
 ### 2.5 Depth sorting — the highest-risk subsystem
+
+Decision record: [ADR 0002](adr/0002-volume-graph-depth-sorting.md).
 
 The U8 sort predicate operates on `SortItem` volumes:
 
@@ -237,6 +241,8 @@ covers most of GFX-003/005 and UI-012 for free. **Write the test anyway** at M1:
 `ScreenToLogical(LogicalToScreen(p)) == p` at 1×, 2×, 3×, 4×, fullscreen, and windowed.
 
 ### 2.9 Scripting host
+
+Decision record: [ADR 0003](adr/0003-moonsharp-object-scripting.md).
 
 **MoonSharp** (pure-C# Lua, no native dependency, sandboxable) for object scripts.
 
@@ -565,22 +571,21 @@ M0 task 4 stands, generalised: the loader validates JSON against
 `tools/import/merp_reference.json` and throws on any column outside tolerance, and CI
 runs `gen_attack_tables.py --check` to catch a stale CSV.
 
-### 5.1a Unvalidated attack tables — blocks M6 tuning
+### 5.1a Unvalidated attack tables — partially resolved 2026-07-29
 
-AT-7 (Spell Bolts), AT-8 (Spell Balls), and `environmental_fall_crush` have no MERP
-source table and are unvalidated. `environmental_fall_crush` carries the same
-reversed-threshold signature as the defect above (Plate 12 → None 6, flat 1.5
-multiplier) and is likely wrong. Supply the source tables, or make an explicit design
-decision to depart from MERP for these three.
+AT-7 (Spell Bolts) and AT-8 (Spell Balls) are now transcribed and validated across
+their usable ranges in `docs/reference/merp-attack-tables.csv`; the reproducible
+full-shape check is `tools/import/analyze_attack_table_shape.py`.
+`environmental_fall_crush` still has no source table and remains unvalidated.
 
-### 5.1b Worked example in `combat_engine_rules.md` §5 Scenario 2 — blocks M0 fixtures
+### 5.1b Worked example in `combat_engine_rules.md` §5 Scenario 2 — RESOLVED 2026-07-29
 
-The "Giant Squid Tentacle vs Leather" example uses threshold 8, multiplier 1.8, base
-crit 17, interval 2 — a combination that matches **no** table in the package. It quotes
-a Grapple result, but AT-6 Leather is 13/1.6/20/2.5, which yields 14 hits and Tier A
-rather than the stated 25 hits and Tier C. This predates the AT-3/AT-4 correction and
-was not introduced by it. Since the build plan makes this an M0 acceptance fixture,
-either the example or the intended table needs a decision before it can be encoded.
+The "Giant Squid Tentacle vs Leather" example used threshold 8, multiplier 1.8, base
+crit 17, interval 2 — a combination matching **no** table in the package. It has been
+explicitly retired in the rulebook and is not an acceptance fixture. The rulebook now
+shows the likely intended AT-6 Leather calculation using the fitted curve
+(Hit 14, Origin 12, Linear 0.553, Quadratic 0.056), yielding 11 hits,
+Tier A, index 7 and the authoritative CT-4 CSV outcome.
 
 ### 5.1d MERP → d20 conversion — RESOLVED 2026-07-28
 
@@ -604,11 +609,10 @@ Three MERP mechanics do not survive the conversion. All three are deliberate:
 | **Weapon fumbles** (`UM 01-08 Possible Fumble`, `UM 01-02 Attack Failure` on AT-5/AT-6) | **Not implemented.** No weapon fumble mechanic | Only the natural-1 spell mishap remains. A missed swing is just a miss |
 | **Independent d100 critical roll** | Replaced by single-roll indexing, `raw_d20 % 10` | Verified non-issue: across all tables and a realistic modifier range, all 10 trauma indices reach all 5 severity tiers (50/50 combinations per table). Coupling only persists within a single frozen matchup, and Tier E saturating at 4+ means several raw rolls reach E at different indices |
 
-The linear fit is anchored at the high end, where MERP's curve is straight. MERP is
-convex at the low end, so glancing blows land slightly harder here than in the source —
-most visibly against unarmoured targets, where AT-1's fitted threshold implies MERP 60
-against an actual first non-zero result at 76-80. Accuracy is where it matters: crits,
-lethality, and death.
+The current fit is measured across every integer d20-scale net result, not only the
+final row. Linear curves are used where normalized RMSE is at most 5%; seven AT-5/AT-6
+columns use a small quadratic term to retain their convex shape. Hit threshold and
+damage-curve origin are separate, so first damage and high-end slope no longer compete.
 
 Granularity, not variance, is what the conversion costs. A d20 spans MERP 5-100 in
 5-point steps, so die swing is preserved but the smallest resolvable step is 5 MERP

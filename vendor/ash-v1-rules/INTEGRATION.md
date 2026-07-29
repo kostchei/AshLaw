@@ -32,7 +32,9 @@ Net Roll = raw d20 + Attack Modifier - Defense Modifier
 The selected attack category and target armor determine:
 
 - hit threshold;
+- damage-curve origin;
 - concussion-damage multiplier;
+- quadratic damage coefficient (zero for a linear curve);
 - base critical threshold;
 - critical interval;
 - associated critical table.

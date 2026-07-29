@@ -74,13 +74,30 @@ generated from `combat_system_data.json` by `tools/import/gen_attack_tables.py`,
 also validates the fit against `tools/import/merp_reference.json`. Do not edit the CSV
 directly; run the generator. This is what prevents the two files diverging again.
 
-### Known-unvalidated tables
+### Known-unvalidated table
 
-No MERP source table was supplied for AT-7 (Spell Bolts), AT-8 (Spell Balls), or
-`environmental_fall_crush`, so none of the three was validated. `environmental_fall_crush`
-carries the same reversed-threshold signature as the AT-3/AT-4 defect (Plate 12,
-Chain 10, Leather 8, None 6) and should be treated as suspect until checked against a
-source table.
+`environmental_fall_crush` has no supplied source table. It carries the same
+reversed-threshold signature as the earlier AT-3/AT-4 defect (Plate 12, Chain 10,
+Leather 8, None 6) and should be treated as suspect until checked against a source.
+
+### 2026-07-29 — full AT-1 through AT-8 chart transcription and curve fit
+
+The supplied BMP charts were transcribed to
+`docs/reference/merp-attack-tables.csv`. AT-1 through AT-8 are now checked at every
+integer d20-scale net result by `tools/import/analyze_attack_table_shape.py`.
+
+The damage contract gained separate `damage_origin` and `quadratic` fields. A linear
+curve is retained where it meets the 5% normalized-RMSE target; seven AT-5/AT-6
+columns use a small quadratic term. All configured AT-1 through AT-8 columns pass.
+AT-8 open-ended-up rows 97–100 are retained as reference data but excluded from the
+fit by design.
+
+### 2026-07-29 — inconsistent squid worked example retired
+
+`rules/combat_engine_rules.md` §5 Scenario 2 quoted attack parameters and trauma text
+that exist in no runtime table. The scenario is now explicitly marked retired and must
+not be used as a fixture. A corrected illustration using the likely intended AT-6
+Leather row and the authoritative CT-4 CSV outcome is recorded in its place.
 
 ## Excluded artifacts
 
