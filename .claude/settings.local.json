@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "PowerShell($g = Get-Command godot -ErrorAction SilentlyContinue; if \\($g\\) { \"godot: $\\($g.Source\\)\" } else { \"godot: not on PATH\" }; $d = Get-Command dotnet -ErrorAction SilentlyContinue; if \\($d\\) { \"dotnet: $\\(dotnet --version\\)\" } else { \"dotnet: none\" }; $p = Get-Command python -ErrorAction SilentlyContinue; if \\($p\\) { \"python: $\\(python --version\\)\" } else { \"python: none\" }; $git = Get-Command git -ErrorAction SilentlyContinue; if \\($git\\) { \"git: $\\(git --version\\)\" } else { \"git: none\" })",
+      "Bash(python tools/import/gen_attack_tables.py)",
+      "Bash(python tools/import/gen_attack_tables.py --check)",
+      "Bash(echo \"=== exit: $? ===\")",
+      "Bash(python -)"
+    ]
+  }
+}

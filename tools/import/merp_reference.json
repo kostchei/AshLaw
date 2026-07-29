@@ -1,0 +1,51 @@
+{
+  "_comment": [
+    "Reference data points transcribed from the published MERP attack tables",
+    "(AT-1 through AT-6), used to validate the d20 re-fit in",
+    "vendor/ash-v1-rules/data/combat_system_data.json.",
+    "",
+    "MERP tables are d100-based, rows 01-150. The d20 re-fit maps MERP roll -> net",
+    "roll as net_roll = merp_roll / 5, so the final table row (146-150) corresponds",
+    "to net roll 30. 'max_hits' below is the damage value in that final row.",
+    "",
+    "MERP has FIVE armour columns: Plate, Chain, Leather-Rigid, Leather-Soft, None.",
+    "The engine models FOUR (Plate, Chain, Leather, None), collapsing the two leather",
+    "columns. The collapse used is the arithmetic mean of rigid and soft; see",
+    "docs/adr/0004-armour-column-collapse.md. Both source columns are retained here so",
+    "the collapse can be revisited without re-reading the books.",
+    "",
+    "AT-7, AT-8 and environmental_fall_crush have no reference data because no source",
+    "table was supplied for them. They are NOT validated. Do not assume they are correct.",
+    "",
+    "Critical thresholds (base_crit_a, crit_interval) are NOT validated here. Only the",
+    "damage curve is. Transcribing first-crit rows from the supplied images was not",
+    "reliable enough to assert; add them when the books are to hand."
+  ],
+  "net_roll_at_final_row": 30,
+  "tolerance_hits": 2,
+  "tables": {
+    "at_1_1_handed_slashing": {
+      "max_hits": { "Plate": 12, "Chain": 18, "Leather_Rigid": 22, "Leather_Soft": 25, "None": 30 }
+    },
+    "at_2_1_handed_concussion": {
+      "max_hits": { "Plate": 16, "Chain": 22, "Leather_Rigid": 20, "Leather_Soft": 20, "None": 23 }
+    },
+    "at_3_2_handed_weapons": {
+      "max_hits": { "Plate": 22, "Chain": 33, "Leather_Rigid": 40, "Leather_Soft": 43, "None": 48 }
+    },
+    "at_4_missile_weapons": {
+      "max_hits": { "Plate": 15, "Chain": 25, "Leather_Rigid": 26, "Leather_Soft": 26, "None": 27 }
+    },
+    "at_5_tooth_and_claw": {
+      "max_hits": { "Plate": 24, "Chain": 27, "Leather_Rigid": 32, "Leather_Soft": 36, "None": 40 }
+    },
+    "at_6_grappling_unbalancing": {
+      "max_hits": { "Plate": 18, "Chain": 23, "Leather_Rigid": 27, "Leather_Soft": 30, "None": 33 }
+    }
+  },
+  "unvalidated": [
+    "at_7_spell_bolts",
+    "at_8_spell_balls",
+    "environmental_fall_crush"
+  ]
+}

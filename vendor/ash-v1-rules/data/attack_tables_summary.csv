@@ -1,0 +1,37 @@
+Category_ID,Category_Name,Armor_Type,Hit_Threshold,Multiplier,Base_Crit_A,Crit_Interval
+AT-1,1-Handed Slashing,Plate,8,0.55,23,2
+AT-1,1-Handed Slashing,Chain,10,0.9,21,2
+AT-1,1-Handed Slashing,Leather,12,1.3,18,2
+AT-1,1-Handed Slashing,None,12,1.65,17,2
+AT-2,1-Handed Concussion,Plate,7,0.7,22,2
+AT-2,1-Handed Concussion,Chain,8,1.0,20,2
+AT-2,1-Handed Concussion,Leather,12,1.1,18,2
+AT-2,1-Handed Concussion,None,13,1.35,19,2
+AT-3,2-Handed Weapons & Polearms,Plate,10,1.1,22,2
+AT-3,2-Handed Weapons & Polearms,Chain,12,1.8,20,2
+AT-3,2-Handed Weapons & Polearms,Leather,14,2.6,17,2
+AT-3,2-Handed Weapons & Polearms,None,15,3.2,17,2
+AT-4,Missile Weapons,Plate,14,1.0,22,2
+AT-4,Missile Weapons,Chain,15,1.6,20,2
+AT-4,Missile Weapons,Leather,15,1.7,18,2
+AT-4,Missile Weapons,None,18,2.2,19,2
+AT-5,Tooth & Claw,Plate,10,1.2,21,2
+AT-5,Tooth & Claw,Chain,11,1.4,20,2
+AT-5,Tooth & Claw,Leather,11,1.8,18,2
+AT-5,Tooth & Claw,None,9,1.9,16,2
+AT-6,Grappling & Unbalancing,Plate,11,0.9,14,3.5
+AT-6,Grappling & Unbalancing,Chain,13,1.3,17,3
+AT-6,Grappling & Unbalancing,Leather,13,1.6,20,2.5
+AT-6,Grappling & Unbalancing,None,12,1.8,21,3
+AT-7,Directed Spell Bolts,Plate,7,0.8,13,4
+AT-7,Directed Spell Bolts,Chain,8,1.0,15,3.5
+AT-7,Directed Spell Bolts,Leather,10,1.3,15,3
+AT-7,Directed Spell Bolts,None,12,2.0,13,2.2
+AT-8,Area-of-Effect Spell Balls,Plate,3,1.3,7,3.5
+AT-8,Area-of-Effect Spell Balls,Chain,4,1.3,8,3.2
+AT-8,Area-of-Effect Spell Balls,Leather,5,1.35,9,3
+AT-8,Area-of-Effect Spell Balls,None,2,1.9,5,3.8
+ENV,Environmental Fall & Impact,Plate,12,1.5,17,3
+ENV,Environmental Fall & Impact,Chain,10,1.5,16,3
+ENV,Environmental Fall & Impact,Leather,8,1.5,15,3
+ENV,Environmental Fall & Impact,None,6,1.5,14,3

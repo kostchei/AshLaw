@@ -1,0 +1,393 @@
+{
+  "combat_system_data": {
+    "description": "By adjusting Thresholds and Multipliers across core MERP Attack Table categories (AT-1 to AT-8), this schema replicates authentic MERP attack resolution without rolling extra dice.",
+    "attack_tables": {
+      "at_1_1_handed_slashing": {
+        "name": "AT-1: 1-Handed Slashing",
+        "examples": [
+          "Longsword",
+          "Broadsword",
+          "Scimitar",
+          "Dagger",
+          "1-Handed Spear"
+        ],
+        "default_crit_type": "slashing",
+        "can_use_shield": true,
+        "description": "Swords and 1-handed bladed weapons. Highly lethal against unarmored targets (high multiplier, low threshold), but energy is deflected by heavy plate armor.",
+        "armor_targets": {
+          "Plate": {
+            "hit_threshold": 8,
+            "multiplier": 0.55,
+            "base_crit_a": 23,
+            "crit_interval": 2
+          },
+          "Chain": {
+            "hit_threshold": 10,
+            "multiplier": 0.9,
+            "base_crit_a": 21,
+            "crit_interval": 2
+          },
+          "Leather": {
+            "hit_threshold": 12,
+            "multiplier": 1.3,
+            "base_crit_a": 18,
+            "crit_interval": 2
+          },
+          "None": {
+            "hit_threshold": 12,
+            "multiplier": 1.65,
+            "base_crit_a": 17,
+            "crit_interval": 2
+          }
+        }
+      },
+      "at_2_1_handed_concussion": {
+        "name": "AT-2: 1-Handed Concussion",
+        "examples": [
+          "Mace",
+          "Warhammer",
+          "Club",
+          "Morningstar"
+        ],
+        "default_crit_type": "concussion",
+        "can_use_shield": true,
+        "description": "Blunt weapons. Flatter damage curve against flesh, but excels at blunt force transfer and generating criticals against plate armor.",
+        "armor_targets": {
+          "Plate": {
+            "hit_threshold": 7,
+            "multiplier": 0.7,
+            "base_crit_a": 22,
+            "crit_interval": 2
+          },
+          "Chain": {
+            "hit_threshold": 8,
+            "multiplier": 1.0,
+            "base_crit_a": 20,
+            "crit_interval": 2
+          },
+          "Leather": {
+            "hit_threshold": 12,
+            "multiplier": 1.1,
+            "base_crit_a": 18,
+            "crit_interval": 2
+          },
+          "None": {
+            "hit_threshold": 13,
+            "multiplier": 1.35,
+            "base_crit_a": 19,
+            "crit_interval": 2
+          }
+        }
+      },
+      "at_3_2_handed_weapons": {
+        "name": "AT-3: 2-Handed Weapons & Polearms",
+        "examples": [
+          "Greataxe",
+          "Greatsword",
+          "Halberd",
+          "Pike",
+          "Mounted Lance",
+          "2-Handed Spear",
+          "Flail",
+          "Quarterstaff"
+        ],
+        "default_crit_type": "slashing_or_puncturing_or_crush",
+        "can_use_shield": false,
+        "description": "Includes all 2-handed weapons, halberds, pikes, and lances. Cannot be used with a shield. The heaviest damage curve in the system: a solid blow registers against plate at a low net roll but is largely absorbed, while an unarmored target takes nothing until a real hit lands and then takes catastrophic damage.",
+        "armor_targets": {
+          "Plate": {
+            "hit_threshold": 10,
+            "multiplier": 1.1,
+            "base_crit_a": 22,
+            "crit_interval": 2
+          },
+          "Chain": {
+            "hit_threshold": 12,
+            "multiplier": 1.8,
+            "base_crit_a": 20,
+            "crit_interval": 2
+          },
+          "Leather": {
+            "hit_threshold": 14,
+            "multiplier": 2.6,
+            "base_crit_a": 17,
+            "crit_interval": 2
+          },
+          "None": {
+            "hit_threshold": 15,
+            "multiplier": 3.2,
+            "base_crit_a": 17,
+            "crit_interval": 2
+          }
+        }
+      },
+      "at_4_missile_weapons": {
+        "name": "AT-4: Missile Weapons",
+        "examples": [
+          "Longbow",
+          "Shortbow",
+          "Heavy Crossbow",
+          "Sling"
+        ],
+        "default_crit_type": "puncturing",
+        "can_use_shield": false,
+        "description": "Ranged attacks. The flattest spread in the system: plate absorbs most of an arrow's energy and caps out low, while soft targets take steadily escalating puncture damage. An unarmored target is hard to score on at all until the shot truly lands.",
+        "armor_targets": {
+          "Plate": {
+            "hit_threshold": 14,
+            "multiplier": 1.0,
+            "base_crit_a": 22,
+            "crit_interval": 2
+          },
+          "Chain": {
+            "hit_threshold": 15,
+            "multiplier": 1.6,
+            "base_crit_a": 20,
+            "crit_interval": 2
+          },
+          "Leather": {
+            "hit_threshold": 15,
+            "multiplier": 1.7,
+            "base_crit_a": 18,
+            "crit_interval": 2
+          },
+          "None": {
+            "hit_threshold": 18,
+            "multiplier": 2.2,
+            "base_crit_a": 19,
+            "crit_interval": 2
+          }
+        }
+      },
+      "at_5_tooth_and_claw": {
+        "name": "AT-5: Tooth & Claw",
+        "examples": [
+          "Bite / Tooth",
+          "Claw / Talon",
+          "Horn / Gore",
+          "Beast Attack"
+        ],
+        "default_crit_type": "tooth_and_claw",
+        "can_use_shield": false,
+        "description": "Natural creature attacks like bites, claws, and horns.",
+        "armor_targets": {
+          "Plate": {
+            "hit_threshold": 10,
+            "multiplier": 1.2,
+            "base_crit_a": 21,
+            "crit_interval": 2
+          },
+          "Chain": {
+            "hit_threshold": 11,
+            "multiplier": 1.4,
+            "base_crit_a": 20,
+            "crit_interval": 2
+          },
+          "Leather": {
+            "hit_threshold": 11,
+            "multiplier": 1.8,
+            "base_crit_a": 18,
+            "crit_interval": 2
+          },
+          "None": {
+            "hit_threshold": 9,
+            "multiplier": 1.9,
+            "base_crit_a": 16,
+            "crit_interval": 2
+          }
+        }
+      },
+      "at_6_grappling_unbalancing": {
+        "name": "AT-6: Grappling & Unbalancing",
+        "examples": [
+          "Grapple / Pin",
+          "Tackle / Trip",
+          "Unarmed Hold",
+          "Constrict / Wrap"
+        ],
+        "default_crit_type": "grapple_unbalance",
+        "can_use_shield": false,
+        "description": "Unarmed holds, tackles, and creature constrictions. Heavy plate armor increases vulnerability to unbalancing, lowering the Base Crit threshold compared to unarmored targets.",
+        "armor_targets": {
+          "Plate": {
+            "hit_threshold": 11,
+            "multiplier": 0.9,
+            "base_crit_a": 14,
+            "crit_interval": 3.5
+          },
+          "Chain": {
+            "hit_threshold": 13,
+            "multiplier": 1.3,
+            "base_crit_a": 17,
+            "crit_interval": 3
+          },
+          "Leather": {
+            "hit_threshold": 13,
+            "multiplier": 1.6,
+            "base_crit_a": 20,
+            "crit_interval": 2.5
+          },
+          "None": {
+            "hit_threshold": 12,
+            "multiplier": 1.8,
+            "base_crit_a": 21,
+            "crit_interval": 3
+          }
+        }
+      },
+      "at_7_spell_bolts": {
+        "name": "AT-7: Directed Spell Bolts",
+        "examples": [
+          "Fire Bolt",
+          "Shock Bolt",
+          "Ice Bolt",
+          "Water Bolt"
+        ],
+        "default_crit_type": "heat_cold_or_electrical",
+        "can_use_shield": false,
+        "description": "Single-target elemental bolt rays. Different bolt types cap at specific MERP thresholds (Shock: Net Roll 18, Water: 22, Ice: 26, Fire & Lightning: 30).",
+        "armor_targets": {
+          "Plate": {
+            "hit_threshold": 7,
+            "multiplier": 0.8,
+            "base_crit_a": 13,
+            "crit_interval": 4
+          },
+          "Chain": {
+            "hit_threshold": 8,
+            "multiplier": 1.0,
+            "base_crit_a": 15,
+            "crit_interval": 3.5
+          },
+          "Leather": {
+            "hit_threshold": 10,
+            "multiplier": 1.3,
+            "base_crit_a": 15,
+            "crit_interval": 3
+          },
+          "None": {
+            "hit_threshold": 12,
+            "multiplier": 2.0,
+            "base_crit_a": 13,
+            "crit_interval": 2.2
+          }
+        }
+      },
+      "at_8_spell_balls": {
+        "name": "AT-8: Area-of-Effect Spell Balls",
+        "examples": [
+          "Fireball",
+          "Coldball",
+          "Lightning Ball"
+        ],
+        "default_crit_type": "heat_cold_or_electrical",
+        "can_use_shield": false,
+        "description": "Area-of-effect elemental explosions. Envelops targets in thermal energy, triggering criticals at low rolls.",
+        "armor_targets": {
+          "Plate": {
+            "hit_threshold": 3,
+            "multiplier": 1.3,
+            "base_crit_a": 7,
+            "crit_interval": 3.5
+          },
+          "Chain": {
+            "hit_threshold": 4,
+            "multiplier": 1.3,
+            "base_crit_a": 8,
+            "crit_interval": 3.2
+          },
+          "Leather": {
+            "hit_threshold": 5,
+            "multiplier": 1.35,
+            "base_crit_a": 9,
+            "crit_interval": 3
+          },
+          "None": {
+            "hit_threshold": 2,
+            "multiplier": 1.9,
+            "base_crit_a": 5,
+            "crit_interval": 3.8
+          }
+        }
+      },
+      "environmental_fall_crush": {
+        "name": "Environmental Fall & Impact",
+        "examples": [
+          "Fall from Height",
+          "Rockslide",
+          "Crushing Trap"
+        ],
+        "default_crit_type": "concussion",
+        "can_use_shield": false,
+        "description": "Kinetic falling damage and heavy environmental crushing.",
+        "armor_targets": {
+          "Plate": {
+            "hit_threshold": 12,
+            "multiplier": 1.5,
+            "base_crit_a": 17,
+            "crit_interval": 3
+          },
+          "Chain": {
+            "hit_threshold": 10,
+            "multiplier": 1.5,
+            "base_crit_a": 16,
+            "crit_interval": 3
+          },
+          "Leather": {
+            "hit_threshold": 8,
+            "multiplier": 1.5,
+            "base_crit_a": 15,
+            "crit_interval": 3
+          },
+          "None": {
+            "hit_threshold": 6,
+            "multiplier": 1.5,
+            "base_crit_a": 14,
+            "crit_interval": 3
+          }
+        }
+      }
+    },
+    "spellcasting_rules": {
+      "attacks_of_opportunity": {
+        "provokes_in_melee": true,
+        "trigger": "Casting spell within melee threat range",
+        "interruption_on_crit_or_stun": true
+      },
+      "armor_restrictions": {
+        "wizard": {
+          "allowed_armor": "none",
+          "allowed_shields": false,
+          "description": "Wizard spells cannot be cast in any armor or with shields."
+        },
+        "druid": {
+          "allowed_armor": "non_metal",
+          "allowed_shields": "wooden_only",
+          "description": "Druid spells cannot be cast in metal armor or with metal shields."
+        },
+        "cleric": {
+          "allowed_armor": "all",
+          "allowed_shields": true,
+          "description": "Clerics may wear any armor subject to deity alignment maintenance."
+        }
+      },
+      "cleric_deity_alignment": {
+        "required_virtues_or_vices_count": 5,
+        "primary_threshold": {
+          "min_score": 15,
+          "required_count": 3
+        },
+        "secondary_threshold": {
+          "min_score": 11,
+          "required_count": 2
+        },
+        "failure_effect": "Loss of divine spellcasting powers until score restoration or atonement."
+      },
+      "mishap_rule": {
+        "trigger": "Natural 1 on d20 spell roll",
+        "effect": "Spell Mishap",
+        "consequence": "Cannot cast that specific spell until the next dawn."
+      }
+    }
+  }
+}
