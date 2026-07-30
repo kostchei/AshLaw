@@ -71,6 +71,7 @@ public sealed class PlayableSliceWorld : IDisposable
         Map = map;
         Physics = new PhysicsSystem(objects, startTick: startTick);
         SaveGate = new WorldSaveGate(objects, Physics, ContentFingerprint);
+        Drag = new DragService(objects);
         LastMessage = "Explore. Open a chest or fight a monster.";
     }
 
@@ -83,6 +84,14 @@ public sealed class PlayableSliceWorld : IDisposable
     public PhysicsSystem Physics { get; }
 
     public WorldSaveGate SaveGate { get; }
+
+    public DragService Drag { get; }
+
+    /// <summary>The object currently held by the cursor, if any.</summary>
+    public WorldObject? HeldObject =>
+        Drag.IsDragging && Objects.TryGet(Drag.State.ObjectId, out var value)
+            ? value
+            : null;
 
     public WorldMap Map { get; }
 
@@ -271,6 +280,33 @@ public sealed class PlayableSliceWorld : IDisposable
             avatars[0].Id,
             loaded.SimulationTick);
     }
+
+    /// <summary>
+    /// Picks an object up with the cursor. Every drag and drop below is the
+    /// Avatar reaching for something, so the same reach and placement rules
+    /// apply as to any other transfer.
+    /// </summary>
+    public SliceActionResult BeginDrag(ObjectId target) =>
+        FromDrag(Drag.Begin(PlayerId, target));
+
+    public SliceActionResult DropDragOnMap(GridPosition cell)
+    {
+        var anchor = MapLocation(cell).Position;
+        return FromDrag(Drag.DropOnMap(DemoMapId, anchor.X, anchor.Y));
+    }
+
+    public SliceActionResult DropDragInBackpack() =>
+        FromDrag(Drag.DropInContainer(PlayerId));
+
+    public SliceActionResult DropDragOnMainHand() =>
+        FromDrag(Drag.DropOnEquipment(PlayerId, EquipmentSlot.MainHand));
+
+    public SliceActionResult DropDragInOpenChest() =>
+        ActiveChest is { } chest
+            ? FromDrag(Drag.DropInContainer(chest.Id))
+            : Finish(false, "No chest is open.");
+
+    public SliceActionResult CancelDrag() => FromDrag(Drag.Cancel());
 
     /// <summary>
     /// Surfaces something that happened outside the world — a save adopted, a
@@ -1002,6 +1038,9 @@ public sealed class PlayableSliceWorld : IDisposable
         LastMessage = message;
         return new SliceActionResult(succeeded, message);
     }
+
+    private SliceActionResult FromDrag(DragResult result) =>
+        Finish(result.Succeeded, result.Message);
 
     private SliceActionResult FinishTransfer(
         ObjectTransferResult transfer,

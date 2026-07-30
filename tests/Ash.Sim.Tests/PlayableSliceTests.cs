@@ -367,6 +367,60 @@ public sealed class PlayableSliceTests
     }
 
     [Fact]
+    public void DraggingMovesLootFromTheWorldToThePackAndBackToTheFloor()
+    {
+        var world = PlayableSliceWorld.CreateDemo();
+        var candlestick = world.GroundItems.Single(
+            item => item.Name == "Brass Candlestick");
+        WalkTo(world, world.GetGridPosition(candlestick.Id).Offset(0, 1));
+
+        Assert.True(world.BeginDrag(candlestick.Id).Succeeded);
+        Assert.Equal(candlestick.Id, world.HeldObject!.Value.Id);
+        Assert.DoesNotContain(
+            world.GroundItems,
+            item => item.Id == candlestick.Id);
+
+        Assert.True(world.DropDragInBackpack().Succeeded);
+        Assert.Null(world.HeldObject);
+        Assert.Contains(
+            world.BackpackItems,
+            item => item.Id == candlestick.Id);
+
+        // Back out of the pack onto the floor beside the Avatar, which lands it
+        // on whatever surface is under that cell.
+        Assert.True(world.BeginDrag(candlestick.Id).Succeeded);
+        var target = world.PlayerPosition.Offset(0, 1);
+        Assert.True(world.DropDragOnMap(target).Succeeded);
+        var dropped = world.Objects.Get(candlestick.Id);
+        Assert.Equal(target, world.GetGridPosition(candlestick.Id));
+        Assert.Equal(MotionState.Resting, dropped.Motion);
+        Assert.False(dropped.Support.IsNone);
+        world.Physics.ValidateInvariants();
+        world.Map.ValidateIndex();
+    }
+
+    [Fact]
+    public void ADragCannotReachAcrossTheRoomAndCancelsBackToTheFloor()
+    {
+        var world = PlayableSliceWorld.CreateDemo();
+        var urn = world.GroundItems.Single(item => item.Name == "Clay Urn");
+        var source = world.Objects.Get(urn.Id);
+
+        var tooFar = world.BeginDrag(urn.Id);
+
+        Assert.False(tooFar.Succeeded);
+        Assert.Contains("reach", tooFar.Message);
+        Assert.Null(world.HeldObject);
+
+        WalkTo(world, world.GetGridPosition(urn.Id).Offset(0, 1));
+        Assert.True(world.BeginDrag(urn.Id).Succeeded);
+        Assert.True(world.CancelDrag().Succeeded);
+
+        Assert.Equal(source, world.Objects.Get(urn.Id));
+        world.Physics.ValidateInvariants();
+    }
+
+    [Fact]
     public void TheDemoWorldSavesAndLoadsWithoutSettlingAgain()
     {
         var directory = Path.Combine(

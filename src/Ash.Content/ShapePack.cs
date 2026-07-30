@@ -250,6 +250,46 @@ public static class ShapePackLoader
         return pack;
     }
 
+    /// <summary>
+    /// Whether the frame, drawn with its origin at
+    /// (<paramref name="originX"/>, <paramref name="originY"/>) in screen
+    /// pixels, has an opaque pixel under (<paramref name="pixelX"/>,
+    /// <paramref name="pixelY"/>).
+    /// </summary>
+    /// <remarks>
+    /// This is the selection half of the same contract the renderer draws with:
+    /// the destination rectangle starts at the origin minus the frame's origin,
+    /// scaled by the shape's render scale. Picking therefore agrees with what
+    /// the player sees, transparent pixels included, and stays integer-only.
+    /// </remarks>
+    public static bool CoversScreenPixel(
+        ShapeDefinition shape,
+        ShapeFrame frame,
+        ReadOnlySpan<byte> maskBytes,
+        int originX,
+        int originY,
+        int pixelX,
+        int pixelY)
+    {
+        ArgumentNullException.ThrowIfNull(shape);
+        ArgumentNullException.ThrowIfNull(frame);
+        var numerator = shape.RenderScaleNumerator;
+        var denominator = shape.RenderScaleDenominator;
+        var left = originX - (frame.OriginX * numerator / denominator);
+        var top = originY - (frame.OriginY * numerator / denominator);
+        var localX = FloorDiv((pixelX - left) * denominator, numerator);
+        var localY = FloorDiv((pixelY - top) * denominator, numerator);
+        return IsOpaque(frame, maskBytes, localX, localY);
+    }
+
+    private static int FloorDiv(int value, int divisor)
+    {
+        var quotient = value / divisor;
+        return value % divisor != 0 && (value < 0) != (divisor < 0)
+            ? quotient - 1
+            : quotient;
+    }
+
     public static bool IsOpaque(
         ShapeFrame frame,
         ReadOnlySpan<byte> maskBytes,

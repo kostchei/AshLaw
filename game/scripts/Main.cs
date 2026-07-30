@@ -49,8 +49,26 @@ public partial class Main : Node2D
     private int _playerDirection = 6;
     private bool _debugOverlayVisible;
     private SmokeRun? _smoke;
+    private IReadOnlyDictionary<string, byte[]> _shapeMasks =
+        new Dictionary<string, byte[]>();
+
+    private readonly List<DrawnSprite> _drawnSprites = [];
+    private int _drawingSortId;
+    private Vector2 _cursor;
 
     private sealed record WorldDrawItem(SortItem SortItem, Action Draw);
+
+    /// <summary>
+    /// A sprite as it was actually drawn this frame, in native pixels. Picking
+    /// reads this rather than recomputing placements, so what the player can
+    /// click is exactly what the renderer put on screen.
+    /// </summary>
+    private readonly record struct DrawnSprite(
+        int SortId,
+        ShapeDefinition Shape,
+        ShapeFrame Frame,
+        int OriginX,
+        int OriginY);
 
     /// <summary>
     /// An automated run: play a scripted input sequence for a fixed number of
@@ -72,6 +90,16 @@ public partial class Main : Node2D
 
         /// <summary>Exercise the save and load commands before reporting.</summary>
         public bool SaveLoad { get; init; }
+
+        /// <summary>Pick a world object up and drop it into the backpack.</summary>
+        public bool DragDrop { get; init; }
+
+        /// <summary>Keep the object in hand, so the report shows a live drag.</summary>
+        public bool HoldDrag { get; init; }
+
+        public string? DragMessage { get; set; }
+
+        public string? DropMessage { get; set; }
 
         public string? SaveMessage { get; set; }
 
@@ -101,6 +129,10 @@ public partial class Main : Node2D
 
         LoadShapePack();
         SnapCameraToPlayer();
+
+        // Until the mouse moves there is no cursor to hang a held object on, so
+        // start it at the middle of the world view rather than at the origin.
+        _cursor = new Vector2(WorldViewportWidth / 2, WorldViewportHeight / 2);
         QueueRedraw();
     }
 
@@ -130,6 +162,12 @@ public partial class Main : Node2D
             Destination = ParseCell(Argument(arguments, "--smoke-goto")),
             SaveLoad = arguments.Contains(
                 "--smoke-save-load",
+                StringComparer.Ordinal),
+            DragDrop = arguments.Contains(
+                "--smoke-drag-drop",
+                StringComparer.Ordinal),
+            HoldDrag = arguments.Contains(
+                "--smoke-hold",
                 StringComparer.Ordinal),
         };
     }
@@ -200,6 +238,32 @@ public partial class Main : Node2D
                     ? _world.MovePlayer(0, 1)
                     : _world.MovePlayer(1, 0);
             }
+        }
+
+        // One full drag gesture through the same service the mouse drives:
+        // pick the nearest movable object up, then drop it into the backpack.
+        if (smoke.DragDrop && smoke.Frame == Math.Max(1, smoke.Frames - 14))
+        {
+            var target = _world.VisibleObjects(radiusTiles: 4)
+                .Where(value =>
+                    value.HasFlag(ObjectFlags.Movable) &&
+                    value.HasFlag(ObjectFlags.Item))
+                .OrderBy(value =>
+                    _world.PlayerPosition.ManhattanDistance(
+                        _world.GetGridPosition(value.Id)))
+                .ThenBy(value => value.Id)
+                .Cast<WorldObject?>()
+                .FirstOrDefault();
+            smoke.DragMessage = target is null
+                ? "no movable item in range"
+                : _world.BeginDrag(target.Value.Id).Message;
+        }
+
+        if (smoke.DragDrop &&
+            !smoke.HoldDrag &&
+            smoke.Frame == Math.Max(2, smoke.Frames - 11))
+        {
+            smoke.DropMessage = _world.DropDragInBackpack().Message;
         }
 
         // Save, then load it back into the running app, through exactly the
@@ -277,6 +341,14 @@ public partial class Main : Node2D
             $"save_pending={_world.SaveGate.IsSavePending}",
         };
 
+        if (smoke.DragDrop)
+        {
+            lines.Add($"drag={smoke.DragMessage}");
+            lines.Add($"drop={smoke.DropMessage}");
+            lines.Add($"held={_world.HeldObject?.Name}");
+            lines.Add($"backpack={_world.BackpackItems.Count}");
+        }
+
         if (smoke.SaveLoad)
         {
             lines.Add($"save={smoke.SaveMessage}");
@@ -343,9 +415,13 @@ public partial class Main : Node2D
         var handled = @event switch
         {
             InputEventKey key when key.Pressed && !key.Echo => HandleKey(key.Keycode),
+            InputEventMouseMotion motion => TrackCursor(motion.Position),
             InputEventMouseButton mouse when
-                mouse.Pressed && mouse.ButtonIndex == MouseButton.Left =>
-                HandleClick(mouse.Position / RenderScale),
+                mouse.ButtonIndex == MouseButton.Left =>
+                HandleLeftButton(mouse.Position, mouse.Pressed),
+            InputEventMouseButton mouse when
+                mouse.Pressed && mouse.ButtonIndex == MouseButton.Right =>
+                HandleRightButton(),
             _ => false,
         };
 
@@ -403,6 +479,12 @@ public partial class Main : Node2D
                 _world.AttackAdjacentMonster();
                 return true;
             case Key.Escape:
+                if (_world.Drag.IsDragging)
+                {
+                    _world.CancelDrag();
+                    return true;
+                }
+
                 _world.ClosePanels();
                 return true;
             case Key.R:
@@ -472,6 +554,126 @@ public partial class Main : Node2D
         _world.Report($"Loaded the world at tick {loaded.Physics.Tick}.");
     }
 
+    private bool TrackCursor(Vector2 nativePosition)
+    {
+        _cursor = nativePosition / RenderScale;
+        return _world.Drag.IsDragging;
+    }
+
+    /// <summary>
+    /// Press picks an object up, release drops it wherever the cursor is. The
+    /// panel clicks keep working unchanged when nothing is in hand.
+    /// </summary>
+    private bool HandleLeftButton(Vector2 nativePosition, bool pressed)
+    {
+        _cursor = nativePosition / RenderScale;
+        if (_world.Drag.IsDragging)
+        {
+            return pressed || DropHeldObject(_cursor);
+        }
+
+        if (!pressed)
+        {
+            return false;
+        }
+
+        return HandleClick(_cursor) || BeginDragAt(nativePosition);
+    }
+
+    private bool HandleRightButton()
+    {
+        if (!_world.Drag.IsDragging)
+        {
+            return false;
+        }
+
+        _world.CancelDrag();
+        return true;
+    }
+
+    /// <summary>
+    /// Picks the topmost object whose sprite covers the cursor. Objects the
+    /// slice still draws procedurally have no mask, so they are picked by the
+    /// cell they stand on instead; both paths go through the same drag service.
+    /// </summary>
+    private bool BeginDragAt(Vector2 nativePosition)
+    {
+        if (nativePosition.X / RenderScale >= WorldViewportWidth)
+        {
+            return false;
+        }
+
+        var byId = _world.VisibleObjects()
+            .ToDictionary(value => SortId(value.Id));
+        for (var index = _drawnSprites.Count - 1; index >= 0; index--)
+        {
+            var sprite = _drawnSprites[index];
+            if (!byId.TryGetValue(sprite.SortId, out var value) ||
+                !_shapeMasks.TryGetValue(sprite.Shape.Id, out var mask))
+            {
+                continue;
+            }
+
+            if (ShapePackLoader.CoversScreenPixel(
+                    sprite.Shape,
+                    sprite.Frame,
+                    mask,
+                    sprite.OriginX,
+                    sprite.OriginY,
+                    Mathf.RoundToInt(nativePosition.X),
+                    Mathf.RoundToInt(nativePosition.Y)) &&
+                value.HasFlag(ObjectFlags.Movable))
+            {
+                return _world.BeginDrag(value.Id).Succeeded;
+            }
+        }
+
+        var cell = CellAt(_cursor);
+        var onCell = _world.VisibleObjects()
+            .Where(value =>
+                value.HasFlag(ObjectFlags.Movable) &&
+                _world.GetGridPosition(value.Id) == cell)
+            .OrderByDescending(value => value.Location.Position.Z)
+            .ThenByDescending(value => value.Id)
+            .ToArray();
+        return onCell.Length > 0 && _world.BeginDrag(onCell[0].Id).Succeeded;
+    }
+
+    private bool DropHeldObject(Vector2 mouse)
+    {
+        if (_world.ActiveChest is not null && mouse.X < WorldViewportWidth)
+        {
+            _world.DropDragInOpenChest();
+            return true;
+        }
+
+        if (mouse.X >= 242)
+        {
+            _ = mouse.Y is >= 129 and < 144
+                ? _world.DropDragOnMainHand()
+                : _world.DropDragInBackpack();
+            return true;
+        }
+
+        _world.DropDragOnMap(CellAt(mouse));
+        return true;
+    }
+
+    /// <summary>
+    /// The ground-plane cell under a compact-pixel position: the exact inverse
+    /// of <see cref="IsoWithoutCamera"/>.
+    /// </summary>
+    private GridPosition CellAt(Vector2 compact)
+    {
+        var x = compact.X - CameraOffset.X - IsoOriginX;
+        var y = compact.Y - CameraOffset.Y - IsoOriginY;
+        var sum = y / TileHalfHeight;
+        var difference = x / TileHalfWidth;
+        return new GridPosition(
+            Mathf.FloorToInt((sum + difference) / 2),
+            Mathf.FloorToInt((sum - difference) / 2));
+    }
+
     private bool HandleClick(Vector2 mouse)
     {
         var chest = _world.ActiveChest;
@@ -538,6 +740,7 @@ public partial class Main : Node2D
             var pack = ShapePackLoader.Parse(manifest.GetAsText());
             var textures = new Dictionary<string, Texture2D>(
                 StringComparer.Ordinal);
+            var masks = new Dictionary<string, byte[]>(StringComparer.Ordinal);
             foreach (var shape in pack.Shapes)
             {
                 var maskPath = $"{ShapePackRoot}/{shape.Mask}";
@@ -577,10 +780,12 @@ public partial class Main : Node2D
                 }
 
                 textures.Add(shape.Id, texture);
+                masks.Add(shape.Id, mask.GetBuffer((long)mask.GetLength()));
             }
 
             _shapePack = pack;
             _shapeTextures = textures;
+            _shapeMasks = masks;
             GD.Print(
                 $"Loaded shape pack '{pack.PackId}' with " +
                 $"{pack.Shapes.Count} shapes.");
@@ -589,6 +794,7 @@ public partial class Main : Node2D
         {
             _shapePack = null;
             _shapeTextures = new Dictionary<string, Texture2D>();
+            _shapeMasks = new Dictionary<string, byte[]>();
             GD.PushError(
                 $"Shape Pack v1 failed to load; using procedural fallbacks. " +
                 exception.Message);
@@ -630,6 +836,15 @@ public partial class Main : Node2D
         var frame = animation.GetFrame(safeDirection, sequence);
         var scale = shape.RenderScale;
         var nativeAt = at * RenderScale;
+
+        // Record the placement so selection can hit-test the same pixels.
+        _drawnSprites.Add(
+            new DrawnSprite(
+                _drawingSortId,
+                shape,
+                frame,
+                Mathf.RoundToInt(nativeAt.X),
+                Mathf.RoundToInt(nativeAt.Y)));
         var destination = new Rect2(
             nativeAt - (new Vector2(frame.OriginX, frame.OriginY) * scale),
             new Vector2(frame.Width, frame.Height) * scale);
@@ -725,15 +940,47 @@ public partial class Main : Node2D
         var drawById = drawItems.ToDictionary(item => item.SortItem.Id);
         var sortResult = VolumeSorter.Sort(
             drawItems.Select(item => item.SortItem).ToArray());
+        _drawnSprites.Clear();
         foreach (var objectId in sortResult.DrawOrder)
         {
+            _drawingSortId = objectId;
             drawById[objectId].Draw();
         }
+
+        _drawingSortId = 0;
+        DrawHeldObject();
 
         if (_debugOverlayVisible)
         {
             DrawDebugOverlay(drawById, sortResult);
         }
+    }
+
+    /// <summary>
+    /// The object on the cursor during a drag. It is genuinely out of the world
+    /// while held — <c>InTransfer</c> in the store — so it is drawn here rather
+    /// than in the sorted pass.
+    /// </summary>
+    private void DrawHeldObject()
+    {
+        if (_world.HeldObject is not { } held)
+        {
+            return;
+        }
+
+        var at = _cursor + new Vector2(0, -2);
+        if (!DrawShape(held.ShapeId, "power", direction: 0, at, fixedSequence: 0))
+        {
+            DrawColoredPolygon(
+                Diamond(at, 4, 2, close: false),
+                new Color("e0b45a"));
+        }
+
+        DrawText(
+            _cursor + new Vector2(6, 4),
+            Shorten(held.Name, 14),
+            6,
+            Highlight);
     }
 
     private void DrawDebugOverlay(

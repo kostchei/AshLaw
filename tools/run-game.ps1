@@ -50,6 +50,13 @@ param(
     # Exercise the in-game save and load commands during the run.
     [switch]$SaveLoad,
 
+    # Pick an object up and drop it into the backpack during the run.
+    [switch]$DragDrop,
+
+    # With -DragDrop, keep the object in hand instead of dropping it, so a
+    # screenshot shows a live drag.
+    [switch]$Hold,
+
     # Hand the game to a human: no smoke run, no timeout, no reaping.
     [switch]$Interactive,
 
@@ -166,6 +173,8 @@ if ($Screenshot) { $godotArgs += "--screenshot=$screenshotPath" }
 if ($Goto) { $godotArgs += "--smoke-goto=$Goto" }
 if ($DebugOverlay) { $godotArgs += "--debug-overlay" }
 if ($SaveLoad) { $godotArgs += "--smoke-save-load" }
+if ($DragDrop) { $godotArgs += "--smoke-drag-drop" }
+if ($Hold) { $godotArgs += "--smoke-hold" }
 
 Write-Host "=== Running $(if ($Windowed) { 'windowed' } else { 'headless' }) smoke run ($Frames frames)"
 $process = Start-Process -FilePath $godot -ArgumentList $godotArgs -PassThru -NoNewWindow `
@@ -234,6 +243,13 @@ if (-not (Test-Path $reportPath)) {
         $loadLine = ($report | Where-Object { $_ -like "load=*" }) -replace "^load=", ""
         if ($loadLine -notlike "Loaded the world*") {
             $failures += "the in-game load did not adopt the save: '$loadLine'"
+        }
+    }
+
+    if ($DragDrop -and -not $Hold) {
+        $dropLine = ($report | Where-Object { $_ -like "drop=*" }) -replace "^drop=", ""
+        if ($dropLine -notlike "Put * in *") {
+            $failures += "the in-game drag did not complete: '$dropLine'"
         }
     }
 

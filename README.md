@@ -110,6 +110,7 @@ variants:
 pwsh ./tools/run-game.ps1 -Screenshot -Goto 32,5   # walk to a cell, save a PNG
 pwsh ./tools/run-game.ps1 -DebugOverlay -Screenshot # with the F3 overlay on
 pwsh ./tools/run-game.ps1 -SaveLoad                 # exercise F5 save and F9 load
+pwsh ./tools/run-game.ps1 -DragDrop                 # pick an object up and stow it
 pwsh ./tools/run-game.ps1 -Interactive              # just play it
 ```
 

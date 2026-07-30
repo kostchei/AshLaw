@@ -13,7 +13,7 @@ The objective is a persistent physical world in which objects collide, rest on
 terrain or other objects, fall when support disappears, and reload without
 changing identity or state.
 
-**Implementation status (2026-07-30):** checkpoints 1 to 4 are complete.
+**Implementation status (2026-07-30):** checkpoints 1 to 5 are complete.
 `WorldMap` owns terrain and a deterministic footprint-bucket/anchor index; store
 commits rebuild one synchronous revision. `WorldMap.ValidatePlacement` is the one
 physical placement contract, `ObjectTransferService` runs it as a validation
@@ -60,7 +60,29 @@ Checkpoint 4, object-world Save v1, is complete:
   running one and adopted only once the whole load succeeded; a save that cannot
   be read leaves the session exactly as it was and says why.
 
-Checkpoint 5, direct manipulation, is next.
+Checkpoint 5, direct manipulation, is complete:
+
+- selection picks the topmost sprite whose **mask** covers the cursor, tested
+  against the placements the renderer actually drew that frame rather than a
+  second copy of the projection maths, so what can be clicked is what is on
+  screen. Objects the slice still draws procedurally have no mask and are picked
+  by the cell they stand on;
+- one drag state machine, `DragService`. A held object really is
+  `InTransfer` in the store for the whole gesture: it leaves the spatial index,
+  no query returns it, and the save boundary defers until the gesture ends;
+- world, container and equipment drops all go through the object transaction and
+  the same physical placement contract. A map drop does not take the caller's
+  elevation — the highest support under the point at or below the holder's reach
+  decides it, exactly as gravity would;
+- reach is validated on both ends: anything the holder carries is reachable by
+  definition, anything on a map within two tiles. A refused drop keeps the
+  gesture alive so the player can try somewhere else;
+- cancelling is an undo. The physics state from before the pick-up is captured
+  and restored, and if the source is no longer valid — the floor beneath it
+  turned to rock — the object stays in hand and says so instead of being
+  dropped somewhere nobody asked for.
+
+Checkpoint 6, quantities and inventory rules, is next.
 
 Conventions settled while implementing checkpoints 2 and 3:
 
@@ -96,8 +118,8 @@ speed are already recorded on the landing event.
 | 2. Collision and placement — done | Solid volumes block movement and invalid placement cannot commit |
 | 3. Elevation, support, and gravity — done | Objects stack, retain support, fall, and land deterministically |
 | 4. Object-world Save v1 — done | The complete object world round-trips byte-identically |
-| 5. Direct manipulation — next | Mouse selection and drag/drop use the same transfer and placement contract |
-| 6. Quantities and inventory rules | Stack merge, split, partial transfer, weight, and content restrictions |
+| 5. Direct manipulation — done | Mouse selection and drag/drop use the same transfer and placement contract |
+| 6. Quantities and inventory rules — next | Stack merge, split, partial transfer, weight, and content restrictions |
 
 Checkpoints 1–4 are the immediate object-world milestone. Direct manipulation
 and quantities follow after physical placement and persistence are trustworthy.
