@@ -23,9 +23,10 @@ public partial class Main : Node2D
     private static readonly Color Panel = new("17120f");
     private static readonly Color PanelInset = new("2a211a");
     private static readonly Color PanelEdge = new("a16d35");
-    private static readonly Color Text = new("e6c78c");
-    private static readonly Color MutedText = new("a68159");
+    private static readonly Color Text = new("f0d7a1");
+    private static readonly Color MutedText = new("c6a776");
     private static readonly Color Highlight = new("f0a83c");
+    private static readonly Color TextShadow = new("100c09c0");
 
     private PlayableSliceWorld _world = PlayableSliceWorld.CreateDemo();
 
@@ -779,14 +780,32 @@ public partial class Main : Node2D
 
     private void DrawText(Vector2 at, string value, int size, Color colour)
     {
+        // World geometry is authored at 320x200 and enlarged into the 1280x800
+        // logical viewport. Rasterize glyphs directly at their final size so
+        // the HUD does not enlarge tiny 7 px letters into blocky shapes.
+        DrawSetTransform(Vector2.Zero, rotation: 0, scale: Vector2.One);
+        var nativeAt = at * RenderScale;
+        var nativeSize = Mathf.RoundToInt(size * RenderScale);
         DrawString(
             ThemeDB.FallbackFont,
-            at,
+            nativeAt + new Vector2(2, 2),
             value,
             HorizontalAlignment.Left,
             width: -1,
-            fontSize: size,
+            fontSize: nativeSize,
+            modulate: TextShadow);
+        DrawString(
+            ThemeDB.FallbackFont,
+            nativeAt,
+            value,
+            HorizontalAlignment.Left,
+            width: -1,
+            fontSize: nativeSize,
             modulate: colour);
+        DrawSetTransform(
+            Vector2.Zero,
+            rotation: 0,
+            scale: new Vector2(RenderScale, RenderScale));
     }
 
     private static string Shorten(string value, int length) =>
