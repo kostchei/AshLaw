@@ -32,6 +32,9 @@ public partial class Main : Node2D
     private static readonly Color MutedText = new("c6a776");
     private static readonly Color Highlight = new("f0a83c");
     private static readonly Color TextShadow = new("100c09c0");
+    private static readonly Color DebugFootprint = new("45d7d7d0");
+    private static readonly Color DebugOrigin = new("ff5fa2");
+    private static readonly Color DebugSortOrder = new("ffe36a");
 
     private PlayableSliceWorld _world = PlayableSliceWorld.CreateDemo();
     private ShapePackDefinition? _shapePack;
@@ -39,11 +42,15 @@ public partial class Main : Node2D
         new Dictionary<string, Texture2D>();
     private double _animationElapsedMilliseconds;
     private int _playerDirection = 6;
+    private bool _debugOverlayVisible;
 
     private sealed record WorldDrawItem(SortItem SortItem, Action Draw);
 
     public override void _Ready()
     {
+        _debugOverlayVisible = OS.GetCmdlineUserArgs().Contains(
+            "--debug-overlay",
+            StringComparer.Ordinal);
         LoadShapePack();
         QueueRedraw();
     }
@@ -132,6 +139,9 @@ public partial class Main : Node2D
             case Key.R:
                 _world = PlayableSliceWorld.CreateDemo();
                 _playerDirection = 6;
+                return true;
+            case Key.F3:
+                _debugOverlayVisible = !_debugOverlayVisible;
                 return true;
             default:
                 return false;
@@ -377,6 +387,65 @@ public partial class Main : Node2D
         foreach (var objectId in sortResult.DrawOrder)
         {
             drawById[objectId].Draw();
+        }
+
+        if (_debugOverlayVisible)
+        {
+            DrawDebugOverlay(drawById, sortResult);
+        }
+    }
+
+    private void DrawDebugOverlay(
+        IReadOnlyDictionary<int, WorldDrawItem> drawById,
+        SortResult sortResult)
+    {
+        for (var sortIndex = 0;
+             sortIndex < sortResult.DrawOrder.Count;
+             sortIndex++)
+        {
+            var objectId = sortResult.DrawOrder[sortIndex];
+            var volume = drawById[objectId].SortItem.Volume;
+            var footprint = new[]
+            {
+                WorldToCompact(volume.XMin, volume.YMin, volume.ZMin),
+                WorldToCompact(volume.XMax, volume.YMin, volume.ZMin),
+                WorldToCompact(volume.XMax, volume.YMax, volume.ZMin),
+                WorldToCompact(volume.XMin, volume.YMax, volume.ZMin),
+                WorldToCompact(volume.XMin, volume.YMin, volume.ZMin),
+            };
+            DrawPolyline(footprint, DebugFootprint, width: 0.5f);
+
+            // Shape-frame origins are drawn at their runtime destination:
+            // the projected volume anchor plus the slice's three-pixel foot
+            // offset. Cross-hairs therefore expose a bad imported origin
+            // independently of the sprite's visible alpha.
+            var origin =
+                WorldToCompact(volume.XMax, volume.YMax, volume.ZMin) +
+                new Vector2(0, 3);
+            DrawLine(
+                origin + new Vector2(-2, 0),
+                origin + new Vector2(2, 0),
+                DebugOrigin,
+                width: 0.75f);
+            DrawLine(
+                origin + new Vector2(0, -2),
+                origin + new Vector2(0, 2),
+                DebugOrigin,
+                width: 0.75f);
+            DrawText(
+                origin + new Vector2(2, -2),
+                $"{sortIndex}:{objectId}",
+                size: 5,
+                DebugSortOrder);
+        }
+
+        if (sortResult.Cycles.Count > 0)
+        {
+            DrawText(
+                new Vector2(4, 9),
+                $"SORT CYCLES {sortResult.Cycles.Count}",
+                size: 6,
+                DebugOrigin);
         }
     }
 
@@ -1063,6 +1132,11 @@ public partial class Main : Node2D
         DrawText(new Vector2(246, 65), "F ATTACK", 7, MutedText);
         DrawText(new Vector2(246, 75), "B PACK", 7, MutedText);
         DrawText(new Vector2(246, 85), "R RESET", 7, MutedText);
+        DrawText(
+            new Vector2(246, 95),
+            _debugOverlayVisible ? "F3 DEBUG ON" : "F3 DEBUG",
+            7,
+            _debugOverlayVisible ? DebugSortOrder : MutedText);
 
         if (_world.BackpackOpen && _world.ActiveChest is null)
         {
@@ -1215,6 +1289,20 @@ public partial class Main : Node2D
         new(
             IsoOriginX + ((position.X - position.Y) * TileHalfWidth),
             IsoOriginY + ((position.X + position.Y) * TileHalfHeight));
+
+    private static Vector2 WorldToCompact(int x, int y, int z) =>
+        new(
+            IsoOriginX +
+            ((x - y) /
+             (float)(ObliqueProjection.UnitsPerHorizontalPixel * RenderScale)),
+            IsoOriginY +
+            ((x + y) /
+             (float)(
+                 ObliqueProjection.UnitsPerHorizontalPixel *
+                 RenderScale *
+                 2)) -
+            (z /
+             (float)(ObliqueProjection.UnitsPerVerticalPixel * RenderScale)));
 
     private static Vector2[] Diamond(
         Vector2 centre,

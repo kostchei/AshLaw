@@ -29,6 +29,13 @@ Godot still uses the PNG alpha channel when drawing.
 to `SortItem.IsSprite`, which is Pentagram's Crusader-style always-on-top
 billboard rule and is wrong for Ultima VIII-style world actors.
 
+Press **F3** in the playable client to inspect the metadata in situ. Cyan
+diamonds are the exact ground footprints passed to `VolumeSorter`, magenta
+cross-hairs are rendered frame origins, and yellow labels are
+`draw-order-index:object-id`. The overlay is off by default. Automated captures
+can start with it enabled by placing `--debug-overlay` after Godot's `--`
+user-argument separator.
+
 ## Rebuild the Flare starter pack
 
 Clone `https://github.com/flareteam/flare-game`, check out the revision in

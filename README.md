@@ -31,6 +31,7 @@ The main scene now boots directly into a small playable room:
 - click items to transfer them between an open chest and the backpack;
 - stand next to a monster and press **F** or **Space** to attack;
 - dead monsters leave lootable remains;
+- press **F3** to show exact footprints, sprite origins, and painter sort order;
 - press **R** to reset the demo.
 
 The room now mixes procedural terrain with the first runtime **Shape Pack v1**:
