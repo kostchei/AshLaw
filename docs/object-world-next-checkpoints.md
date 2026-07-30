@@ -26,7 +26,30 @@ and `PhysicsSystem` for support maintenance, gravity, landings, carried
 dependants and the physical invariants. `ObjectTransferService.Execute` now
 commits locations and physics fields in one transaction.
 
-Checkpoint 4, object-world Save v1, is next.
+Checkpoint 4, object-world Save v1, is in progress. Landed so far:
+
+- the canonical format (`ASHW`, format and minimum-reader versions, content
+  fingerprint, tick, current map, payload length and SHA-256) in
+  `ObjectWorldSave`, with an atomic temp-file write that reads the file back
+  before it replaces the destination;
+- exact object-store fidelity through `ObjectStore.Capture` and
+  `ObjectStore.Restore`: every slot including dead ones, their generations, and
+  the free-slot stack order, so handles are never remapped, a stale handle stays
+  stale, and allocation after a load reuses the same slots in the same order;
+- derived caches stay out of the payload — spatial buckets, support back-links,
+  visible-object lists and sort order are rebuilt on load, while the
+  authoritative support *references* are saved.
+
+Still open in checkpoint 4:
+
+- the terrain and map section of the payload, which first needs the decision
+  about whether the demo map is authored data or code (`BuildTerrain` is code
+  today). The format version bumps when that section lands; nothing writes a
+  save it must keep reading yet, so no migration is owed;
+- the save boundary in 4.1: saving only at the end of a completed tick, with no
+  transfer in flight and a deferral when a drag is `InTransfer`;
+- the staged load of 4.4: deserialize into a staging store and map set, resolve
+  every reference, run the invariants, then replace the live world atomically.
 
 Conventions settled while implementing checkpoints 2 and 3:
 
@@ -61,7 +84,7 @@ speed are already recorded on the landing event.
 | 1. Map container and spatial index — done | Authoritative map ownership and shared spatial queries |
 | 2. Collision and placement — done | Solid volumes block movement and invalid placement cannot commit |
 | 3. Elevation, support, and gravity — done | Objects stack, retain support, fall, and land deterministically |
-| 4. Object-world Save v1 — next | The complete object world round-trips byte-identically |
+| 4. Object-world Save v1 — in progress | The complete object world round-trips byte-identically |
 | 5. Direct manipulation | Mouse selection and drag/drop use the same transfer and placement contract |
 | 6. Quantities and inventory rules | Stack merge, split, partial transfer, weight, and content restrictions |
 

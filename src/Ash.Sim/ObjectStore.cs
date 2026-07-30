@@ -369,6 +369,20 @@ public sealed record ObjectStoreCommit(
     IReadOnlyList<ObjectId> ObjectIds);
 
 /// <summary>
+/// One object slot exactly as the store holds it. A dead slot still carries its
+/// generation, which is what makes a handle from before its destruction stale
+/// after a save and load.
+/// </summary>
+public readonly record struct ObjectSlotSnapshot(
+    bool IsAlive,
+    byte Generation,
+    WorldObject? Value);
+
+public sealed record ObjectStoreSnapshot(
+    IReadOnlyList<ObjectSlotSnapshot> Slots,
+    IReadOnlyList<int> FreeSlots);
+
+/// <summary>
 /// Authoritative object storage backed by parallel slot arrays and 32-bit
 /// generational handles.
 /// </summary>
@@ -408,6 +422,92 @@ public sealed class ObjectStore
     public WorldMapSet Maps { get; } = new();
 
     public int Count { get; private set; }
+
+    /// <summary>
+    /// Every slot of this store, live and dead, in slot order, plus the
+    /// free-slot stack in pop order. Dead slots and their generations are part
+    /// of the authoritative state: they are what keeps a stale handle stale and
+    /// future allocation deterministic.
+    /// </summary>
+    public ObjectStoreSnapshot Capture()
+    {
+        var slots = new List<ObjectSlotSnapshot>(_alive.Count);
+        for (var index = 0; index < _alive.Count; index++)
+        {
+            slots.Add(
+                new ObjectSlotSnapshot(
+                    _alive[index],
+                    _generations[index],
+                    _alive[index] ? Snapshot(index) : null));
+        }
+
+        // Stack<int> enumerates top first, which is the order the slots will be
+        // reused in. The reader pushes them back in reverse.
+        return new ObjectStoreSnapshot(slots, _freeSlots.ToArray());
+    }
+
+    /// <summary>
+    /// Rebuilds a store from <paramref name="snapshot"/> with identical handles.
+    /// Nothing is remapped: slot indices, generations, the live/dead pattern and
+    /// the free-slot order are restored exactly, then the invariants are checked.
+    /// </summary>
+    public static ObjectStore Restore(ObjectStoreSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var store = new ObjectStore();
+        var dead = new HashSet<int>();
+        for (var index = 0; index < snapshot.Slots.Count; index++)
+        {
+            var slot = snapshot.Slots[index];
+            store.AllocateSlot();
+            store._generations[index] = slot.Generation;
+            if (!slot.IsAlive)
+            {
+                dead.Add(index);
+                if (slot.Value is not null)
+                {
+                    throw new ArgumentException(
+                        $"Slot {index} is dead but carries an object.");
+                }
+
+                continue;
+            }
+
+            if (slot.Value is not { } value)
+            {
+                throw new ArgumentException(
+                    $"Slot {index} is live but carries no object.");
+            }
+
+            if (value.Id.Index != index ||
+                value.Id.Generation != slot.Generation)
+            {
+                throw new ArgumentException(
+                    $"Object {value.Id} does not belong in slot {index} " +
+                    $"generation {slot.Generation}.");
+            }
+
+            store.WriteSlot(index, value);
+            store.Count++;
+        }
+
+        var free = snapshot.FreeSlots;
+        if (free.Count != dead.Count ||
+            free.Distinct().Count() != free.Count ||
+            free.Any(index => !dead.Contains(index)))
+        {
+            throw new ArgumentException(
+                "The free-slot stack must hold every dead slot exactly once.");
+        }
+
+        for (var index = free.Count - 1; index >= 0; index--)
+        {
+            store._freeSlots.Push(free[index]);
+        }
+
+        store.ValidateInvariants();
+        return store;
+    }
 
     public ObjectId Create(ObjectSpawn spawn)
     {
@@ -1024,6 +1124,31 @@ public sealed class ObjectStore
                     .Distinct()
                     .Order()
                     .ToArray()));
+    }
+
+    private void WriteSlot(int index, WorldObject value)
+    {
+        _alive[index] = true;
+        _typeIds[index] = value.TypeId;
+        _names[index] = value.Name;
+        _shapeIds[index] = value.ShapeId;
+        _frameIds[index] = value.FrameId;
+        _locations[index] = value.Location;
+        _footprints[index] = value.Footprint;
+        _heights[index] = value.Height;
+        _stepHeights[index] = value.StepHeight;
+        _motionStates[index] = value.Motion;
+        _verticalVelocities[index] = value.VerticalVelocity;
+        _supports[index] = value.Support;
+        _flags[index] = value.Flags;
+        _equipmentSlots[index] = value.EquipmentSlots;
+        _qualities[index] = value.Quality;
+        _quantities[index] = value.Quantity;
+        _conditions[index] = value.Condition;
+        _health[index] = value.Health;
+        _maxHealth[index] = value.MaxHealth;
+        _containerCapacities[index] = value.ContainerCapacity;
+        _containerOpen[index] = value.IsContainerOpen;
     }
 
     private WorldObject Snapshot(int index) =>
