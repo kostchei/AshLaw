@@ -80,6 +80,98 @@ public sealed class VolumeSorterTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void PentagramFlatShapeFlagsResolveEqualLevelTies()
+    {
+        var volume = new SortVolume(0, Tile, 0, Tile, 0, 0);
+        var plain = new SortItem(1, volume);
+
+        foreach (var drawnAfter in new[]
+                 {
+                     SortItemFlags.Animated,
+                     SortItemFlags.Translucent,
+                 })
+        {
+            var flagged = new SortItem(2, volume, Flags: drawnAfter);
+            Assert.True(VolumeSorter.Below(plain, flagged));
+            Assert.False(VolumeSorter.Below(flagged, plain));
+        }
+
+        foreach (var drawnBefore in new[]
+                 {
+                     SortItemFlags.Draw,
+                     SortItemFlags.Solid,
+                     SortItemFlags.Occludes,
+                     SortItemFlags.LargeFlatSquare,
+                 })
+        {
+            var flagged = new SortItem(2, volume, Flags: drawnBefore);
+            Assert.True(VolumeSorter.Below(flagged, plain));
+            Assert.False(VolumeSorter.Below(plain, flagged));
+        }
+    }
+
+    [Fact]
+    public void PentagramShapeAndFrameNumbersAreStableFinalTieBreaks()
+    {
+        var volume = new SortVolume(0, Tile, 0, Tile, 0, 64);
+        var lowerShape = new SortItem(1, volume, ShapeNumber: 10, FrameNumber: 7);
+        var higherShape = new SortItem(2, volume, ShapeNumber: 11, FrameNumber: 0);
+        var higherFrame = new SortItem(3, volume, ShapeNumber: 10, FrameNumber: 8);
+
+        Assert.True(VolumeSorter.Below(lowerShape, higherShape));
+        Assert.False(VolumeSorter.Below(higherShape, lowerShape));
+        Assert.True(VolumeSorter.Below(lowerShape, higherFrame));
+        Assert.False(VolumeSorter.Below(higherFrame, lowerShape));
+    }
+
+    [Fact]
+    public void CompletelyCoveredObjectIsCulledByAnOccludingFrontShape()
+    {
+        var volume = new SortVolume(0, Tile, 0, Tile, 0, 64);
+        var hidden = new SortItem(1, volume, ShapeNumber: 10);
+        var wall = new SortItem(
+            2,
+            volume,
+            Flags: SortItemFlags.Occludes,
+            ShapeNumber: 20);
+
+        var result = VolumeSorter.Sort([hidden, wall]);
+
+        Assert.Equal([2], result.DrawOrder);
+        Assert.Equal([1], result.OccludedObjectIds);
+    }
+
+    [Fact]
+    public void PartialCoverDoesNotCullTheObjectBehind()
+    {
+        var hidden = new SortItem(
+            1,
+            new SortVolume(0, Tile, 0, Tile, 0, 64),
+            ShapeNumber: 10);
+        var narrowWall = new SortItem(
+            2,
+            new SortVolume(64, Tile - 64, 64, Tile - 64, 0, 64),
+            Flags: SortItemFlags.Occludes,
+            ShapeNumber: 20);
+
+        var result = VolumeSorter.Sort([hidden, narrowWall]);
+
+        Assert.Equal(2, result.DrawOrder.Count);
+        Assert.Empty(result.OccludedObjectIds);
+    }
+
+    [Fact]
+    public void FixedMetadataDoesNotInventADepthRule()
+    {
+        var volume = new SortVolume(0, Tile, 0, Tile, 0, 64);
+        var dynamicItem = new SortItem(1, volume);
+        var fixedItem = new SortItem(2, volume, Flags: SortItemFlags.Fixed);
+
+        Assert.False(VolumeSorter.Below(dynamicItem, fixedItem));
+        Assert.False(VolumeSorter.Below(fixedItem, dynamicItem));
+    }
+
+    [Fact]
     public void DrawOrderContainsEveryObjectExactlyOnce()
     {
         var items = Enumerable.Range(1, 200)
@@ -91,6 +183,7 @@ public sealed class VolumeSorterTests(ITestOutputHelper output)
         Assert.Equal(items.Length, result.DrawOrder.Count);
         Assert.Equal(items.Length, result.DrawOrder.Distinct().Count());
         Assert.Equal(items.Select(i => i.Id).OrderBy(id => id), result.DrawOrder.OrderBy(id => id));
+        Assert.Empty(result.OccludedObjectIds);
     }
 
     /// <summary>

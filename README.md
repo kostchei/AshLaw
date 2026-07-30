@@ -234,9 +234,9 @@ Two things worth knowing before you rely on a number:
 it commits the project to.
 
 The short version: the specification names Pentagram and ScummVM's Ultima VIII engine as
-the behavioural reference, and this project **ports** from ScummVM rather than
-reimplementing what it already solves. ScummVM is GPL-2.0-or-later, so this project is
-GPLv2 to match. Ported code carries a comment naming the upstream file it came from.
+the behavioural reference. GPLv2-compatible ports come from Pentagram; current ScummVM
+Ultima VIII source is GPLv3-or-later and remains a behavioural reference only. Ported
+code carries a comment naming the upstream file it came from.
 
 Nothing here uses Ultima VIII's own content — no Origin data files are read, the art is
 original, and the rules are an unrelated MERP/AD&D blend. The relationship is one of

@@ -1,5 +1,18 @@
 namespace Ash.Core;
 
+[Flags]
+public enum SortItemFlags
+{
+    None = 0,
+    Animated = 1 << 0,
+    Translucent = 1 << 1,
+    Draw = 1 << 2,
+    Solid = 1 << 3,
+    Occludes = 1 << 4,
+    LargeFlatSquare = 1 << 5,
+    Fixed = 1 << 6,
+}
+
 /// <summary>
 /// The axis-aligned volume a visible object occupies, in world units
 /// (ADR 0001: 1 tile = 256 units, 1 vertical level = 8 units).
@@ -42,11 +55,26 @@ public readonly record struct SortVolume(
 /// Per-shape authored nudge (GFX-055). Higher draws later, i.e. in front.
 /// Applied before geometry, so content can override a bad automatic result.
 /// </param>
+/// <param name="Flags">
+/// Shape metadata used by Pentagram's specialist flat-item and occlusion rules.
+/// </param>
+/// <param name="ShapeNumber">
+/// Stable authored shape number, used near the end of Pentagram's tie-break.
+/// </param>
+/// <param name="FrameNumber">
+/// Stable authored frame number, used as Pentagram's final tie-break.
+/// </param>
 public sealed record SortItem(
     int Id,
     SortVolume Volume,
     bool IsSprite = false,
-    int SortBias = 0);
+    int SortBias = 0,
+    SortItemFlags Flags = SortItemFlags.None,
+    int ShapeNumber = 0,
+    int FrameNumber = 0)
+{
+    public bool HasFlag(SortItemFlags flag) => (Flags & flag) != 0;
+}
 
 /// <summary>
 /// A cycle in the draw-order graph, reported so the map tool can surface it
@@ -97,16 +125,25 @@ public sealed class SortResult
 {
     internal SortResult(
         IReadOnlyList<int> drawOrder,
+        IReadOnlyList<int> occludedObjectIds,
         IReadOnlyList<SortCycleDiagnostic> cycles,
         int comparisons)
     {
         DrawOrder = drawOrder;
+        OccludedObjectIds = occludedObjectIds;
         Cycles = cycles;
         Comparisons = comparisons;
     }
 
     /// <summary>Object ids in painter order: first drawn is furthest back.</summary>
     public IReadOnlyList<int> DrawOrder { get; }
+
+    /// <summary>
+    /// Object ids omitted because a front item marked
+    /// <see cref="SortItemFlags.Occludes"/> completely covers their projected
+    /// volume.
+    /// </summary>
+    public IReadOnlyList<int> OccludedObjectIds { get; }
 
     public IReadOnlyList<SortCycleDiagnostic> Cycles { get; }
 

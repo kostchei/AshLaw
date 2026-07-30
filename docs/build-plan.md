@@ -200,13 +200,13 @@ non-transitive comparator and will happily reorder identical input.
 
 Approach:
 
-1. Port the pairwise `Below(a, b)` predicate from ScummVM's
-   `ultima8/world/sort_item.h` (`SortItem::below`) — it is the behavioural reference the
-   spec names in §18, and it encodes years of special cases (flat items, sprites, fixed
-   vs. dynamic, the "occludes" fast path) that are not worth rediscovering. Porting it is
-   licensed by [ADR 0005](adr/0005-gplv2-and-reuse-over-reimplementation.md): this project
-   is GPLv2, matching ScummVM. Ported code carries an attribution comment naming the
-   upstream file.
+1. Port the pairwise predicate and occlusion test from Pentagram's GPLv2-compatible
+   `world/ItemSorter.cpp`; use current ScummVM's `SortItem::below` as a behavioural
+   reference only because its file is GPLv3-or-later. The Pentagram code carries the
+   specialist flat-item shape flags, stable shape/frame fallback, and the occlusion
+   fast path that are not worth rediscovering. It stores fixed/dynamic metadata but does
+   not invent a depth relation from it. See
+   [ADR 0005](adr/0005-gplv2-and-reuse-over-reimplementation.md).
 2. Build a DAG over the visible set from pairwise comparisons and **topologically sort
    with explicit cycle detection**.
 3. On a detected cycle, break it deterministically on a stable key
@@ -816,16 +816,15 @@ the `uid://` on `Main.cs`, which the same rewrite had produced.
 
 ### 6.5 What M1 should do next
 
-1. Build the playable interaction slice first: a visible controllable character,
-   backpack, lootable chests, and killable monsters.
-2. Port `SortItem::below` from ScummVM when real authored shapes need its special cases,
-   replacing `VolumeSorter.Below` rather than
-   extending it. The current predicate implements the geometric core only — the
-   fixed-vs-dynamic, occludes-fast-path, and shape-flag cases are absent — and it was
-   written from first principles while the licensing question was open. That question is
-   settled: [ADR 0005](adr/0005-gplv2-and-reuse-over-reimplementation.md) licenses this
-   project GPLv2 and makes reuse the preferred route. Should land before M2 authors map
-   content.
-3. Grow the slice into M1/M2 infrastructure as the working game demands: shape resource
-   format, camera, sprite draw pass, object store, containers, and transactional
-   transfers. Palette polish and debug overlays follow playable interaction.
+1. **Done:** the playable interaction slice has a visible controllable character,
+   backpack, lootable chests, killable monsters, corpses, and loot.
+2. **Done:** `VolumeSorter.Below`, flat-shape priorities, and occluder culling are
+   ported from Pentagram's GPLv2-compatible `world/ItemSorter.cpp` at official SVN
+   revision 2560. Current ScummVM's descendant is GPLv3-or-later and was audited but
+   not copied. Pentagram carries `fixed` metadata but does not use it as a depth rule;
+   AshLaw preserves that metadata without inventing a fixed-vs-dynamic ordering.
+   See [ADR 0005](adr/0005-gplv2-and-reuse-over-reimplementation.md).
+3. **Next:** grow the slice into M1/M2 infrastructure as the working game demands:
+   shape resource format, camera, sprite draw pass, object store, containers, and
+   transactional transfers. Palette polish and debug overlays follow playable
+   interaction.

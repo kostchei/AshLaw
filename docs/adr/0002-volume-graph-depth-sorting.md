@@ -14,7 +14,7 @@ pairwise front/behind relationship is not transitive, so using it as a comparato
 The renderer will:
 
 1. derive pairwise ordering from each visible object's footprint and vertical interval,
-   using ScummVM Ultima VIII `SortItem::below` as the behavioral reference;
+   using Pentagram and ScummVM Ultima VIII sorting as the behavioral reference;
 2. represent those relations as a directed graph;
 3. produce draw order with a topological sort;
 4. detect cycles and break them deterministically using
@@ -24,12 +24,13 @@ The renderer will:
 Candidate comparisons are reduced with screen-space buckets. M1 must benchmark 2,000
 visible objects at 60 Hz before this design is considered proven.
 
-**Amended 2026-07-29.** [ADR 0005](0005-gplv2-and-reuse-over-reimplementation.md) licenses
-this project under GPLv2, which makes porting `SortItem::below` directly from ScummVM
-permitted and preferred. The current `VolumeSorter.Below` is a from-scratch geometric
-predicate written while that question was open; it should be replaced by a real port
-carrying an attribution comment. See build plan §6.4 for what it currently omits, and
-§6.4 for the measured performance, which is independent of this.
+**Amended 2026-07-30.** [ADR 0005](0005-gplv2-and-reuse-over-reimplementation.md)
+licenses this project under GPLv2. The compatible source is Pentagram's
+GPL-2.0-or-later `world/ItemSorter.cpp`; current ScummVM's descendant is
+GPL-3.0-or-later and cannot be copied into this GPLv2-only repository.
+`VolumeSorter.Below` and occluder culling now port the Pentagram behavior with an
+attribution comment. The graph, deterministic cycle handling, authored bias, and
+screen-space candidate filtering remain AshLaw code.
 
 ## Consequences
 

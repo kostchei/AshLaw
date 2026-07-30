@@ -1,3 +1,7 @@
+// Depth-order and occlusion portions derived from Pentagram ItemSorter.cpp,
+// Copyright (C) 2003-2004 The Pentagram team, GPL-2.0-or-later.
+// AshLaw is distributed under GPL-2.0-only; see LICENSE and ADR 0005.
+
 namespace Ash.Core;
 
 /// <summary>
@@ -13,15 +17,11 @@ namespace Ash.Core;
 /// an explicit topological sort rather than a comparison sort.
 /// </para>
 /// <para>
-/// <strong>Status: <see cref="Below"/> is due to be replaced, not extended.</strong>
-/// It implements the geometric core only — separation on Z, then Y, then X, with
-/// flat items and sprites handled explicitly — and was derived from first
-/// principles while the project's licensing was undecided. ADR 0005 settled that:
-/// this project is GPLv2, matching ScummVM, so <c>SortItem::below</c> from
-/// <c>ultima8/world/sort_item.h</c> should be ported directly, with an attribution
-/// comment. It encodes special cases this does not have (fixed vs dynamic items,
-/// the "occludes" fast path, several shape-flag exceptions). Port it before M2
-/// authors real map content.
+/// <see cref="Below"/> and the occlusion test are C# ports of Pentagram's
+/// GPLv2-compatible <c>world/ItemSorter.cpp</c> at official SourceForge SVN
+/// revision 2560. See ADR 0005. The current ScummVM descendant is GPLv3-or-later,
+/// so it is a behavioural reference rather than the copied source for this
+/// GPLv2-only repository.
 /// </para>
 /// <para>
 /// The graph construction, cycle handling, determinism and cost characteristics
@@ -65,54 +65,151 @@ public static class VolumeSorter
             return a.SortBias < b.SortBias;
         }
 
-        // Clear vertical separation dominates: lower draws first.
-        if (a.Volume.ZMax <= b.Volume.ZMin)
-        {
-            return true;
-        }
-
-        if (b.Volume.ZMax <= a.Volume.ZMin)
-        {
-            return false;
-        }
-
-        // A flat item at the same level as a solid one is its floor, so it draws
-        // first regardless of footprint.
-        if (a.Volume.IsFlat != b.Volume.IsFlat)
-        {
-            return a.Volume.IsFlat;
-        }
-
-        // Further from the camera draws first. In this projection, greater Y and
-        // greater X are nearer.
-        if (a.Volume.YMax <= b.Volume.YMin)
-        {
-            return true;
-        }
-
-        if (b.Volume.YMax <= a.Volume.YMin)
-        {
-            return false;
-        }
-
-        if (a.Volume.XMax <= b.Volume.XMin)
-        {
-            return true;
-        }
-
-        if (b.Volume.XMax <= a.Volume.XMin)
-        {
-            return false;
-        }
-
-        // Interpenetrating volumes. A sprite does not really occupy its box, so it
-        // draws after whatever it overlaps.
+        // Crusader-style always-on-top sprites are retained as an explicit
+        // extension. Ultima VIII content normally leaves this flag unset.
         if (a.IsSprite != b.IsSprite)
         {
             return !a.IsSprite;
         }
 
-        return false;
+        var av = a.Volume;
+        var bv = b.Volume;
+
+        // Ported from Pentagram world/ItemSorter.cpp, SVN r2560,
+        // SortItem::operator< (GPL-2.0-or-later), adapted from its x/xleft,
+        // y/yfar, z/ztop names to SortVolume min/max extents.
+        if (av.IsFlat && bv.IsFlat)
+        {
+            if (av.ZMax != bv.ZMax)
+            {
+                return av.ZMax < bv.ZMax;
+            }
+
+            if (a.HasFlag(SortItemFlags.Animated) != b.HasFlag(SortItemFlags.Animated))
+            {
+                return !a.HasFlag(SortItemFlags.Animated);
+            }
+
+            if (a.HasFlag(SortItemFlags.Translucent) != b.HasFlag(SortItemFlags.Translucent))
+            {
+                return !a.HasFlag(SortItemFlags.Translucent);
+            }
+
+            if (a.HasFlag(SortItemFlags.Draw) != b.HasFlag(SortItemFlags.Draw))
+            {
+                return a.HasFlag(SortItemFlags.Draw);
+            }
+
+            if (a.HasFlag(SortItemFlags.Solid) != b.HasFlag(SortItemFlags.Solid))
+            {
+                return a.HasFlag(SortItemFlags.Solid);
+            }
+
+            if (a.HasFlag(SortItemFlags.Occludes) != b.HasFlag(SortItemFlags.Occludes))
+            {
+                return a.HasFlag(SortItemFlags.Occludes);
+            }
+
+            if (a.HasFlag(SortItemFlags.LargeFlatSquare) !=
+                b.HasFlag(SortItemFlags.LargeFlatSquare))
+            {
+                return a.HasFlag(SortItemFlags.LargeFlatSquare);
+            }
+        }
+        else
+        {
+            if (av.ZMax <= bv.ZMin)
+            {
+                return true;
+            }
+
+            if (av.ZMin >= bv.ZMax)
+            {
+                return false;
+            }
+        }
+
+        if (av.XMax <= bv.XMin)
+        {
+            return true;
+        }
+
+        if (av.XMin >= bv.XMax)
+        {
+            return false;
+        }
+
+        if (av.YMax <= bv.YMin)
+        {
+            return true;
+        }
+
+        if (av.YMin >= bv.YMax)
+        {
+            return false;
+        }
+
+        if (av.ZMin != bv.ZMin)
+        {
+            return av.ZMin < bv.ZMin;
+        }
+
+        if ((av.ZMax + av.ZMin) / 2 <= bv.ZMin)
+        {
+            return true;
+        }
+
+        if (av.ZMin >= (bv.ZMax + bv.ZMin) / 2)
+        {
+            return false;
+        }
+
+        if ((av.XMax + av.XMin) / 2 <= bv.XMin)
+        {
+            return true;
+        }
+
+        if (av.XMin >= (bv.XMax + bv.XMin) / 2)
+        {
+            return false;
+        }
+
+        if ((av.YMax + av.YMin) / 2 <= bv.YMin)
+        {
+            return true;
+        }
+
+        if (av.YMin >= (bv.YMax + bv.YMin) / 2)
+        {
+            return false;
+        }
+
+        if (av.XMax + av.YMax != bv.XMax + bv.YMax)
+        {
+            return av.XMax + av.YMax < bv.XMax + bv.YMax;
+        }
+
+        if (av.XMin + av.YMin != bv.XMin + bv.YMin)
+        {
+            return av.XMin + av.YMin < bv.XMin + bv.YMin;
+        }
+
+        if (av.XMax != bv.XMax)
+        {
+            return av.XMax < bv.XMax;
+        }
+
+        if (av.YMax != bv.YMax)
+        {
+            return av.YMax < bv.YMax;
+        }
+
+        if (a.ShapeNumber != b.ShapeNumber)
+        {
+            return a.ShapeNumber < b.ShapeNumber;
+        }
+
+        return a.FrameNumber < b.FrameNumber;
     }
 
     public static SortResult Sort(IReadOnlyList<SortItem> items)
@@ -138,11 +235,6 @@ public static class VolumeSorter
         // draw order, is a function of the input set and not of its enumeration
         // order.
         var ordered = items.OrderBy(TieBreakKey, TieBreakComparer.Instance).ToArray();
-        var indexOfId = new Dictionary<int, int>(ordered.Length);
-        for (var index = 0; index < ordered.Length; index++)
-        {
-            indexOfId[ordered[index].Id] = index;
-        }
 
         var successors = new List<int>[ordered.Length];
         var inDegree = new int[ordered.Length];
@@ -157,23 +249,43 @@ public static class VolumeSorter
             rects[index] = ProjectToScreen(ordered[index].Volume);
         }
 
-        var comparisons = 0;
-        foreach (var (left, right) in CandidatePairs(ordered, rects))
+        var pairs = CandidatePairs(ordered, rects);
+        var relations = new List<(int Behind, int Front)>(pairs.Count);
+        var occluded = new bool[ordered.Length];
+        foreach (var (left, right) in pairs)
         {
-            comparisons++;
             var a = ordered[left];
             var b = ordered[right];
 
             if (Below(a, b))
             {
-                successors[left].Add(right);
-                inDegree[right]++;
+                relations.Add((left, right));
+                if (b.HasFlag(SortItemFlags.Occludes) &&
+                    Occludes(b.Volume, a.Volume))
+                {
+                    occluded[left] = true;
+                }
             }
             else if (Below(b, a))
             {
-                successors[right].Add(left);
-                inDegree[left]++;
+                relations.Add((right, left));
+                if (a.HasFlag(SortItemFlags.Occludes) &&
+                    Occludes(a.Volume, b.Volume))
+                {
+                    occluded[right] = true;
+                }
             }
+        }
+
+        foreach (var (behind, front) in relations)
+        {
+            if (occluded[behind] || occluded[front])
+            {
+                continue;
+            }
+
+            successors[behind].Add(front);
+            inDegree[front]++;
         }
 
         var drawOrder = new List<int>(ordered.Length);
@@ -192,6 +304,11 @@ public static class VolumeSorter
 
         for (var index = 0; index < ordered.Length; index++)
         {
+            if (occluded[index])
+            {
+                continue;
+            }
+
             unemitted.Add(index);
             if (inDegree[index] == 0)
             {
@@ -244,7 +361,11 @@ public static class VolumeSorter
             }
         }
 
-        return new SortResult(drawOrder, cycles, comparisons);
+        var occludedObjectIds = ordered
+            .Where((_, index) => occluded[index])
+            .Select(item => item.Id)
+            .ToArray();
+        return new SortResult(drawOrder, occludedObjectIds, cycles, pairs.Count);
     }
 
     /// <summary>
@@ -272,6 +393,62 @@ public static class VolumeSorter
 
         return new ScreenRect(left, right, top, bottom);
     }
+
+    private static bool Occludes(SortVolume front, SortVolume behind)
+    {
+        // Ported from Pentagram world/ItemSorter.cpp, SVN r2560,
+        // SortItem::occludes (GPL-2.0-or-later). Its six half-plane checks
+        // determine whether the projected prism in front completely contains
+        // the one behind.
+        var a = ProjectPrism(front);
+        var b = ProjectPrism(behind);
+
+        var topX = a.TopX - b.TopX;
+        var topY = a.TopY - b.TopY;
+        var bottomX = a.BottomX - b.BottomX;
+        var bottomY = a.BottomY - b.BottomY;
+
+        var topLeft = topX + (topY * 2);
+        var topRight = -topX + (topY * 2);
+        var bottomLeft = bottomX - (bottomY * 2);
+        var bottomRight = -bottomX - (bottomY * 2);
+
+        return
+            a.RightX >= b.RightX &&
+            a.LeftX <= b.LeftX &&
+            topLeft <= 0 &&
+            topRight <= 0 &&
+            bottomLeft <= 0 &&
+            bottomRight <= 0;
+    }
+
+    private static ProjectedPrism ProjectPrism(SortVolume volume)
+    {
+        var left = ObliqueProjection.WorldToScreen(
+            new Vec3i(volume.XMin, volume.YMax, volume.ZMin));
+        var right = ObliqueProjection.WorldToScreen(
+            new Vec3i(volume.XMax, volume.YMin, volume.ZMin));
+        var top = ObliqueProjection.WorldToScreen(
+            new Vec3i(volume.XMin, volume.YMin, volume.ZMax));
+        var bottom = ObliqueProjection.WorldToScreen(
+            new Vec3i(volume.XMax, volume.YMax, volume.ZMin));
+
+        return new ProjectedPrism(
+            left.X,
+            right.X,
+            top.X,
+            top.Y,
+            bottom.X,
+            bottom.Y);
+    }
+
+    private readonly record struct ProjectedPrism(
+        int LeftX,
+        int RightX,
+        int TopX,
+        int TopY,
+        int BottomX,
+        int BottomY);
 
     /// <summary>
     /// Yields only pairs worth comparing. Items are bucketed on a screen-space
