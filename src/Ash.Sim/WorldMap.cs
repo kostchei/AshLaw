@@ -136,6 +136,7 @@ public sealed class WorldMap : IDisposable
     private readonly TerrainCell[] _terrain;
     private readonly Dictionary<(int X, int Y), ObjectId[]> _buckets = [];
     private readonly Dictionary<Vec3i, ObjectId[]> _anchors = [];
+    private readonly Dictionary<ObjectId, ObjectId[]> _supported = [];
     private ObjectId[] _mapObjects = [];
     private bool _disposed;
 
@@ -293,6 +294,18 @@ public sealed class WorldMap : IDisposable
                     $"Solid terrain at ({x}, {y}) blocks " +
                     $"{projected.Name}.");
             }
+
+            // Nothing may sink below the floor of a cell it covers. This is what
+            // makes a raised platform an obstacle rather than a place to embed.
+            if (volume.ZMin < cell.FloorZ &&
+                cell.Flags.HasFlag(TerrainFlags.ProvidesSupport))
+            {
+                return PlacementResult.Reject(
+                    PlacementFailure.TerrainBlocked,
+                    PlacementBlocker.Terrain(x, y),
+                    $"The floor at ({x}, {y}) is above " +
+                    $"{projected.Name}.");
+            }
         }
 
         if (!projected.HasFlag(ObjectFlags.Solid))
@@ -300,9 +313,10 @@ public sealed class WorldMap : IDisposable
             return PlacementResult.Allow($"{projected.Name} fits.");
         }
 
-        foreach (var candidate in ProjectedSolids(bounds, projection))
+        foreach (var candidate in ProjectedObjects(bounds, projection))
         {
             if (candidate.Id == projected.Id ||
+                !candidate.HasFlag(ObjectFlags.Solid) ||
                 !VolumeFor(candidate).Overlaps(volume))
             {
                 continue;
@@ -316,6 +330,86 @@ public sealed class WorldMap : IDisposable
 
         return PlacementResult.Allow($"{projected.Name} fits.");
     }
+
+    /// <summary>
+    /// The last world unit inside an object's footprint, at its anchor corner.
+    /// The v1 support rule is that this point must lie on the supporting face,
+    /// and placement, movement and gravity all use this one definition.
+    /// </summary>
+    public static (int X, int Y) SupportPointOf(WorldObject value)
+    {
+        var position = value.Location.Position;
+        return (checked(position.X - 1), checked(position.Y - 1));
+    }
+
+    public SupportRef FindSupport(WorldObject projected, int atOrBelowZ) =>
+        FindSupport(projected, atOrBelowZ, EmptyProjection);
+
+    /// <summary>
+    /// The highest valid surface at or below <paramref name="atOrBelowZ"/> under
+    /// the object's support point. Ties resolve terrain first, then the lowest
+    /// <see cref="ObjectId"/>, so support never depends on iteration order.
+    /// </summary>
+    public SupportRef FindSupport(
+        WorldObject projected,
+        int atOrBelowZ,
+        IReadOnlyDictionary<ObjectId, ObjectLocation> projection)
+    {
+        ArgumentNullException.ThrowIfNull(projection);
+        if (projected.Location.Kind != LocationKind.OnMap ||
+            projected.Location.MapId != MapId)
+        {
+            throw new InvalidOperationException(
+                $"Object {projected.Id} is not placed on map {MapId}.");
+        }
+
+        var (x, y) = SupportPointOf(projected);
+        var best = SupportRef.None;
+        if (WorldBounds.Contains(x, y))
+        {
+            var cellX = FloorDiv(x, WorldUnitsPerTile);
+            var cellY = FloorDiv(y, WorldUnitsPerTile);
+            var cell = _terrain[(cellY * Width) + cellX];
+            if (cell.Flags.HasFlag(TerrainFlags.ProvidesSupport) &&
+                cell.FloorZ <= atOrBelowZ)
+            {
+                best = SupportRef.Terrain(MapId, cellX, cellY, cell.FloorZ);
+            }
+        }
+
+        var point = new WorldRectangle(x, x + 1, y, y + 1);
+        foreach (var candidate in ProjectedObjects(point, projection))
+        {
+            if (candidate.Id == projected.Id ||
+                !candidate.CanSupport ||
+                !BoundsFor(candidate).Contains(x, y))
+            {
+                continue;
+            }
+
+            var top = checked(
+                candidate.Location.Position.Z + candidate.Height);
+            if (top > atOrBelowZ ||
+                (!best.IsNone && top <= best.TopZ))
+            {
+                continue;
+            }
+
+            best = SupportRef.Object(candidate.Id, top);
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// The objects currently resting on <paramref name="supporter"/>, in
+    /// <see cref="ObjectId"/> order. This is a cache rebuilt from authoritative
+    /// support references, never a second source of truth.
+    /// </summary>
+    public IReadOnlyList<ObjectId> SupportedObjects(ObjectId supporter) =>
+        _supported.TryGetValue(supporter, out var dependants)
+            ? dependants
+            : [];
 
     public IReadOnlyList<WorldObject> QueryAll(
         ObjectFlags requiredFlags = ObjectFlags.None) =>
@@ -464,11 +558,11 @@ public sealed class WorldMap : IDisposable
     }
 
     /// <summary>
-    /// Solid objects whose projected location overlaps <paramref name="bounds"/>,
-    /// in <see cref="ObjectId"/> order. Objects moving in the same transaction
-    /// are considered at their destination, wherever the index still holds them.
+    /// Objects whose projected location overlaps <paramref name="bounds"/>, in
+    /// <see cref="ObjectId"/> order. Objects moving in the same transaction are
+    /// considered at their destination, wherever the index still holds them.
     /// </summary>
-    private IEnumerable<WorldObject> ProjectedSolids(
+    private IEnumerable<WorldObject> ProjectedObjects(
         WorldRectangle bounds,
         IReadOnlyDictionary<ObjectId, ObjectLocation> projection)
     {
@@ -486,11 +580,7 @@ public sealed class WorldMap : IDisposable
                 continue;
             }
 
-            var snapshot = value with { Location = location };
-            if (snapshot.HasFlag(ObjectFlags.Solid))
-            {
-                yield return snapshot;
-            }
+            yield return value with { Location = location };
         }
     }
 
@@ -538,6 +628,30 @@ public sealed class WorldMap : IDisposable
         foreach (var (anchor, ids) in anchors)
         {
             _anchors.Add(anchor, ids.Distinct().Order().ToArray());
+        }
+
+        var supported = new Dictionary<ObjectId, List<ObjectId>>();
+        foreach (var value in values)
+        {
+            if (value.Support.Kind != SupportKind.Object)
+            {
+                continue;
+            }
+
+            var supporter = value.Support.ObjectId;
+            if (!supported.TryGetValue(supporter, out var dependants))
+            {
+                dependants = [];
+                supported.Add(supporter, dependants);
+            }
+
+            dependants.Add(value.Id);
+        }
+
+        _supported.Clear();
+        foreach (var (supporter, dependants) in supported)
+        {
+            _supported.Add(supporter, dependants.Order().ToArray());
         }
 
         _mapObjects = values.Select(value => value.Id).ToArray();

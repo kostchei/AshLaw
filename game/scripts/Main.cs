@@ -48,8 +48,32 @@ public partial class Main : Node2D
     private double _animationElapsedMilliseconds;
     private int _playerDirection = 6;
     private bool _debugOverlayVisible;
+    private SmokeRun? _smoke;
 
     private sealed record WorldDrawItem(SortItem SortItem, Action Draw);
+
+    /// <summary>
+    /// An automated run: play a scripted input sequence for a fixed number of
+    /// frames, write a report of the authoritative world state, then quit.
+    /// This exists because this Godot build does not terminate cleanly on
+    /// Windows, so a caller cannot use the exit code as the verdict; it reads
+    /// the report instead. See tools/run-game.ps1.
+    /// </summary>
+    private sealed class SmokeRun
+    {
+        public required int Frames { get; init; }
+
+        public required string ReportPath { get; init; }
+
+        public string? ScreenshotPath { get; init; }
+
+        /// <summary>Where to walk before reporting, when the run names a cell.</summary>
+        public GridPosition? Destination { get; init; }
+
+        public int Frame { get; set; }
+
+        public int WalkStepsTaken { get; set; }
+    }
 
     public override void _Ready()
     {
@@ -57,6 +81,7 @@ public partial class Main : Node2D
         _debugOverlayVisible = userArguments.Contains(
             "--debug-overlay",
             StringComparer.Ordinal);
+        _smoke = ParseSmokeRun(userArguments);
         if (userArguments.Contains("--backpack-open", StringComparer.Ordinal))
         {
             _world.ToggleBackpack();
@@ -75,11 +100,191 @@ public partial class Main : Node2D
     public override void _Process(double delta)
     {
         _animationElapsedMilliseconds += delta * 1000;
+        AdvanceSmokeRun();
         QueueRedraw();
+    }
+
+    private static SmokeRun? ParseSmokeRun(IReadOnlyList<string> arguments)
+    {
+        if (!arguments.Contains("--smoke-test", StringComparer.Ordinal))
+        {
+            return null;
+        }
+
+        return new SmokeRun
+        {
+            Frames = int.Parse(
+                Argument(arguments, "--smoke-frames") ?? "90",
+                System.Globalization.CultureInfo.InvariantCulture),
+            ReportPath = Argument(arguments, "--smoke-report") ??
+                throw new InvalidOperationException(
+                    "--smoke-test requires --smoke-report=<absolute path>."),
+            ScreenshotPath = Argument(arguments, "--screenshot"),
+            Destination = ParseCell(Argument(arguments, "--smoke-goto")),
+        };
+    }
+
+    private static GridPosition? ParseCell(string? value)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        var parts = value.Split(',');
+        if (parts.Length != 2)
+        {
+            throw new ArgumentException(
+                $"--smoke-goto expects 'x,y' but was '{value}'.");
+        }
+
+        return new GridPosition(
+            int.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture),
+            int.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    private static string? Argument(
+        IReadOnlyList<string> arguments,
+        string name)
+    {
+        var prefix = $"{name}=";
+        foreach (var argument in arguments)
+        {
+            if (argument.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return argument[prefix.Length..];
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Drives the scripted run: a few real moves through the same input path a
+    /// player uses, then one report and a quit.
+    /// </summary>
+    private void AdvanceSmokeRun()
+    {
+        if (_smoke is not { } smoke)
+        {
+            return;
+        }
+
+        smoke.Frame++;
+
+        // Real moves through the same input path a player uses, so movement,
+        // collision, support attachment and drawing all run several times
+        // before the report is taken. Either walk to a named cell — how a
+        // reviewer points the run at the feature they changed — or take a short
+        // default walk.
+        if (smoke.Frame % 2 == 0)
+        {
+            if (smoke.Destination is { } destination)
+            {
+                smoke.WalkStepsTaken += StepToward(destination) ? 1 : 0;
+            }
+            else if (smoke.Frame % 5 == 0 && smoke.WalkStepsTaken < 8)
+            {
+                smoke.WalkStepsTaken++;
+                _ = smoke.WalkStepsTaken % 2 == 0
+                    ? _world.MovePlayer(0, 1)
+                    : _world.MovePlayer(1, 0);
+            }
+        }
+
+        if (smoke.Frame < smoke.Frames)
+        {
+            return;
+        }
+
+        WriteSmokeReport(smoke);
+        _smoke = null;
+        GetTree().Quit();
+    }
+
+    /// <summary>
+    /// One step of a walk toward <paramref name="destination"/>: the column
+    /// first, then the row, which is the order that clears the demo's props.
+    /// Returns whether a step was taken.
+    /// </summary>
+    private bool StepToward(GridPosition destination)
+    {
+        var here = _world.PlayerPosition;
+        if (here.Y != destination.Y)
+        {
+            return _world.MovePlayer(0, here.Y < destination.Y ? 1 : -1)
+                .Succeeded;
+        }
+
+        if (here.X != destination.X)
+        {
+            return _world.MovePlayer(here.X < destination.X ? 1 : -1, 0)
+                .Succeeded;
+        }
+
+        return false;
+    }
+
+    private void WriteSmokeReport(SmokeRun smoke)
+    {
+        var player = _world.Player;
+        var position = player.Location.Position;
+        var drawItems = BuildWorldDrawItems();
+        var sortResult = VolumeSorter.Sort(
+            drawItems.Select(item => item.SortItem).ToArray());
+        var falling = _world.Map.QueryAll()
+            .Count(value => value.Motion == MotionState.Falling);
+        var lines = new List<string>
+        {
+            $"godot={Engine.GetVersionInfo()["string"]}",
+            $"headless={DisplayServer.GetName() == "headless"}",
+            $"frames={smoke.Frame}",
+            $"walk_steps={smoke.WalkStepsTaken}",
+            $"physics_tick={_world.Physics.Tick}",
+            $"player_grid={_world.PlayerPosition.X},{_world.PlayerPosition.Y}",
+            $"player_world={position.X},{position.Y},{position.Z}",
+            $"player_motion={player.Motion}",
+            $"player_support={DescribeSupport(player.Support)}",
+            $"map_revision={_world.Map.Revision}",
+            $"map_objects={_world.Map.IndexedObjectCount}",
+            $"draw_items={drawItems.Count}",
+            $"sort_cycles={sortResult.Cycles.Count}",
+            $"falling_objects={falling}",
+            $"last_message={_world.LastMessage}",
+        };
+
+        if (smoke.ScreenshotPath is { } screenshotPath)
+        {
+            var image = GetViewport().GetTexture()?.GetImage();
+            if (image is null)
+            {
+                lines.Add(
+                    "screenshot_error=the viewport produced no image; a " +
+                    "headless run has no renderer to capture");
+            }
+            else
+            {
+                image.SavePng(screenshotPath);
+                lines.Add($"screenshot={screenshotPath}");
+            }
+        }
+
+        // The invariants are the point of the run: a violation throws here and
+        // the report is never written, which is exactly the failure signal the
+        // caller checks for.
+        _world.Physics.ValidateInvariants();
+        _world.Objects.ValidateInvariants();
+        _world.Map.ValidateIndex();
+        lines.Add("invariants=ok");
+        System.IO.File.WriteAllLines(smoke.ReportPath, lines);
+        GD.Print($"smoke report written to {smoke.ReportPath}");
     }
 
     public override void _PhysicsProcess(double _delta)
     {
+        // The Godot physics step is the simulation's fixed tick: gravity,
+        // support maintenance and landings all advance here, never in _Draw.
+        _world.AdvancePhysics();
         _camera.StepToward(
             CameraTargetForPlayer(),
             CameraPixelsPerPhysicsTick);
@@ -177,6 +382,9 @@ public partial class Main : Node2D
                 return true;
             case Key.F3:
                 _debugOverlayVisible = !_debugOverlayVisible;
+                return true;
+            case Key.T:
+                _world.RemoveTrestleSupport();
                 return true;
             default:
                 return false;
@@ -461,6 +669,7 @@ public partial class Main : Node2D
             $"MAP r{_world.Map.Revision} n{_world.Map.IndexedObjectCount}",
             size: 5,
             DebugSortOrder);
+        DrawPhysicsReadout(_world.Player);
 
         for (var sortIndex = 0;
              sortIndex < sortResult.DrawOrder.Count;
@@ -512,9 +721,44 @@ public partial class Main : Node2D
         }
     }
 
+    /// <summary>
+    /// Collision volume, base and top elevation, motion state and support
+    /// identity for the Avatar, plus the tick the physics system is on.
+    /// </summary>
+    private void DrawPhysicsReadout(WorldObject value)
+    {
+        var volume = WorldMap.VolumeFor(value);
+        DrawText(
+            new Vector2(4, 23),
+            $"TICK {_world.Physics.Tick} " +
+            $"VOL {volume.Horizontal.Width}x{volume.Horizontal.Depth} " +
+            $"Z {volume.ZMin}..{volume.ZMax}",
+            size: 5,
+            DebugSortOrder);
+        DrawText(
+            new Vector2(4, 30),
+            $"{value.Motion.ToString().ToUpperInvariant()} " +
+            $"v{value.VerticalVelocity} ON {DescribeSupport(value.Support)}",
+            size: 5,
+            DebugSortOrder);
+    }
+
+    private string DescribeSupport(SupportRef support) =>
+        support.Kind switch
+        {
+            SupportKind.Terrain =>
+                $"terrain({support.CellX},{support.CellY})@{support.TopZ}",
+            SupportKind.Object =>
+                $"{Shorten(_world.Objects.Get(support.ObjectId).Name, 12)}" +
+                $"@{support.TopZ}",
+            _ => "nothing",
+        };
+
     private void DrawPlayer()
     {
-        var at = Iso(_world.PlayerPosition) + new Vector2(0, 3);
+        var at = Iso(_world.PlayerPosition) +
+            new Vector2(0, 3) +
+            Elevation(_world.Player.Location.Position.Z);
         DrawShadow(at, 7);
 
         if (!DrawShape("avatar.knight", "stance", _playerDirection, at))
@@ -566,7 +810,9 @@ public partial class Main : Node2D
 
     private void DrawChest(WorldObject chest)
     {
-        var at = Iso(_world.GetGridPosition(chest.Id)) + new Vector2(0, 3);
+        var at = Iso(_world.GetGridPosition(chest.Id)) +
+            new Vector2(0, 3) +
+            Elevation(chest.Location.Position.Z);
         var isCorpse = chest.HasFlag(ObjectFlags.Corpse);
         if (isCorpse)
         {
@@ -649,7 +895,9 @@ public partial class Main : Node2D
 
     private void DrawMonster(WorldObject monster)
     {
-        var at = Iso(_world.GetGridPosition(monster.Id)) + new Vector2(0, 3);
+        var at = Iso(_world.GetGridPosition(monster.Id)) +
+            new Vector2(0, 3) +
+            Elevation(monster.Location.Position.Z);
 
         if (monster.ShapeId == "monster.many-eyed")
         {
@@ -742,7 +990,9 @@ public partial class Main : Node2D
 
     private void DrawGroundItem(WorldObject item)
     {
-        var at = Iso(_world.GetGridPosition(item.Id)) + new Vector2(0, 1);
+        var at = Iso(_world.GetGridPosition(item.Id)) +
+            new Vector2(0, 1) +
+            Elevation(item.Location.Position.Z);
         if (DrawShape(
                 item.ShapeId,
                 "power",
@@ -800,7 +1050,14 @@ public partial class Main : Node2D
 
     private void DrawFloorTile(GridPosition position)
     {
-        var at = Iso(position);
+        var terrain = _world.Map.GetTerrain(position.X, position.Y);
+        var ground = Iso(position);
+        var at = ground + Elevation(terrain.FloorZ);
+        if (terrain.FloorZ != 0)
+        {
+            DrawFloorRiser(ground, at);
+        }
+
         Color colour;
         if (IsCarpetTile(position))
         {
@@ -848,11 +1105,65 @@ public partial class Main : Node2D
                 1);
         }
 
-        if (_world.Map.GetTerrain(position.X, position.Y).Flags
-            .HasFlag(TerrainFlags.Solid))
+        if (terrain.Flags.HasFlag(TerrainFlags.Solid))
         {
             DrawSolidTerrainBlock(at);
         }
+    }
+
+    /// <summary>
+    /// The visible side of a cell whose floor is not at zero, so stairs, the
+    /// raised platform and the pit read as elevation rather than as flat paint.
+    /// </summary>
+    private void DrawFloorRiser(Vector2 ground, Vector2 top)
+    {
+        var height = ground.Y - top.Y;
+        var left = top + new Vector2(-TileHalfWidth, 0);
+        var right = top + new Vector2(TileHalfWidth, 0);
+        if (height < 0)
+        {
+            // A sunken cell. What is visible is the inside of the hole: the two
+            // faces away from the camera, running from the surrounding floor
+            // down to this cell. Without them the viewport background shows
+            // through the gap the lowered tile leaves behind.
+            var depth = -height;
+            var back = top + new Vector2(0, -TileHalfHeight);
+            DrawColoredPolygon(
+            [
+                left + new Vector2(0, -depth),
+                back + new Vector2(0, -depth),
+                back,
+                left,
+            ],
+                new Color("332f2b"));
+            DrawColoredPolygon(
+            [
+                back + new Vector2(0, -depth),
+                right + new Vector2(0, -depth),
+                right,
+                back,
+            ],
+                new Color("2a2724"));
+            return;
+        }
+
+        var bottom = top + new Vector2(0, TileHalfHeight);
+        DrawColoredPolygon(
+        [
+            left,
+            bottom,
+            bottom + new Vector2(0, height),
+            left + new Vector2(0, height),
+        ],
+            new Color("4a443d"));
+        DrawColoredPolygon(
+        [
+            bottom,
+            right,
+            right + new Vector2(0, height),
+            bottom + new Vector2(0, height),
+        ],
+            new Color("3e3934"));
     }
 
     /// <summary>
@@ -1024,11 +1335,67 @@ public partial class Main : Node2D
                 () => DrawGroundItem(item)));
         }
 
+        foreach (var prop in visibleObjects.Where(candidate =>
+                     candidate.TypeId.StartsWith(
+                         "prop.",
+                         StringComparison.Ordinal)))
+        {
+            items.Add(CreateObjectDrawItem(
+                prop,
+                shapeNumber: 22,
+                () => DrawProp(prop)));
+        }
+
         items.Add(CreateObjectDrawItem(
             _world.Player,
             shapeNumber: 1,
             DrawPlayer));
         return items;
+    }
+
+    /// <summary>
+    /// Physical props are drawn straight from their authoritative footprint and
+    /// height, so what the collision solver uses is what the player sees.
+    /// </summary>
+    private void DrawProp(WorldObject prop)
+    {
+        var position = prop.Location.Position;
+        var at = Iso(_world.GetGridPosition(prop.Id)) +
+            new Vector2(0, 3) +
+            Elevation(position.Z);
+        var halfWidth = Math.Max(2, prop.Footprint.Width * TileHalfWidth / 256);
+        var halfDepth = Math.Max(1, prop.Footprint.Depth * TileHalfHeight / 256);
+        var height = Math.Max(1, prop.Height / 4);
+        var top = at + new Vector2(0, -height);
+        var left = top + new Vector2(-halfWidth, 0);
+        var bottom = top + new Vector2(0, halfDepth);
+        var right = top + new Vector2(halfWidth, 0);
+        var side = prop.HasFlag(ObjectFlags.Solid)
+            ? new Color("6b563a")
+            : new Color("4f4738");
+        DrawColoredPolygon(
+        [
+            left,
+            bottom,
+            bottom + new Vector2(0, height),
+            left + new Vector2(0, height),
+        ],
+            side);
+        DrawColoredPolygon(
+        [
+            bottom,
+            right,
+            right + new Vector2(0, height),
+            bottom + new Vector2(0, height),
+        ],
+            side.Darkened(0.2f));
+        DrawColoredPolygon(
+            Diamond(top, halfWidth, halfDepth, close: false),
+            side.Lightened(0.18f));
+        DrawPolyline(
+            Diamond(top, halfWidth, halfDepth, close: true),
+            Mortar,
+            1);
     }
 
     private WorldDrawItem CreateObjectDrawItem(
@@ -1052,7 +1419,8 @@ public partial class Main : Node2D
             shape?.SortBias ?? 0,
             shape is null
                 ? SortItemFlags.None
-                : ToSortFlags(shape.Flags));
+                : ToSortFlags(shape.Flags),
+            value.Location.Position.Z);
     }
 
     private static int SortId(ObjectId id) => unchecked((int)id.Value);
@@ -1075,7 +1443,8 @@ public partial class Main : Node2D
         int shapeNumber,
         Action draw,
         int sortBias = 0,
-        SortItemFlags flags = SortItemFlags.None) =>
+        SortItemFlags flags = SortItemFlags.None,
+        int baseZ = 0) =>
         new(
             new SortItem(
                 id,
@@ -1083,7 +1452,8 @@ public partial class Main : Node2D
                     position,
                     footprintWidth,
                     footprintDepth,
-                    height),
+                    height,
+                    baseZ),
                 IsSprite: false,
                 SortBias: sortBias,
                 Flags: flags,
@@ -1094,7 +1464,8 @@ public partial class Main : Node2D
         GridPosition position,
         int footprintWidth,
         int footprintDepth,
-        int height)
+        int height,
+        int baseZ = 0)
     {
         var xMax = position.X * WorldUnitsPerTile;
         var yMax = position.Y * WorldUnitsPerTile;
@@ -1103,9 +1474,16 @@ public partial class Main : Node2D
             xMax,
             yMax - footprintDepth,
             yMax,
-            ZMin: 0,
-            ZMax: height);
+            ZMin: baseZ,
+            ZMax: baseZ + height);
     }
+
+    /// <summary>
+    /// Compact-pixel offset for an elevation. One vertical level is eight world
+    /// units and four world units are one compact pixel, so a level lifts a
+    /// sprite by two compact pixels.
+    /// </summary>
+    private static Vector2 Elevation(int z) => new(0, -(z / 4));
 
     private static SortItemFlags ToSortFlags(ShapeFlags flags)
     {

@@ -18,7 +18,7 @@ public sealed class PlayableSliceTests
                 item.EquipmentSlots == EquipmentSlotMask.MainHand);
         Assert.Equal(4, world.Chests.Count);
         Assert.Equal(4, world.Monsters.Count);
-        Assert.Equal(9, world.Map.IndexedObjectCount);
+        Assert.Equal(20, world.Map.IndexedObjectCount);
         Assert.True(PlayableSliceWorld.MapWidth > 19);
         Assert.True(PlayableSliceWorld.MapHeight > 13);
         Assert.Contains(
@@ -119,11 +119,11 @@ public sealed class PlayableSliceTests
         Assert.True(world.DropFromBackpack(swordIndex).Succeeded);
         Assert.Equal(world.Player.Location, world.Objects.Get(sword.Id).Location);
         Assert.Contains(world.GroundItems, item => item.Id == sword.Id);
-        Assert.Equal(10, world.Map.IndexedObjectCount);
+        Assert.Equal(21, world.Map.IndexedObjectCount);
 
         Assert.True(world.PickUpAtPlayerFeet().Succeeded);
         Assert.Contains(world.BackpackItems, item => item.Id == sword.Id);
-        Assert.Equal(9, world.Map.IndexedObjectCount);
+        Assert.Equal(20, world.Map.IndexedObjectCount);
 
         MoveToFirstChest(world);
         Assert.True(world.ToggleNearestChest().Succeeded);
@@ -263,6 +263,126 @@ public sealed class PlayableSliceTests
 
         world.Objects.ValidateInvariants();
         world.Map.ValidateIndex();
+    }
+
+    [Fact]
+    public void TheAvatarClimbsTheStairsOntoTheRaisedPlatform()
+    {
+        var world = PlayableSliceWorld.CreateDemo();
+        WalkTo(world, new GridPosition(25, 5));
+        Assert.Equal(0, world.Player.Location.Position.Z);
+
+        for (var step = 1; step <= 4; step++)
+        {
+            var climb = world.MovePlayer(1, 0);
+            Assert.True(climb.Succeeded, climb.Message);
+            Assert.Equal(
+                step * PlayableSliceWorld.UnitsPerLevel,
+                world.Player.Location.Position.Z);
+        }
+
+        Assert.True(world.MovePlayer(1, 0).Succeeded);
+        Assert.Equal(
+            PlayableSliceWorld.PlatformZ,
+            world.Player.Location.Position.Z);
+        Assert.Equal(SupportKind.Terrain, world.Player.Support.Kind);
+        world.Physics.ValidateInvariants();
+    }
+
+    [Fact]
+    public void LootOnFurnitureRestsAtTheTopFaceOfWhatHoldsIt()
+    {
+        var world = PlayableSliceWorld.CreateDemo();
+
+        var candlestick = world.GroundItems.Single(
+            item => item.Name == "Brass Candlestick");
+        var table = world.Map.QueryAll().Single(
+            value => value.TypeId == "prop.oak-table");
+
+        Assert.Equal(MotionState.Resting, candlestick.Motion);
+        Assert.Equal(SupportKind.Object, candlestick.Support.Kind);
+        Assert.Equal(table.Id, candlestick.Support.ObjectId);
+        Assert.Equal(
+            table.Location.Position.Z + table.Height,
+            candlestick.Location.Position.Z);
+        Assert.Equal(
+            [candlestick.Id],
+            world.Map.SupportedObjects(table.Id));
+        world.Physics.ValidateInvariants();
+    }
+
+    [Fact]
+    public void RemovingTheTrestleDropsEverythingItHeld()
+    {
+        var world = PlayableSliceWorld.CreateDemo();
+        var urn = world.GroundItems.Single(item => item.Name == "Clay Urn");
+        Assert.True(world.Objects.Get(urn.Id).Location.Position.Z > 0);
+
+        Assert.True(world.RemoveTrestleSupport().Succeeded);
+        for (var tick = 0; tick < 100; tick++)
+        {
+            world.AdvancePhysics();
+            if (world.Objects.Get(urn.Id).Motion == MotionState.Resting)
+            {
+                break;
+            }
+        }
+
+        var landed = world.Objects.Get(urn.Id);
+        Assert.Equal(MotionState.Resting, landed.Motion);
+        Assert.Equal(0, landed.Location.Position.Z);
+        Assert.Equal(SupportKind.Terrain, landed.Support.Kind);
+        world.Physics.ValidateInvariants();
+        world.Map.ValidateIndex();
+    }
+
+    [Fact]
+    public void TheBridgeCarriesTheAvatarAndThePitCatchesTheFall()
+    {
+        var world = PlayableSliceWorld.CreateDemo();
+        WalkTo(
+            world,
+            new GridPosition(
+                PlayableSliceWorld.PitXMin - 1,
+                PlayableSliceWorld.BridgeY));
+
+        Assert.True(world.MovePlayer(1, 0).Succeeded);
+        Assert.Equal(4, world.Player.Location.Position.Z);
+        Assert.Equal(SupportKind.Object, world.Player.Support.Kind);
+
+        Assert.True(world.MovePlayer(0, 1).Succeeded);
+        Assert.Equal(MotionState.Falling, world.Player.Motion);
+
+        for (var tick = 0; tick < 100 &&
+            world.Player.Motion == MotionState.Falling; tick++)
+        {
+            world.AdvancePhysics();
+        }
+
+        Assert.Equal(
+            PlayableSliceWorld.PitFloorZ,
+            world.Player.Location.Position.Z);
+        Assert.Equal(SupportKind.Terrain, world.Player.Support.Kind);
+        world.Physics.ValidateInvariants();
+    }
+
+    // The demo's props and monsters sit on the rows the Avatar starts on, so
+    // the walk clears the column first and then runs along the empty row.
+    private static void WalkTo(PlayableSliceWorld world, GridPosition target)
+    {
+        while (world.PlayerPosition.Y != target.Y)
+        {
+            var step = world.PlayerPosition.Y < target.Y ? 1 : -1;
+            var move = world.MovePlayer(0, step);
+            Assert.True(move.Succeeded, move.Message);
+        }
+
+        while (world.PlayerPosition.X != target.X)
+        {
+            var step = world.PlayerPosition.X < target.X ? 1 : -1;
+            var move = world.MovePlayer(step, 0);
+            Assert.True(move.Succeeded, move.Message);
+        }
     }
 
     private static void MoveToFirstChest(PlayableSliceWorld world)

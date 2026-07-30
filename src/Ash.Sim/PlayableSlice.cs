@@ -25,6 +25,30 @@ public sealed class PlayableSliceWorld
     public const int WorldUnitsPerTile = WorldMap.WorldUnitsPerTile;
     public const int PlayerAttackDamage = 2;
 
+    /// <summary>Eight world units is one Ultima VIII vertical level.</summary>
+    public const int UnitsPerLevel = 8;
+
+    /// <summary>The Avatar climbs one level per step without a jump.</summary>
+    public const int StepHeightUnits = UnitsPerLevel;
+
+    public const int PlatformZ = 4 * UnitsPerLevel;
+    public const int PitFloorZ = -8 * UnitsPerLevel;
+    public const int StairsXMin = 26;
+    public const int StairsXMax = 29;
+    public const int PlatformXMin = 30;
+    public const int PlatformXMax = 34;
+    public const int TerraceYMin = 3;
+    public const int TerraceYMax = 8;
+    public const int PitXMin = 20;
+    public const int PitXMax = 23;
+    public const int PitYMin = 23;
+    public const int PitYMax = 26;
+    public const int BridgeY = 24;
+
+    private const int TableHeight = 40;
+    private const int CrateHeight = 32;
+    private const int BridgeDeckHeight = 4;
+
     private ObjectId _activeChestId = ObjectId.None;
 
     private PlayableSliceWorld(ObjectStore objects, ObjectId playerId)
@@ -39,6 +63,8 @@ public sealed class PlayableSliceWorld
             MapWidth,
             MapHeight);
         BuildTerrain(Map);
+        Physics = new PhysicsSystem(objects);
+        Settle();
         LastMessage = "Explore. Open a chest or fight a monster.";
     }
 
@@ -47,6 +73,8 @@ public sealed class PlayableSliceWorld
     public ObjectTransferService Transfers { get; }
 
     public MovementSolver Movement { get; }
+
+    public PhysicsSystem Physics { get; }
 
     public WorldMap Map { get; }
 
@@ -111,10 +139,12 @@ public sealed class PlayableSliceWorld
             Location = MapLocation(new GridPosition(4, 14)),
             Footprint = new ObjectFootprint(128, 128),
             Height = 64,
+            StepHeight = StepHeightUnits,
             Flags =
                 ObjectFlags.Actor |
                 ObjectFlags.Container |
                 ObjectFlags.Solid |
+                ObjectFlags.AffectedByGravity |
                 ObjectFlags.Visible,
             ContainerCapacity = 12,
             Health = 12,
@@ -187,7 +217,121 @@ public sealed class PlayableSliceWorld
             maxHealth: 8,
             loot: ["Iron Buckle", "Guard Token"]);
 
+        SpawnPhysicsArea(objects);
         return new PlayableSliceWorld(objects, player);
+    }
+
+    /// <summary>
+    /// The physical acceptance area: a table holding loot, a stack of crates, a
+    /// bridge deck over a lower floor, and a trestle whose support the player
+    /// can remove with <see cref="RemoveTrestleSupport"/>.
+    /// </summary>
+    private static void SpawnPhysicsArea(ObjectStore objects)
+    {
+        SpawnProp(
+            objects,
+            "prop.oak-table",
+            "Oak Table",
+            new GridPosition(10, 17),
+            height: TableHeight,
+            gravity: false);
+        SpawnWorldItem(
+            objects,
+            "Brass Candlestick",
+            new GridPosition(10, 17),
+            TableHeight);
+
+        SpawnProp(
+            objects,
+            "prop.crate-lower",
+            "Crate",
+            new GridPosition(12, 19),
+            height: CrateHeight);
+        SpawnProp(
+            objects,
+            "prop.crate-upper",
+            "Stacked Crate",
+            new GridPosition(12, 19),
+            height: CrateHeight,
+            baseZ: CrateHeight);
+        SpawnProp(
+            objects,
+            "prop.crate-side",
+            "Side Crate",
+            new GridPosition(13, 19),
+            height: CrateHeight);
+
+        SpawnProp(
+            objects,
+            "prop.trestle",
+            "Prop Trestle",
+            new GridPosition(9, 20),
+            height: TableHeight);
+        SpawnWorldItem(
+            objects,
+            "Clay Urn",
+            new GridPosition(9, 20),
+            TableHeight);
+
+        for (var x = PitXMin; x <= PitXMax; x++)
+        {
+            SpawnProp(
+                objects,
+                $"prop.bridge-plank-{x}",
+                "Bridge Plank",
+                new GridPosition(x, BridgeY),
+                height: BridgeDeckHeight,
+                gravity: false,
+                solid: false,
+                footprint: new ObjectFootprint(
+                    WorldUnitsPerTile,
+                    WorldUnitsPerTile));
+        }
+    }
+
+    /// <summary>
+    /// Advances one fixed physics tick. The caller owns the tick rate; the
+    /// world only guarantees that each tick is one committed, valid step.
+    /// </summary>
+    public IReadOnlyList<PhysicsEvent> AdvancePhysics()
+    {
+        var result = Physics.Advance();
+        foreach (var landing in result.Events)
+        {
+            if (landing.Kind == PhysicsEventKind.Landed &&
+                landing.ObjectId == PlayerId &&
+                landing.FallDistance > 0)
+            {
+                LastMessage =
+                    $"You land {landing.FallDistance} units below.";
+            }
+        }
+
+        return result.Events;
+    }
+
+    /// <summary>
+    /// Destroys the prop trestle so everything resting on it loses its support.
+    /// This is the demo's support-removal case.
+    /// </summary>
+    public SliceActionResult RemoveTrestleSupport()
+    {
+        var trestle = Map.QueryAll()
+            .Where(value => value.TypeId == "prop.trestle")
+            .Cast<WorldObject?>()
+            .FirstOrDefault();
+        if (trestle is null)
+        {
+            return Finish(false, "The trestle is already gone.");
+        }
+
+        var dependants = Map.SupportedObjects(trestle.Value.Id).Count;
+        Objects.Destroy(trestle.Value.Id);
+        return Finish(
+            true,
+            dependants == 0
+                ? "The trestle collapses."
+                : $"The trestle collapses; {dependants} object(s) fall.");
     }
 
     public IReadOnlyList<WorldObject> ContentsOf(ObjectId container) =>
@@ -234,10 +378,13 @@ public sealed class PlayableSliceWorld
         }
 
         var move = Transfers.Execute(
-            new ObjectTransferRequest(
-                PlayerId,
-                Player.Location,
-                ObjectLocation.OnMap(DemoMapId, sweep.ResolvedPosition)));
+            [
+                new ObjectTransferRequest(
+                    PlayerId,
+                    Player.Location,
+                    ObjectLocation.OnMap(DemoMapId, sweep.ResolvedPosition)),
+            ],
+            [sweep.PhysicsFor(PlayerId)]);
         if (!move.Succeeded)
         {
             return Finish(false, move.Message);
@@ -583,6 +730,61 @@ public sealed class PlayableSliceWorld
         }
     }
 
+    private static void SpawnProp(
+        ObjectStore objects,
+        string typeId,
+        string name,
+        GridPosition position,
+        int height,
+        int baseZ = 0,
+        bool gravity = true,
+        bool solid = true,
+        ObjectFootprint? footprint = null)
+    {
+        var location = MapLocation(position);
+        objects.Create(new ObjectSpawn
+        {
+            TypeId = typeId,
+            Name = name,
+            ShapeId = "container.chest",
+            Location = ObjectLocation.OnMap(
+                DemoMapId,
+                location.Position with { Z = baseZ }),
+            Footprint = footprint ?? new ObjectFootprint(128, 128),
+            Height = height,
+            Flags =
+                ObjectFlags.Visible |
+                ObjectFlags.Movable |
+                (solid ? ObjectFlags.Solid : ObjectFlags.ProvidesSupport) |
+                (gravity ? ObjectFlags.AffectedByGravity : ObjectFlags.None),
+        });
+    }
+
+    private static void SpawnWorldItem(
+        ObjectStore objects,
+        string name,
+        GridPosition position,
+        int baseZ)
+    {
+        var location = MapLocation(position);
+        objects.Create(new ObjectSpawn
+        {
+            TypeId = ItemTypeId(name),
+            Name = name,
+            ShapeId = "loot.generic",
+            Location = ObjectLocation.OnMap(
+                DemoMapId,
+                location.Position with { Z = baseZ }),
+            Footprint = new ObjectFootprint(32, 32),
+            Height = 8,
+            Flags =
+                ObjectFlags.Item |
+                ObjectFlags.Movable |
+                ObjectFlags.AffectedByGravity |
+                ObjectFlags.Visible,
+        });
+    }
+
     private static void SpawnItem(
         ObjectStore objects,
         ObjectId parent,
@@ -646,7 +848,57 @@ public sealed class PlayableSliceWorld
         {
             map.SetTerrain(x, 25, wall);
         }
+
+        // Stairs rising one level per cell into a raised stone platform.
+        for (var y = TerraceYMin; y <= TerraceYMax; y++)
+        {
+            for (var x = StairsXMin; x <= StairsXMax; x++)
+            {
+                map.SetTerrain(
+                    x,
+                    y,
+                    Floor((x - StairsXMin + 1) * UnitsPerLevel));
+            }
+
+            for (var x = PlatformXMin; x <= PlatformXMax; x++)
+            {
+                map.SetTerrain(x, y, Floor(PlatformZ));
+            }
+        }
+
+        // A lower floor objects fall to, crossed by the bridge deck.
+        for (var y = PitYMin; y <= PitYMax; y++)
+        {
+            for (var x = PitXMin; x <= PitXMax; x++)
+            {
+                map.SetTerrain(x, y, Floor(PitFloorZ));
+            }
+        }
     }
+
+    /// <summary>
+    /// Runs the world forward until nothing is falling, so a new demo starts
+    /// from a settled, invariant-checked state instead of mid-air.
+    /// </summary>
+    private void Settle()
+    {
+        const int MaxSettleTicks = 400;
+        for (var tick = 0; tick < MaxSettleTicks; tick++)
+        {
+            Physics.Advance();
+            if (Objects.Enumerate().All(value =>
+                value.Motion == MotionState.Resting))
+            {
+                return;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"The demo world did not settle within {MaxSettleTicks} ticks.");
+    }
+
+    private static TerrainCell Floor(int floorZ) =>
+        new(floorZ, TerrainFlags.Walkable | TerrainFlags.ProvidesSupport);
 
     private static string ItemTypeId(string name) =>
         $"item.{string.Concat(

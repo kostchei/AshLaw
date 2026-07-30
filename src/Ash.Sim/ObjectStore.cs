@@ -209,6 +209,15 @@ public enum ObjectFlags
     Corpse = 1 << 9,
     Item = 1 << 10,
     Trigger = 1 << 11,
+
+    /// <summary>
+    /// A non-solid top face objects still rest on, such as a bridge deck.
+    /// Every <see cref="Solid"/> volume already supports what lands on it, so
+    /// nothing that stops a fall is ever missing a support surface.
+    /// </summary>
+    ProvidesSupport = 1 << 12,
+
+    AffectedByGravity = 1 << 13,
 }
 
 [Flags]
@@ -277,6 +286,12 @@ public sealed record ObjectSpawn
 
     public int Height { get; init; }
 
+    /// <summary>
+    /// How far this object may rise or drop in one step and stay attached to a
+    /// support. Only meaningful for objects that move themselves.
+    /// </summary>
+    public int StepHeight { get; init; }
+
     public ObjectFlags Flags { get; init; } = ObjectFlags.Visible;
 
     public EquipmentSlotMask EquipmentSlots { get; init; }
@@ -303,6 +318,10 @@ public readonly record struct WorldObject(
     ObjectLocation Location,
     ObjectFootprint Footprint,
     int Height,
+    int StepHeight,
+    MotionState Motion,
+    int VerticalVelocity,
+    SupportRef Support,
     ObjectFlags Flags,
     EquipmentSlotMask EquipmentSlots,
     int Quality,
@@ -316,6 +335,14 @@ public readonly record struct WorldObject(
     public bool HasFlag(ObjectFlags flag) => (Flags & flag) != 0;
 
     public bool IsAlive => MaxHealth > 0 && Health > 0;
+
+    /// <summary>
+    /// Whether this object's top face can hold another object. Solid volumes
+    /// stop a fall, so they must also end it; <see cref="ObjectFlags.ProvidesSupport"/>
+    /// adds the same surface to volumes that are not solid.
+    /// </summary>
+    public bool CanSupport =>
+        HasFlag(ObjectFlags.Solid) || HasFlag(ObjectFlags.ProvidesSupport);
 }
 
 public sealed class InvalidObjectIdException : InvalidOperationException
@@ -356,6 +383,10 @@ public sealed class ObjectStore
     private readonly List<ObjectLocation> _locations = [];
     private readonly List<ObjectFootprint> _footprints = [];
     private readonly List<int> _heights = [];
+    private readonly List<int> _stepHeights = [];
+    private readonly List<MotionState> _motionStates = [];
+    private readonly List<int> _verticalVelocities = [];
+    private readonly List<SupportRef> _supports = [];
     private readonly List<ObjectFlags> _flags = [];
     private readonly List<EquipmentSlotMask> _equipmentSlots = [];
     private readonly List<int> _qualities = [];
@@ -394,6 +425,18 @@ public sealed class ObjectStore
         _locations[index] = spawn.Location;
         _footprints[index] = spawn.Footprint;
         _heights[index] = spawn.Height;
+        _stepHeights[index] = spawn.StepHeight;
+
+        // Anything gravity moves enters the world falling: the first physics
+        // tick is what decides where it comes to rest, so no spawn can invent a
+        // support that the support graph never validated.
+        var falls = spawn.Flags.HasFlag(ObjectFlags.AffectedByGravity) &&
+            spawn.Location.Kind == LocationKind.OnMap;
+        _motionStates[index] = falls
+            ? MotionState.Falling
+            : MotionState.Resting;
+        _verticalVelocities[index] = 0;
+        _supports[index] = SupportRef.None;
         _flags[index] = spawn.Flags;
         _equipmentSlots[index] = spawn.EquipmentSlots;
         _qualities[index] = spawn.Quality;
@@ -575,6 +618,9 @@ public sealed class ObjectStore
         _names[index] = null;
         _shapeIds[index] = null;
         _locations[index] = default;
+        _motionStates[index] = MotionState.Resting;
+        _verticalVelocities[index] = 0;
+        _supports[index] = SupportRef.None;
         _flags[index] = ObjectFlags.None;
         _equipmentSlots[index] = EquipmentSlotMask.None;
         _containerOpen[index] = false;
@@ -611,6 +657,35 @@ public sealed class ObjectStore
             {
                 throw new InvalidOperationException(
                     $"Object {id} has invalid quantity or health.");
+            }
+
+            if (_verticalVelocities[index] < 0)
+            {
+                throw new InvalidOperationException(
+                    $"Object {id} has a negative fall speed.");
+            }
+
+            if (_motionStates[index] == MotionState.Falling &&
+                (location.Kind != LocationKind.OnMap ||
+                 !_supports[index].IsNone))
+            {
+                throw new InvalidOperationException(
+                    $"Falling object {id} must be on a map with no support.");
+            }
+
+            if (location.Kind != LocationKind.OnMap &&
+                (!_supports[index].IsNone ||
+                 _verticalVelocities[index] != 0))
+            {
+                throw new InvalidOperationException(
+                    $"Object {id} carries map physics state off the map.");
+            }
+
+            if (_flags[index].HasFlag(ObjectFlags.Fixed) &&
+                _motionStates[index] == MotionState.Falling)
+            {
+                throw new InvalidOperationException(
+                    $"Fixed object {id} cannot be falling.");
             }
 
             var isContainer = _flags[index].HasFlag(ObjectFlags.Container);
@@ -694,6 +769,10 @@ public sealed class ObjectStore
         _locations.Add(default);
         _footprints.Add(default);
         _heights.Add(0);
+        _stepHeights.Add(0);
+        _motionStates.Add(MotionState.Resting);
+        _verticalVelocities.Add(0);
+        _supports.Add(SupportRef.None);
         _flags.Add(ObjectFlags.None);
         _equipmentSlots.Add(EquipmentSlotMask.None);
         _qualities.Add(0);
@@ -721,6 +800,11 @@ public sealed class ObjectStore
         if (spawn.Height < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(spawn.Height));
+        }
+
+        if (spawn.StepHeight < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(spawn.StepHeight));
         }
 
         if (spawn.Location.Kind == LocationKind.OnMap)
@@ -897,18 +981,49 @@ public sealed class ObjectStore
         ObjectId.FromParts(index, _generations[index]);
 
     internal void CommitTransfer(
-        IReadOnlyList<ObjectTransferRequest> requests)
+        IReadOnlyList<ObjectTransferRequest> requests,
+        IReadOnlyList<ObjectPhysicsUpdate> physics)
     {
         foreach (var request in requests)
         {
-            _locations[ResolveSlot(request.ObjectId)] = request.Destination;
+            var index = ResolveSlot(request.ObjectId);
+            _locations[index] = request.Destination;
+
+            // A location change without an explicit physics update still has to
+            // leave the support graph honest: an object that left the map keeps
+            // no support, and one that arrived on a map without a resolved
+            // support falls until the next tick finds one.
+            if (request.Destination.Kind != LocationKind.OnMap)
+            {
+                _motionStates[index] = MotionState.Resting;
+                _verticalVelocities[index] = 0;
+                _supports[index] = SupportRef.None;
+            }
+            else if (_flags[index].HasFlag(ObjectFlags.AffectedByGravity))
+            {
+                _motionStates[index] = MotionState.Falling;
+                _verticalVelocities[index] = 0;
+                _supports[index] = SupportRef.None;
+            }
+        }
+
+        foreach (var update in physics)
+        {
+            var index = ResolveSlot(update.ObjectId);
+            _motionStates[index] = update.Motion;
+            _verticalVelocities[index] = update.VerticalVelocity;
+            _supports[index] = update.Support;
         }
 
         AssertInvariants();
         Committed?.Invoke(
             new ObjectStoreCommit(
                 ObjectStoreChangeKind.Transferred,
-                requests.Select(request => request.ObjectId).ToArray()));
+                requests.Select(request => request.ObjectId)
+                    .Concat(physics.Select(update => update.ObjectId))
+                    .Distinct()
+                    .Order()
+                    .ToArray()));
     }
 
     private WorldObject Snapshot(int index) =>
@@ -921,6 +1036,10 @@ public sealed class ObjectStore
             _locations[index],
             _footprints[index],
             _heights[index],
+            _stepHeights[index],
+            _motionStates[index],
+            _verticalVelocities[index],
+            _supports[index],
             _flags[index],
             _equipmentSlots[index],
             _qualities[index],

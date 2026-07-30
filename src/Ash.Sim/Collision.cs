@@ -113,6 +113,7 @@ public enum MovementFailure : byte
     None = 0,
     Immovable,
     Blocked,
+    StepTooHigh,
 }
 
 /// <summary>
@@ -124,9 +125,21 @@ public readonly record struct MovementResolution(
     Vec3i ResolvedPosition,
     bool Moved,
     bool ReachedTarget,
+    MotionState Motion,
+    SupportRef Support,
     MovementFailure Failure,
     PlacementBlocker Blocker,
-    string Message);
+    string Message)
+{
+    /// <summary>
+    /// The physics fields to commit with the resolved position, so elevation,
+    /// support and motion state change in the same transaction as the move.
+    /// </summary>
+    public ObjectPhysicsUpdate PhysicsFor(ObjectId objectId) =>
+        Motion == MotionState.Falling
+            ? ObjectPhysicsUpdate.Falling(objectId, 0)
+            : ObjectPhysicsUpdate.Resting(objectId, Support);
+}
 
 /// <summary>
 /// Swept-volume movement resolution shared by actors, monsters and movable
@@ -162,10 +175,8 @@ public sealed class MovementSolver
         var map = _objects.Maps.Get(mover.Location.MapId);
         if (mover.HasFlag(ObjectFlags.Fixed))
         {
-            return new MovementResolution(
-                origin,
-                Moved: false,
-                ReachedTarget: false,
+            return Refused(
+                mover,
                 MovementFailure.Immovable,
                 PlacementBlocker.None,
                 $"{mover.Name} is fixed in place.");
@@ -175,14 +186,66 @@ public sealed class MovementSolver
             checked(origin.X + displacement.X),
             checked(origin.Y + displacement.Y),
             checked(origin.Z + displacement.Z));
-        var from = SweptBox.From(WorldMap.VolumeFor(mover));
-        var contact = FirstContact(map, mover, from, displacement);
-        var resolved = Advance(origin, displacement, contact.Time);
-        var placement = map.ValidatePlacement(
-            mover with
+
+        // 1. Resolve the elevation the move happens at, so a step up onto a
+        //    stair or platform is swept at the height it will end on.
+        var climb = map.FindSupport(At(mover, target), target.Z + mover.StepHeight);
+        if (climb.IsNone)
+        {
+            var anySurface = map.FindSupport(At(mover, target), int.MaxValue);
+            if (!anySurface.IsNone)
             {
-                Location = ObjectLocation.OnMap(map.MapId, resolved),
-            },
+                return Refused(
+                    mover,
+                    MovementFailure.StepTooHigh,
+                    Blocker(anySurface),
+                    $"The step up to {anySurface.TopZ} is higher than " +
+                    $"{mover.Name} can climb.");
+            }
+        }
+
+        var sweepZ = climb.IsNone
+            ? target.Z
+            : Math.Max(target.Z, climb.TopZ);
+        var start = new Vec3i(origin.X, origin.Y, sweepZ);
+        var horizontal = new Vec3i(displacement.X, displacement.Y, 0);
+
+        // 2. Sweep horizontally at that elevation.
+        var from = SweptBox.From(WorldMap.VolumeFor(At(mover, start)));
+        var contact = horizontal == Vec3i.Zero
+            ? (Time: Fraction.One, Blocker: PlacementBlocker.None)
+            : FirstContact(map, mover, from, horizontal);
+        var swept = Advance(start, horizontal, contact.Time);
+
+        // 3. Attach to the support under the position the sweep actually
+        //    reached, dropping onto it when that is within one step.
+        var support = map.FindSupport(At(mover, swept), sweepZ);
+        var motion = MotionState.Resting;
+        var resolved = swept;
+        if (support.IsNone)
+        {
+            // Walking off an edge is a legal move: gravity, not the movement
+            // solver, decides where the object comes down.
+            motion = mover.HasFlag(ObjectFlags.AffectedByGravity)
+                ? MotionState.Falling
+                : MotionState.Resting;
+        }
+        else if (sweepZ - support.TopZ <= mover.StepHeight)
+        {
+            resolved = swept with { Z = support.TopZ };
+        }
+        else if (mover.HasFlag(ObjectFlags.AffectedByGravity))
+        {
+            motion = MotionState.Falling;
+            support = SupportRef.None;
+        }
+        else
+        {
+            support = SupportRef.None;
+        }
+
+        var placement = map.ValidatePlacement(
+            At(mover, resolved),
             mover.Location);
         if (!placement.Allowed)
         {
@@ -190,26 +253,54 @@ public sealed class MovementSolver
             // the integer point at or before it. If that point still fails the
             // one authoritative placement contract, the move is refused whole
             // rather than repaired.
-            return new MovementResolution(
-                origin,
-                Moved: false,
-                ReachedTarget: false,
+            return Refused(
+                mover,
                 MovementFailure.Blocked,
                 placement.Blocker,
                 placement.Message);
         }
 
-        var reached = resolved == target;
+        var reached = resolved.X == target.X && resolved.Y == target.Y;
         return new MovementResolution(
             resolved,
             Moved: resolved != origin,
             ReachedTarget: reached,
+            motion,
+            motion == MotionState.Falling ? SupportRef.None : support,
             reached ? MovementFailure.None : MovementFailure.Blocked,
             reached ? PlacementBlocker.None : contact.Blocker,
             reached
                 ? $"{mover.Name} moves."
                 : Describe(contact.Blocker));
     }
+
+    private static WorldObject At(WorldObject value, Vec3i position) =>
+        value with
+        {
+            Location = ObjectLocation.OnMap(
+                value.Location.MapId,
+                position),
+        };
+
+    private static PlacementBlocker Blocker(SupportRef support) =>
+        support.Kind == SupportKind.Object
+            ? PlacementBlocker.Object(support.ObjectId)
+            : PlacementBlocker.Terrain(support.CellX, support.CellY);
+
+    private static MovementResolution Refused(
+        WorldObject mover,
+        MovementFailure failure,
+        PlacementBlocker blocker,
+        string message) =>
+        new(
+            mover.Location.Position,
+            Moved: false,
+            ReachedTarget: false,
+            mover.Motion,
+            mover.Support,
+            failure,
+            blocker,
+            message);
 
     private (Fraction Time, PlacementBlocker Blocker) FirstContact(
         WorldMap map,

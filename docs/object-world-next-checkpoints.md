@@ -13,29 +13,46 @@ The objective is a persistent physical world in which objects collide, rest on
 terrain or other objects, fall when support disappears, and reload without
 changing identity or state.
 
-**Implementation status (2026-07-30):** checkpoints 1 and 2 are complete.
+**Implementation status (2026-07-30):** checkpoints 1, 2 and 3 are complete.
 `WorldMap` owns terrain and a deterministic footprint-bucket/anchor index; store
 commits rebuild one synchronous revision. `WorldMap.ValidatePlacement` is the one
 physical placement contract, `ObjectTransferService` runs it as a validation
 stage of the same transaction, and `MovementSolver` resolves swept integer
 movement against solid objects, solid terrain and map bounds.
 
-Checkpoint 3, elevation, support and gravity, is next. It owns the physical
-components listed in 2.2 that only support and gravity consume —
-`ProvidesSupport`, `AffectedByGravity`, step height, motion state, vertical
-velocity and the support reference. They were deliberately not added in
-checkpoint 2, where nothing would read them.
+Checkpoint 3 added `SupportRef`, `MotionState`, vertical velocity and step
+height to the store, support resolution and support back-links to `WorldMap`,
+and `PhysicsSystem` for support maintenance, gravity, landings, carried
+dependants and the physical invariants. `ObjectTransferService.Execute` now
+commits locations and physics fields in one transaction.
 
-Two conventions were settled while implementing checkpoint 2:
+Checkpoint 4, object-world Save v1, is next.
+
+Conventions settled while implementing checkpoints 2 and 3:
 
 - a footprint is anchored at the far corner of the cell it occupies, so the
   anchor of cell `c` is `(c + 1) * 256` and every placed footprint lies inside
   the map's world bounds;
 - solid terrain blocks every object, while object-versus-object collision is
-  solid-against-solid, so ground items and loot still share a cell with an actor.
+  solid-against-solid, so ground items and loot still share a cell with an actor;
+- nothing may sit below the floor of a cell it covers, which is what makes a
+  raised platform an obstacle instead of somewhere to embed;
+- every `Solid` volume supports what lands on it, and `ProvidesSupport` adds the
+  same top face to volumes that are not solid, such as a bridge deck. Nothing
+  that can stop a fall is ever missing a support surface;
+- the support rule is the anchor point rule from 3.1: the supported object's
+  anchor corner unit must lie on the supporting face;
+- a step up is resolved before the horizontal sweep, so the sweep runs at the
+  elevation the move ends on. The vertical transition itself is not swept in v1.
 
 `ObjectStore.Create` remains outside placement validation: spawning builds the
 initial world before its maps exist. Placement is enforced on every transfer.
+Anything gravity-affected spawns `Falling`, so the first physics tick — not the
+spawn — decides where it rests.
+
+Deferred from checkpoint 3: fall damage stays out until the environmental
+fall/crush table has an accepted source, as 3.4 requires. Distance and landing
+speed are already recorded on the landing event.
 
 ## Delivery order
 
@@ -43,8 +60,8 @@ initial world before its maps exist. Placement is enforced on every transfer.
 |---|---|
 | 1. Map container and spatial index — done | Authoritative map ownership and shared spatial queries |
 | 2. Collision and placement — done | Solid volumes block movement and invalid placement cannot commit |
-| 3. Elevation, support, and gravity — next | Objects stack, retain support, fall, and land deterministically |
-| 4. Object-world Save v1 | The complete object world round-trips byte-identically |
+| 3. Elevation, support, and gravity — done | Objects stack, retain support, fall, and land deterministically |
+| 4. Object-world Save v1 — next | The complete object world round-trips byte-identically |
 | 5. Direct manipulation | Mouse selection and drag/drop use the same transfer and placement contract |
 | 6. Quantities and inventory rules | Stack merge, split, partial transfer, weight, and content restrictions |
 

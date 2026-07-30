@@ -73,20 +73,49 @@ public sealed class ObjectTransferService
 
     public ObjectTransferResult Execute(
         params ObjectTransferRequest[] requests) =>
-        Execute((IReadOnlyList<ObjectTransferRequest>)requests);
+        Execute(requests, []);
 
     public ObjectTransferResult Execute(
-        IReadOnlyList<ObjectTransferRequest> requests)
+        IReadOnlyList<ObjectTransferRequest> requests) =>
+        Execute(requests, []);
+
+    /// <summary>
+    /// Commits object locations and their physics fields together. Placement,
+    /// support and motion state are validated before anything is written, so a
+    /// rejected transaction leaves the whole world untouched.
+    /// </summary>
+    public ObjectTransferResult Execute(
+        IReadOnlyList<ObjectTransferRequest> requests,
+        IReadOnlyList<ObjectPhysicsUpdate> physics)
     {
         ArgumentNullException.ThrowIfNull(requests);
-        var validation = Validate(requests);
-        if (!validation.Succeeded)
+        ArgumentNullException.ThrowIfNull(physics);
+        if (requests.Count == 0 && physics.Count == 0)
         {
-            return validation;
+            return Reject(
+                ObjectTransferFailure.EmptyTransaction,
+                "A transaction requires at least one object.");
         }
 
-        _objects.CommitTransfer(requests);
-        return ObjectTransferResult.Success(requests.Count);
+        // A physics-only transaction is legal: motion state and support change
+        // without the object moving.
+        if (requests.Count > 0)
+        {
+            var validation = Validate(requests);
+            if (!validation.Succeeded)
+            {
+                return validation;
+            }
+        }
+
+        foreach (var update in physics)
+        {
+            update.Validate();
+        }
+
+        _objects.CommitTransfer(requests, physics);
+        return ObjectTransferResult.Success(
+            Math.Max(requests.Count, physics.Count));
     }
 
     public void ExecuteOrThrow(
