@@ -8,23 +8,27 @@ public sealed class PlayableSliceTests
         var world = PlayableSliceWorld.CreateDemo();
 
         Assert.Equal(new GridPosition(4, 14), world.PlayerPosition);
-        Assert.Contains("Rusty Sword", world.Backpack.Items);
+        Assert.Contains(
+            world.BackpackItems,
+            item => item.Name == "Rusty Sword");
         Assert.Equal(4, world.Chests.Count);
         Assert.Equal(4, world.Monsters.Count);
         Assert.True(PlayableSliceWorld.MapWidth > 19);
         Assert.True(PlayableSliceWorld.MapHeight > 13);
         Assert.Contains(
             world.Monsters,
-            monster => monster.Id == "many-eyed-tyrant");
+            monster => monster.TypeId == "monster.many-eyed-tyrant");
         Assert.All(world.Monsters, monster => Assert.True(monster.IsAlive));
         Assert.All(
-            world.Chests.Select(chest => chest.Position)
-                .Concat(world.Monsters.Select(monster => monster.Position)),
+            world.Chests.Select(chest => world.GetGridPosition(chest.Id))
+                .Concat(world.Monsters.Select(monster =>
+                    world.GetGridPosition(monster.Id))),
             position =>
             {
                 Assert.InRange(position.X, 0, PlayableSliceWorld.MapWidth - 1);
                 Assert.InRange(position.Y, 0, PlayableSliceWorld.MapHeight - 1);
             });
+        world.Objects.ValidateInvariants();
     }
 
     [Fact]
@@ -39,10 +43,15 @@ public sealed class PlayableSliceTests
         Assert.NotNull(world.ActiveChest);
         Assert.True(world.BackpackOpen);
 
-        var item = world.ActiveChest!.Inventory.Items[0];
+        var chest = world.ActiveChest!.Value;
+        var item = world.ContentsOf(chest.Id)[0];
         Assert.True(world.TakeFromOpenChest(0).Succeeded);
-        Assert.Contains(item, world.Backpack.Items);
-        Assert.DoesNotContain(item, world.ActiveChest.Inventory.Items);
+        Assert.Contains(
+            world.BackpackItems,
+            candidate => candidate.Id == item.Id);
+        Assert.DoesNotContain(
+            world.ContentsOf(chest.Id),
+            candidate => candidate.Id == item.Id);
     }
 
     [Fact]
@@ -52,33 +61,50 @@ public sealed class PlayableSliceTests
         MoveToFirstChest(world);
         world.ToggleNearestChest();
 
-        while (!world.Backpack.IsFull)
+        while (world.BackpackItems.Count < world.BackpackCapacity)
         {
-            Assert.True(world.Backpack.TryAdd($"Filler {world.Backpack.Items.Count}"));
+            var index = world.BackpackItems.Count;
+            world.Objects.Create(new ObjectSpawn
+            {
+                TypeId = $"item.filler-{index}",
+                Name = $"Filler {index}",
+                ShapeId = "loot.generic",
+                Location = ObjectLocation.InContainer(world.PlayerId),
+                Flags = ObjectFlags.Item | ObjectFlags.Movable,
+                Footprint = new ObjectFootprint(32, 32),
+                Height = 8,
+            });
         }
 
-        var chestCount = world.ActiveChest!.Inventory.Items.Count;
+        var chest = world.ActiveChest!.Value;
+        var chestCount = world.ContentsOf(chest.Id).Count;
         var result = world.TakeFromOpenChest(0);
 
         Assert.False(result.Succeeded);
-        Assert.Equal(chestCount, world.ActiveChest.Inventory.Items.Count);
+        Assert.Equal(chestCount, world.ContentsOf(chest.Id).Count);
     }
 
     [Fact]
     public void PlayerCanKillAMonsterAndLootItsRemains()
     {
         var world = PlayableSliceWorld.CreateDemo();
-        var rat = world.Monsters.Single(monster => monster.Id == "cave-rat");
+        var rat = world.Monsters.Single(
+            monster => monster.TypeId == "monster.cave-rat");
 
-        MoveNextTo(world, rat.Position);
+        MoveNextTo(world, world.GetGridPosition(rat.Id));
         Assert.True(world.AttackAdjacentMonster().Succeeded);
-        Assert.True(rat.IsAlive);
+        Assert.True(world.Objects.Get(rat.Id).IsAlive);
         Assert.True(world.AttackAdjacentMonster().Succeeded);
-        Assert.False(rat.IsAlive);
+        var corpse = world.Objects.Get(rat.Id);
+        Assert.False(corpse.IsAlive);
+        Assert.True(corpse.HasFlag(ObjectFlags.Corpse));
 
         Assert.True(world.ToggleNearestChest().Succeeded);
-        Assert.StartsWith("Remains of", world.ActiveChest!.Name);
-        Assert.Contains("Rat Tail", world.ActiveChest.Inventory.Items);
+        Assert.Equal(rat.Id, world.ActiveChest!.Value.Id);
+        Assert.StartsWith("Remains of", world.ActiveChest.Value.Name);
+        Assert.Contains(
+            world.ContentsOf(rat.Id),
+            item => item.Name == "Rat Tail");
     }
 
     [Fact]
@@ -86,17 +112,21 @@ public sealed class PlayableSliceTests
     {
         var world = PlayableSliceWorld.CreateDemo();
         var firstChest = world.Chests[0];
-        MoveNextTo(world, firstChest.Position);
+        MoveNextTo(world, world.GetGridPosition(firstChest.Id));
 
         var result = world.MovePlayer(1, 0);
 
         Assert.False(result.Succeeded);
-        Assert.NotEqual(firstChest.Position, world.PlayerPosition);
+        Assert.NotEqual(
+            world.GetGridPosition(firstChest.Id),
+            world.PlayerPosition);
     }
 
     private static void MoveToFirstChest(PlayableSliceWorld world)
     {
-        MoveNextTo(world, world.Chests[0].Position);
+        MoveNextTo(
+            world,
+            world.GetGridPosition(world.Chests[0].Id));
     }
 
     private static void MoveNextTo(PlayableSliceWorld world, GridPosition target)

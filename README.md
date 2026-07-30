@@ -44,6 +44,11 @@ The playable map is 41×29 tiles and extends well beyond the visible world panel
 An integer, fixed-physics-tick camera follows the character while keeping the HUD
 stationary and the nearest-filtered world on its pixel grid.
 
+All runtime entities now live in one authoritative generational object store.
+The Avatar, chests, monsters, corpses, backpack contents, and loot use persistent
+`ObjectId` handles and exactly one tagged location; renderer and UI consume
+immutable snapshots.
+
 ## Layout
 
 ```text

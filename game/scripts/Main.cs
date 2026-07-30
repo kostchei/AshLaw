@@ -457,7 +457,7 @@ public partial class Main : Node2D
                 width: 0.75f);
             DrawText(
                 origin + new Vector2(2, -2),
-                $"{sortIndex}:{objectId}",
+                $"{sortIndex}:{FormatSortIdentity(objectId)}",
                 size: 5,
                 DebugSortOrder);
         }
@@ -483,10 +483,12 @@ public partial class Main : Node2D
         }
 
         if (_world.Chests.Any(chest =>
-                _world.PlayerPosition.ManhattanDistance(chest.Position) <= 1) ||
+                _world.PlayerPosition.ManhattanDistance(
+                    _world.GetGridPosition(chest.Id)) <= 1) ||
             _world.Monsters.Any(monster =>
                 monster.IsAlive &&
-                _world.PlayerPosition.ManhattanDistance(monster.Position) <= 1))
+                _world.PlayerPosition.ManhattanDistance(
+                    _world.GetGridPosition(monster.Id)) <= 1))
         {
             DrawPolyline(
                 Diamond(at + new Vector2(0, -2), 9, 4, close: true),
@@ -522,10 +524,10 @@ public partial class Main : Node2D
         DrawCircle(at + new Vector2(0, -20), 4, new Color("c6976d"));
     }
 
-    private void DrawChest(ChestState chest)
+    private void DrawChest(WorldObject chest)
     {
-        var at = Iso(chest.Position) + new Vector2(0, 3);
-        var isCorpse = chest.Id.StartsWith("remains-", StringComparison.Ordinal);
+        var at = Iso(_world.GetGridPosition(chest.Id)) + new Vector2(0, 3);
+        var isCorpse = chest.HasFlag(ObjectFlags.Corpse);
         if (isCorpse)
         {
             DrawShadow(at, 8);
@@ -549,7 +551,7 @@ public partial class Main : Node2D
                 "state",
                 direction: 0,
                 at,
-                fixedSequence: chest.IsOpen ? 1 : 0))
+                fixedSequence: chest.IsContainerOpen ? 1 : 0))
         {
             return;
         }
@@ -587,7 +589,7 @@ public partial class Main : Node2D
             new Rect2(at + new Vector2(-1, -5), new Vector2(3, 4)),
             new Color("e0b54e"));
 
-        if (chest.IsOpen)
+        if (chest.IsContainerOpen)
         {
             DrawColoredPolygon(
                 [
@@ -605,21 +607,11 @@ public partial class Main : Node2D
         }
     }
 
-    private void DrawMonster(MonsterState monster)
+    private void DrawMonster(WorldObject monster)
     {
-        var at = Iso(monster.Position) + new Vector2(0, 3);
-        if (!monster.IsAlive)
-        {
-            DrawShadow(at, 7);
-            DrawLine(
-                at + new Vector2(-7, -2),
-                at + new Vector2(7, -5),
-                new Color("803838"),
-                3);
-            return;
-        }
+        var at = Iso(_world.GetGridPosition(monster.Id)) + new Vector2(0, 3);
 
-        if (monster.Id == "many-eyed-tyrant")
+        if (monster.ShapeId == "monster.many-eyed")
         {
             DrawManyEyedTyrant(at);
         }
@@ -635,7 +627,8 @@ public partial class Main : Node2D
         if (monster.Health < monster.MaxHealth)
         {
             var healthWidth = 14f * monster.Health / monster.MaxHealth;
-            var healthOffset = monster.Id == "many-eyed-tyrant" ? -27 : -21;
+            var healthOffset =
+                monster.ShapeId == "monster.many-eyed" ? -27 : -21;
             DrawRect(
                 new Rect2(at.X - 7, at.Y + healthOffset, 14, 2),
                 new Color("351212"));
@@ -898,86 +891,63 @@ public partial class Main : Node2D
                     Iso(new GridPosition(38, 17)) + new Vector2(0, 3))),
         };
 
-        for (var index = 0; index < _world.Chests.Count; index++)
+        foreach (var chest in _world.Chests)
         {
-            var chest = _world.Chests[index];
-            var isCorpse = chest.Id.StartsWith(
-                "remains-",
-                StringComparison.Ordinal);
-            items.Add(isCorpse
-                ? CreateDrawItem(
-                    id: 100 + index,
-                    chest.Position,
-                    footprintWidth: 128,
-                    footprintDepth: 128,
-                    height: 24,
-                    shapeNumber: 20,
-                    () => DrawChest(chest))
-                : CreateShapeDrawItem(
-                    id: 100 + index,
-                    chest.Position,
-                    shapeId: "container.chest",
-                    shapeNumber: 21,
-                    () => DrawChest(chest)));
+            items.Add(CreateObjectDrawItem(
+                chest,
+                shapeNumber: chest.HasFlag(ObjectFlags.Corpse) ? 20 : 21,
+                () => DrawChest(chest)));
         }
 
-        for (var index = 0; index < _world.Monsters.Count; index++)
+        foreach (var monster in _world.Monsters)
         {
-            var monster = _world.Monsters[index];
-            items.Add(monster.Id == "many-eyed-tyrant"
-                ? CreateDrawItem(
-                    id: 200 + index,
-                    monster.Position,
-                    footprintWidth: 160,
-                    footprintDepth: 160,
-                    height: monster.IsAlive ? 104 : 24,
-                    shapeNumber: 30,
-                    () => DrawMonster(monster))
-                : CreateShapeDrawItem(
-                    id: 200 + index,
-                    monster.Position,
-                    shapeId: "monster.goblin",
-                    shapeNumber: 31,
-                    () => DrawMonster(monster)));
+            items.Add(CreateObjectDrawItem(
+                monster,
+                shapeNumber:
+                    monster.ShapeId == "monster.many-eyed" ? 30 : 31,
+                () => DrawMonster(monster)));
         }
 
-        items.Add(CreateShapeDrawItem(
-            id: 1,
-            _world.PlayerPosition,
-            shapeId: "avatar.knight",
+        items.Add(CreateObjectDrawItem(
+            _world.Player,
             shapeNumber: 1,
             DrawPlayer));
         return items;
     }
 
-    private WorldDrawItem CreateShapeDrawItem(
-        int id,
-        GridPosition position,
-        string shapeId,
+    private WorldDrawItem CreateObjectDrawItem(
+        WorldObject value,
         int shapeNumber,
         Action draw)
     {
         var shape = _shapePack?.Shapes.FirstOrDefault(candidate =>
-            string.Equals(candidate.Id, shapeId, StringComparison.Ordinal));
-        return shape is null
-            ? CreateDrawItem(
-                id,
-                position,
-                footprintWidth: 128,
-                footprintDepth: 128,
-                height: 64,
-                shapeNumber,
-                draw)
-            : CreateDrawItem(
-                id,
-                position,
-                shape.Footprint.Width,
-                shape.Footprint.Depth,
-                shape.Height,
-                shapeNumber,
-                draw,
-                shape.SortBias,
-                ToSortFlags(shape.Flags));
+            string.Equals(
+                candidate.Id,
+                value.ShapeId,
+                StringComparison.Ordinal));
+        return CreateDrawItem(
+            SortId(value.Id),
+            _world.GetGridPosition(value.Id),
+            value.Footprint.Width,
+            value.Footprint.Depth,
+            value.Height,
+            shapeNumber,
+            draw,
+            shape?.SortBias ?? 0,
+            shape is null
+                ? SortItemFlags.None
+                : ToSortFlags(shape.Flags));
+    }
+
+    private static int SortId(ObjectId id) => unchecked((int)id.Value);
+
+    private static string FormatSortIdentity(int sortId)
+    {
+        var packed = unchecked((uint)sortId);
+        var generation = (byte)(packed >> 24);
+        return generation == 0
+            ? sortId.ToString()
+            : $"{packed & 0x00FF_FFFF}g{generation}";
     }
 
     private static WorldDrawItem CreateDrawItem(
@@ -1228,7 +1198,8 @@ public partial class Main : Node2D
         {
             DrawText(new Vector2(246, 105), "BACKPACK", 8, Highlight);
             DrawInventory(
-                _world.Backpack,
+                _world.BackpackItems,
+                _world.BackpackCapacity,
                 new Vector2(246, 117),
                 width: 70,
                 maxRows: 6);
@@ -1239,7 +1210,7 @@ public partial class Main : Node2D
 
     private void DrawChestTransfer()
     {
-        var chest = _world.ActiveChest!;
+        var chest = _world.ActiveChest!.Value;
         DrawRect(new Rect2(18, 18, 210, 145), new Color("17110de8"));
         DrawRect(new Rect2(21, 21, 204, 139), PanelInset);
         DrawRect(new Rect2(18, 18, 210, 145), PanelEdge, filled: false, width: 1);
@@ -1249,24 +1220,36 @@ public partial class Main : Node2D
         DrawText(new Vector2(28, 44), "click to store", 7, MutedText);
         DrawText(new Vector2(123, 44), "click to take", 7, MutedText);
 
-        DrawInventory(_world.Backpack, new Vector2(28, 49), 89, maxRows: 9);
-        DrawInventory(chest.Inventory, new Vector2(123, 49), 95, maxRows: 9);
+        DrawInventory(
+            _world.BackpackItems,
+            _world.BackpackCapacity,
+            new Vector2(28, 49),
+            89,
+            maxRows: 9);
+        DrawInventory(
+            _world.ContentsOf(chest.Id),
+            chest.ContainerCapacity,
+            new Vector2(123, 49),
+            95,
+            maxRows: 9);
 
         DrawText(new Vector2(28, 157), "E CLOSE", 7, MutedText);
     }
 
     private void DrawInventory(
-        Inventory inventory,
+        IReadOnlyList<WorldObject> items,
+        int capacity,
         Vector2 origin,
         float width,
         int maxRows)
     {
-        var rows = Math.Min(inventory.Items.Count, maxRows);
+        var rows = Math.Min(items.Count, maxRows);
         for (var index = 0; index < rows; index++)
         {
             var y = origin.Y + (index * InventoryRowHeight);
-            var item = inventory.Items[index];
-            var hasSwordIcon = item.Contains(
+            var item = items[index];
+            var hasSwordIcon = item.ShapeId == "loot.shortsword" ||
+                item.Name.Contains(
                 "sword",
                 StringComparison.OrdinalIgnoreCase);
             DrawRect(new Rect2(origin.X, y, width, 10), new Color("38291d"));
@@ -1287,19 +1270,19 @@ public partial class Main : Node2D
 
             DrawText(
                 new Vector2(origin.X + (hasSwordIcon ? 15 : 3), y + 8),
-                Shorten(item, width < 80 ? 12 : 16),
+                Shorten(item.Name, width < 80 ? 12 : 16),
                 7,
                 Text);
         }
 
-        if (inventory.Items.Count == 0)
+        if (items.Count == 0)
         {
             DrawText(origin + new Vector2(3, 8), "(empty)", 7, MutedText);
         }
 
         DrawText(
             new Vector2(origin.X, origin.Y + (maxRows * InventoryRowHeight) + 8),
-            $"{inventory.Items.Count}/{inventory.Capacity}",
+            $"{items.Count}/{capacity}",
             7,
             MutedText);
     }

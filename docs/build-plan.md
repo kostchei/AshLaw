@@ -832,6 +832,12 @@ the `uid://` on `Main.cs`, which the same rewrite had produced.
    An integer camera follows the Avatar on the fixed physics tick, clamps at the
    projected map edges, leaves the HUD stationary, and exposes its offset in the
    F3 diagnostic overlay. The headless follow model asserts deterministic motion.
-5. **Next:** add the object store, then move containers and transfers onto
-   generational object handles and transactional commits. Palette polish follows
-   playable interaction.
+5. **Done — authoritative object store:** 24-bit slot/8-bit generation handles,
+   parallel component arrays, a single tagged `ObjectLocation`, capability flags,
+   stale-handle failure, deterministic enumeration, capacity/cycle/equipment
+   validation, and debug invariant audits. The playable state classes are gone:
+   actors, chests, monsters, corpses, backpack contents, and loot are store
+   objects. Death transforms a monster handle into a corpse-container in place.
+6. **Next:** add the map container, region activation, and commit-rebuilt uniform
+   spatial index, then route collision and visibility through its queries.
+   Palette polish follows playable interaction.
