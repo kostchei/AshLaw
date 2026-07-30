@@ -11,6 +11,11 @@ public sealed class PlayableSliceTests
         Assert.Contains(
             world.BackpackItems,
             item => item.Name == "Rusty Sword");
+        Assert.Contains(
+            world.BackpackItems,
+            item =>
+                item.Name == "Rusty Sword" &&
+                item.EquipmentSlots == EquipmentSlotMask.MainHand);
         Assert.Equal(4, world.Chests.Count);
         Assert.Equal(4, world.Monsters.Count);
         Assert.True(PlayableSliceWorld.MapWidth > 19);
@@ -82,6 +87,93 @@ public sealed class PlayableSliceTests
 
         Assert.False(result.Succeeded);
         Assert.Equal(chestCount, world.ContentsOf(chest.Id).Count);
+    }
+
+    [Fact]
+    public void OneSwordMovesThroughBackpackEquipmentWorldAndChest()
+    {
+        var world = PlayableSliceWorld.CreateDemo();
+        var sword = world.BackpackItems.Single(
+            item => item.Name == "Rusty Sword");
+        var swordIndex = world.BackpackItems
+            .Select((item, index) => (item, index))
+            .Single(pair => pair.item.Id == sword.Id)
+            .index;
+
+        Assert.True(world.EquipFromBackpack(swordIndex).Succeeded);
+        Assert.Equal(
+            LocationKind.Equipped,
+            world.Objects.Get(sword.Id).Location.Kind);
+        Assert.Equal(
+            sword.Id,
+            world.EquippedIn(EquipmentSlot.MainHand)!.Value.Id);
+
+        Assert.True(
+            world.UnequipToBackpack(EquipmentSlot.MainHand).Succeeded);
+        swordIndex = world.BackpackItems
+            .Select((item, index) => (item, index))
+            .Single(pair => pair.item.Id == sword.Id)
+            .index;
+        Assert.True(world.DropFromBackpack(swordIndex).Succeeded);
+        Assert.Equal(world.Player.Location, world.Objects.Get(sword.Id).Location);
+        Assert.Contains(world.GroundItems, item => item.Id == sword.Id);
+
+        Assert.True(world.PickUpAtPlayerFeet().Succeeded);
+        Assert.Contains(world.BackpackItems, item => item.Id == sword.Id);
+
+        MoveToFirstChest(world);
+        Assert.True(world.ToggleNearestChest().Succeeded);
+        swordIndex = world.BackpackItems
+            .Select((item, index) => (item, index))
+            .Single(pair => pair.item.Id == sword.Id)
+            .index;
+        Assert.True(world.PutInOpenChest(swordIndex).Succeeded);
+        var chest = world.ActiveChest!.Value;
+        var chestIndex = world.ContentsOf(chest.Id)
+            .Select((item, index) => (item, index))
+            .Single(pair => pair.item.Id == sword.Id)
+            .index;
+        Assert.True(world.TakeFromOpenChest(chestIndex).Succeeded);
+
+        var final = world.Objects.Get(sword.Id);
+        Assert.Equal(sword.Id, final.Id);
+        Assert.Equal(
+            ObjectLocation.InContainer(world.PlayerId),
+            final.Location);
+        world.Objects.ValidateInvariants();
+    }
+
+    [Fact]
+    public void FailedUnequipKeepsItemEquippedWhenBackpackIsFull()
+    {
+        var world = PlayableSliceWorld.CreateDemo();
+        Assert.True(world.ToggleMainHand().Succeeded);
+        var sword = world.EquippedIn(EquipmentSlot.MainHand)!.Value;
+
+        while (world.BackpackItems.Count < world.BackpackCapacity)
+        {
+            var index = world.BackpackItems.Count;
+            world.Objects.Create(new ObjectSpawn
+            {
+                TypeId = $"item.filler-{index}",
+                Name = $"Filler {index}",
+                ShapeId = "loot.generic",
+                Location = ObjectLocation.InContainer(world.PlayerId),
+                Flags = ObjectFlags.Item | ObjectFlags.Movable,
+                Footprint = new ObjectFootprint(32, 32),
+                Height = 8,
+            });
+        }
+
+        var result = world.UnequipToBackpack(EquipmentSlot.MainHand);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(
+            LocationKind.Equipped,
+            world.Objects.Get(sword.Id).Location.Kind);
+        Assert.Equal(
+            sword.Id,
+            world.EquippedIn(EquipmentSlot.MainHand)!.Value.Id);
     }
 
     [Fact]

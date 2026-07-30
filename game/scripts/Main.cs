@@ -53,9 +53,20 @@ public partial class Main : Node2D
 
     public override void _Ready()
     {
-        _debugOverlayVisible = OS.GetCmdlineUserArgs().Contains(
+        var userArguments = OS.GetCmdlineUserArgs();
+        _debugOverlayVisible = userArguments.Contains(
             "--debug-overlay",
             StringComparer.Ordinal);
+        if (userArguments.Contains("--backpack-open", StringComparer.Ordinal))
+        {
+            _world.ToggleBackpack();
+        }
+
+        if (userArguments.Contains("--equip-main-hand", StringComparer.Ordinal))
+        {
+            _world.ToggleMainHand();
+        }
+
         LoadShapePack();
         SnapCameraToPlayer();
         QueueRedraw();
@@ -140,6 +151,15 @@ public partial class Main : Node2D
             case Key.I:
                 _world.ToggleBackpack();
                 return true;
+            case Key.Q:
+                _world.ToggleMainHand();
+                return true;
+            case Key.G:
+                _world.PickUpAtPlayerFeet();
+                return true;
+            case Key.X:
+                _world.DropFromBackpack();
+                return true;
             case Key.E:
                 _world.ToggleNearestChest();
                 return true;
@@ -190,6 +210,21 @@ public partial class Main : Node2D
 
         if (_world.BackpackOpen && mouse.X >= 242)
         {
+            if (mouse.Y is >= 129 and < 144)
+            {
+                _world.UnequipToBackpack(EquipmentSlot.MainHand);
+                return true;
+            }
+
+            const float backpackListTop = 150;
+            if (mouse.Y >= backpackListTop)
+            {
+                var row =
+                    (int)((mouse.Y - backpackListTop) / InventoryRowHeight);
+                _world.EquipFromBackpack(row);
+                return true;
+            }
+
             return true;
         }
 
@@ -700,6 +735,25 @@ public partial class Main : Node2D
         }
     }
 
+    private void DrawGroundItem(WorldObject item)
+    {
+        var at = Iso(_world.GetGridPosition(item.Id)) + new Vector2(0, 1);
+        if (DrawShape(
+                item.ShapeId,
+                "power",
+                direction: 0,
+                at,
+                fixedSequence: 0))
+        {
+            return;
+        }
+
+        DrawShadow(at, 4);
+        DrawColoredPolygon(
+            Diamond(at + new Vector2(0, -2), 4, 2, close: false),
+            new Color("b8873d"));
+    }
+
     private void DrawWallCourses(
         Vector2 start,
         Vector2 end,
@@ -906,6 +960,14 @@ public partial class Main : Node2D
                 shapeNumber:
                     monster.ShapeId == "monster.many-eyed" ? 30 : 31,
                 () => DrawMonster(monster)));
+        }
+
+        foreach (var item in _world.GroundItems)
+        {
+            items.Add(CreateObjectDrawItem(
+                item,
+                shapeNumber: 40,
+                () => DrawGroundItem(item)));
         }
 
         items.Add(CreateObjectDrawItem(
@@ -1187,25 +1249,43 @@ public partial class Main : Node2D
         DrawText(new Vector2(246, 55), "E OPEN", 7, MutedText);
         DrawText(new Vector2(246, 65), "F ATTACK", 7, MutedText);
         DrawText(new Vector2(246, 75), "B PACK", 7, MutedText);
-        DrawText(new Vector2(246, 85), "R RESET", 7, MutedText);
+        DrawText(new Vector2(246, 85), "Q HAND", 7, MutedText);
+        DrawText(new Vector2(246, 95), "G GET  X DROP", 7, MutedText);
+        DrawText(new Vector2(246, 105), "R RESET", 7, MutedText);
         DrawText(
-            new Vector2(246, 95),
+            new Vector2(246, 115),
             _debugOverlayVisible ? "F3 DEBUG ON" : "F3 DEBUG",
             7,
             _debugOverlayVisible ? DebugSortOrder : MutedText);
 
         if (_world.BackpackOpen && _world.ActiveChest is null)
         {
-            DrawText(new Vector2(246, 105), "BACKPACK", 8, Highlight);
+            DrawText(new Vector2(246, 127), "BACKPACK", 8, Highlight);
+            var mainHand = _world.EquippedIn(EquipmentSlot.MainHand);
+            DrawText(
+                new Vector2(246, 139),
+                mainHand is null
+                    ? "HAND (empty)"
+                    : $"HAND {Shorten(mainHand.Value.Name, 9)}",
+                7,
+                mainHand is null ? MutedText : Text);
+            DrawText(
+                new Vector2(246, 148),
+                "click item: equip",
+                6,
+                MutedText);
             DrawInventory(
                 _world.BackpackItems,
                 _world.BackpackCapacity,
-                new Vector2(246, 117),
+                new Vector2(246, 150),
                 width: 70,
-                maxRows: 6);
+                maxRows: 3);
         }
 
-        DrawWrappedMessage(_world.LastMessage);
+        if (!_world.BackpackOpen || _world.ActiveChest is not null)
+        {
+            DrawWrappedMessage(_world.LastMessage);
+        }
     }
 
     private void DrawChestTransfer()

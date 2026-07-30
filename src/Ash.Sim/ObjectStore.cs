@@ -130,6 +130,11 @@ public readonly record struct ObjectLocation
     public static ObjectLocation Equipped(ObjectId actor, byte slot) =>
         new(LocationKind.Equipped, parent: actor, slot: slot);
 
+    public static ObjectLocation Equipped(
+        ObjectId actor,
+        EquipmentSlot slot) =>
+        Equipped(actor, (byte)slot);
+
     public static ObjectLocation InTransfer(uint transferId)
     {
         if (transferId == 0)
@@ -206,6 +211,43 @@ public enum ObjectFlags
     Trigger = 1 << 11,
 }
 
+[Flags]
+public enum EquipmentSlotMask : ushort
+{
+    None = 0,
+    MainHand = 1 << 0,
+    OffHand = 1 << 1,
+    Head = 1 << 2,
+    Body = 1 << 3,
+    Hands = 1 << 4,
+    Feet = 1 << 5,
+    Neck = 1 << 6,
+    Ring = 1 << 7,
+}
+
+public enum EquipmentSlot : byte
+{
+    MainHand = 0,
+    OffHand = 1,
+    Head = 2,
+    Body = 3,
+    Hands = 4,
+    Feet = 5,
+    Neck = 6,
+    Ring = 7,
+}
+
+public static class EquipmentSlots
+{
+    public static EquipmentSlotMask MaskFor(byte slot) =>
+        slot < 16
+            ? (EquipmentSlotMask)(1 << slot)
+            : EquipmentSlotMask.None;
+
+    public static bool Accepts(this EquipmentSlotMask mask, byte slot) =>
+        (mask & MaskFor(slot)) != 0;
+}
+
 public readonly record struct ObjectFootprint(int Width, int Depth)
 {
     public void Validate()
@@ -237,6 +279,8 @@ public sealed record ObjectSpawn
 
     public ObjectFlags Flags { get; init; } = ObjectFlags.Visible;
 
+    public EquipmentSlotMask EquipmentSlots { get; init; }
+
     public int Quality { get; init; }
 
     public int Quantity { get; init; } = 1;
@@ -260,6 +304,7 @@ public readonly record struct WorldObject(
     ObjectFootprint Footprint,
     int Height,
     ObjectFlags Flags,
+    EquipmentSlotMask EquipmentSlots,
     int Quality,
     int Quantity,
     int Condition,
@@ -300,6 +345,7 @@ public sealed class ObjectStore
     private readonly List<ObjectFootprint> _footprints = [];
     private readonly List<int> _heights = [];
     private readonly List<ObjectFlags> _flags = [];
+    private readonly List<EquipmentSlotMask> _equipmentSlots = [];
     private readonly List<int> _qualities = [];
     private readonly List<int> _quantities = [];
     private readonly List<int> _conditions = [];
@@ -328,6 +374,7 @@ public sealed class ObjectStore
         _footprints[index] = spawn.Footprint;
         _heights[index] = spawn.Height;
         _flags[index] = spawn.Flags;
+        _equipmentSlots[index] = spawn.EquipmentSlots;
         _qualities[index] = spawn.Quality;
         _quantities[index] = spawn.Quantity;
         _conditions[index] = spawn.Condition;
@@ -397,16 +444,13 @@ public sealed class ObjectStore
 
     public void Move(ObjectId id, ObjectLocation destination)
     {
-        var index = ResolveSlot(id);
-        destination.Validate();
-        if (_locations[index] == destination)
+        var source = Get(id).Location;
+        var result = new ObjectTransferService(this).Execute(
+            new ObjectTransferRequest(id, source, destination));
+        if (!result.Succeeded)
         {
-            return;
+            throw new InvalidOperationException(result.Message);
         }
-
-        ValidateLocation(id, destination);
-        _locations[index] = destination;
-        AssertInvariants();
     }
 
     public int Damage(ObjectId id, int amount)
@@ -501,6 +545,7 @@ public sealed class ObjectStore
         _shapeIds[index] = null;
         _locations[index] = default;
         _flags[index] = ObjectFlags.None;
+        _equipmentSlots[index] = EquipmentSlotMask.None;
         _containerOpen[index] = false;
         _generations[index] = NextGeneration(_generations[index]);
         _freeSlots.Push(index);
@@ -549,6 +594,13 @@ public sealed class ObjectStore
                     $"Non-container object {id} is marked open.");
             }
 
+            if (_equipmentSlots[index] != EquipmentSlotMask.None &&
+                !_flags[index].HasFlag(ObjectFlags.Item))
+            {
+                throw new InvalidOperationException(
+                    $"Non-item object {id} declares equipment slots.");
+            }
+
             if (location.Kind is
                 LocationKind.InContainer or LocationKind.Equipped)
             {
@@ -565,6 +617,15 @@ public sealed class ObjectStore
                 {
                     throw new InvalidOperationException(
                         $"Actor {parent} has duplicate equipment slot " +
+                        $"{location.Slot}.");
+                }
+
+                if (location.Kind == LocationKind.Equipped &&
+                    (!_flags[index].HasFlag(ObjectFlags.Item) ||
+                     !_equipmentSlots[index].Accepts(location.Slot)))
+                {
+                    throw new InvalidOperationException(
+                        $"Object {id} cannot occupy equipment slot " +
                         $"{location.Slot}.");
                 }
             }
@@ -602,6 +663,7 @@ public sealed class ObjectStore
         _footprints.Add(default);
         _heights.Add(0);
         _flags.Add(ObjectFlags.None);
+        _equipmentSlots.Add(EquipmentSlotMask.None);
         _qualities.Add(0);
         _quantities.Add(0);
         _conditions.Add(0);
@@ -639,6 +701,21 @@ public sealed class ObjectStore
         {
             throw new ArgumentException(
                 "Container flag and positive container capacity must agree.");
+        }
+
+        if (spawn.EquipmentSlots != EquipmentSlotMask.None &&
+            !spawn.Flags.HasFlag(ObjectFlags.Item))
+        {
+            throw new ArgumentException(
+                "Only item objects can declare accepted equipment slots.");
+        }
+
+        if (spawn.Location.Kind == LocationKind.Equipped &&
+            (!spawn.Flags.HasFlag(ObjectFlags.Item) ||
+             !spawn.EquipmentSlots.Accepts(spawn.Location.Slot)))
+        {
+            throw new ArgumentException(
+                "An equipped spawn must accept its initial equipment slot.");
         }
 
         if (spawn.MaxHealth < 0 ||
@@ -779,6 +856,17 @@ public sealed class ObjectStore
     private ObjectId IdAt(int index) =>
         ObjectId.FromParts(index, _generations[index]);
 
+    internal void CommitTransfer(
+        IReadOnlyList<ObjectTransferRequest> requests)
+    {
+        foreach (var request in requests)
+        {
+            _locations[ResolveSlot(request.ObjectId)] = request.Destination;
+        }
+
+        AssertInvariants();
+    }
+
     private WorldObject Snapshot(int index) =>
         new(
             IdAt(index),
@@ -790,6 +878,7 @@ public sealed class ObjectStore
             _footprints[index],
             _heights[index],
             _flags[index],
+            _equipmentSlots[index],
             _qualities[index],
             _quantities[index],
             _conditions[index],

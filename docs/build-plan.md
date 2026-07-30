@@ -838,6 +838,12 @@ the `uid://` on `Main.cs`, which the same rewrite had produced.
    validation, and debug invariant audits. The playable state classes are gone:
    actors, chests, monsters, corpses, backpack contents, and loot are store
    objects. Death transforms a monster handle into a corpse-container in place.
-6. **Next:** add the map container, region activation, and commit-rebuilt uniform
+6. **Done — transactional transfer:** one two-phase service now moves ordinary
+   objects between the map, backpack, chest, and equipment. It validates expected
+   sources against a projected final location graph, so batch swaps can cross
+   full containers while stale sources, cycles, capacity failures, slot
+   conflicts, and item restrictions reject without mutation. The playable build
+   exposes main-hand equip/unequip plus world drop/pickup.
+7. **Next:** add the map container, region activation, and commit-rebuilt uniform
    spatial index, then route collision and visibility through its queries.
    Palette polish follows playable interaction.

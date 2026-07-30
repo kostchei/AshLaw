@@ -35,6 +35,29 @@ equipped object. Parent handles are validated, container cycles and duplicate
 equipment slots are rejected, and container capacity is checked before a move
 commits.
 
+## Transactional transfer
+
+`ObjectTransferService` is the single movement boundary for the world,
+containers, actor backpacks, and equipment. Each request carries an object
+handle, its expected source, and its destination. A transaction:
+
+1. snapshots the current object graph;
+2. verifies every handle and expected source;
+3. projects every requested destination together;
+4. validates parents, cycles, final container counts, equipment capability,
+   accepted slots, and final slot uniqueness;
+5. commits all locations together only after the complete projection passes.
+
+This final-state validation permits atomic swaps between full containers and
+between occupied equipment slots without inventing a temporary invalid state.
+Stale-source, capacity, cycle, and equipment failures return a typed
+`ObjectTransferFailure` and mutate nothing. The legacy single-object `Move`
+entrypoint routes through the same transaction service.
+
+Items declare accepted slots with `EquipmentSlotMask`. Equipment slots reference
+the ordinary item handle; equipping therefore preserves identity, quality,
+quantity, condition, and presentation data.
+
 ## Parallel components
 
 Slots index parallel arrays for identity/presentation, location, physical
@@ -63,6 +86,7 @@ available to headless tests. The audit covers:
 - container capability/capacity agreement;
 - container capacity;
 - unique equipment slots;
+- equipped-item slot restrictions;
 - positive quantity, valid health, and physical footprint.
 
 This checkpoint intentionally does not implement the M2 spatial index, support

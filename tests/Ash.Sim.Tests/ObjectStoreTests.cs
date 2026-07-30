@@ -37,9 +37,11 @@ public sealed class ObjectStoreTests
         Assert.Throws<InvalidOperationException>(
             () => store.Get(item).Location.Position);
 
-        store.Move(item, ObjectLocation.Equipped(actor, slot: 2));
+        store.Move(
+            item,
+            ObjectLocation.Equipped(actor, EquipmentSlot.MainHand));
         Assert.Equal(actor, store.Get(item).Location.Parent);
-        Assert.Equal(2, store.Get(item).Location.Slot);
+        Assert.Equal((byte)EquipmentSlot.MainHand, store.Get(item).Location.Slot);
 
         store.Move(item, ObjectLocation.InTransfer(42));
         Assert.Equal(42u, store.Get(item).Location.TransferId);
@@ -155,6 +157,7 @@ public sealed class ObjectStoreTests
             Location = location ??
                 ObjectLocation.OnMap(0, new Vec3i(0, 0, 0)),
             Flags = ObjectFlags.Item | ObjectFlags.Movable | ObjectFlags.Visible,
+            EquipmentSlots = EquipmentSlotMask.MainHand,
             Footprint = new ObjectFootprint(32, 32),
             Height = 8,
         };

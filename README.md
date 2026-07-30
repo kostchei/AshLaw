@@ -27,6 +27,8 @@ The main scene now boots directly into a small playable room:
 
 - move the visible character with **WASD** or the arrow keys;
 - press **B** or **I** to open the character's backpack;
+- press **Q** to equip or unequip the first valid main-hand item;
+- press **X** to drop the first backpack item and **G** to pick it up;
 - stand next to a chest and press **E** to open it;
 - click items to transfer them between an open chest and the backpack;
 - stand next to a monster and press **F** or **Space** to attack;
@@ -47,7 +49,9 @@ stationary and the nearest-filtered world on its pixel grid.
 All runtime entities now live in one authoritative generational object store.
 The Avatar, chests, monsters, corpses, backpack contents, and loot use persistent
 `ObjectId` handles and exactly one tagged location; renderer and UI consume
-immutable snapshots.
+immutable snapshots. World, backpack, chest, and equipment moves use one
+two-phase transfer service: validate the projected final state, then commit the
+whole transaction or change nothing.
 
 ## Layout
 

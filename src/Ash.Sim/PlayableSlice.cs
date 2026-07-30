@@ -30,11 +30,14 @@ public sealed class PlayableSliceWorld
     private PlayableSliceWorld(ObjectStore objects, ObjectId playerId)
     {
         Objects = objects;
+        Transfers = new ObjectTransferService(objects);
         PlayerId = playerId;
         LastMessage = "Explore. Open a chest or fight a monster.";
     }
 
     public ObjectStore Objects { get; }
+
+    public ObjectTransferService Transfers { get; }
 
     public ObjectId PlayerId { get; }
 
@@ -77,6 +80,22 @@ public sealed class PlayableSliceWorld
     public IReadOnlyList<WorldObject> BackpackItems =>
         ContentsOf(PlayerId);
 
+    public IReadOnlyList<WorldObject> EquippedItems =>
+        Objects.Enumerate()
+            .Where(candidate =>
+                candidate.Location.Kind == LocationKind.Equipped &&
+                candidate.Location.Parent == PlayerId)
+            .OrderBy(candidate => candidate.Location.Slot)
+            .ToArray();
+
+    public IReadOnlyList<WorldObject> GroundItems =>
+        Objects.Enumerate()
+            .Where(candidate =>
+                candidate.HasFlag(ObjectFlags.Item) &&
+                candidate.Location.Kind == LocationKind.OnMap &&
+                candidate.Location.MapId == DemoMapId)
+            .ToArray();
+
     public int BackpackCapacity => Player.ContainerCapacity;
 
     public static PlayableSliceWorld CreateDemo()
@@ -99,7 +118,13 @@ public sealed class PlayableSliceWorld
             Health = 12,
             MaxHealth = 12,
         });
-        SpawnItem(objects, player, "item.rusty-sword", "Rusty Sword", "loot.shortsword");
+        SpawnItem(
+            objects,
+            player,
+            "item.rusty-sword",
+            "Rusty Sword",
+            "loot.shortsword",
+            EquipmentSlotMask.MainHand);
         SpawnItem(objects, player, "item.apple", "Apple");
 
         SpawnChest(
@@ -197,7 +222,16 @@ public sealed class PlayableSliceWorld
             return Finish(false, $"{blocker.Name} occupies that space.");
         }
 
-        Objects.Move(PlayerId, MapLocation(destination));
+        var move = Transfers.Execute(
+            new ObjectTransferRequest(
+                PlayerId,
+                Player.Location,
+                MapLocation(destination)));
+        if (!move.Succeeded)
+        {
+            return Finish(false, move.Message);
+        }
+
         if (ActiveChest is { } active &&
             PlayerPosition.ManhattanDistance(GridPositionOf(active)) > 1)
         {
@@ -267,14 +301,14 @@ public sealed class PlayableSliceWorld
             return Finish(false, "That chest slot is empty.");
         }
 
-        if (BackpackItems.Count >= BackpackCapacity)
-        {
-            return Finish(false, "The backpack is full.");
-        }
-
         var item = contents[itemIndex];
-        Objects.Move(item.Id, ObjectLocation.InContainer(PlayerId));
-        return Finish(true, $"Took {item.Name}.");
+        return FinishTransfer(
+            Transfers.Execute(
+                new ObjectTransferRequest(
+                    item.Id,
+                    item.Location,
+                    ObjectLocation.InContainer(PlayerId))),
+            $"Took {item.Name}.");
     }
 
     public SliceActionResult PutInOpenChest(int itemIndex)
@@ -292,14 +326,121 @@ public sealed class PlayableSliceWorld
         }
 
         var destination = chest.Value;
-        if (ContentsOf(destination.Id).Count >= destination.ContainerCapacity)
+        var item = backpack[itemIndex];
+        return FinishTransfer(
+            Transfers.Execute(
+                new ObjectTransferRequest(
+                    item.Id,
+                    item.Location,
+                    ObjectLocation.InContainer(destination.Id))),
+            $"Stored {item.Name}.");
+    }
+
+    public WorldObject? EquippedIn(EquipmentSlot slot)
+    {
+        foreach (var item in EquippedItems)
         {
-            return Finish(false, $"{destination.Name} is full.");
+            if (item.Location.Slot == (byte)slot)
+            {
+                return item;
+            }
+        }
+
+        return null;
+    }
+
+    public SliceActionResult EquipFromBackpack(
+        int itemIndex,
+        EquipmentSlot slot = EquipmentSlot.MainHand)
+    {
+        var backpack = BackpackItems;
+        if (itemIndex < 0 || itemIndex >= backpack.Count)
+        {
+            return Finish(false, "That backpack slot is empty.");
         }
 
         var item = backpack[itemIndex];
-        Objects.Move(item.Id, ObjectLocation.InContainer(destination.Id));
-        return Finish(true, $"Stored {item.Name}.");
+        return FinishTransfer(
+            Transfers.Execute(
+                new ObjectTransferRequest(
+                    item.Id,
+                    item.Location,
+                    ObjectLocation.Equipped(PlayerId, slot))),
+            $"Equipped {item.Name}.");
+    }
+
+    public SliceActionResult UnequipToBackpack(EquipmentSlot slot)
+    {
+        var equipped = EquippedIn(slot);
+        if (equipped is null)
+        {
+            return Finish(false, "That equipment slot is empty.");
+        }
+
+        var item = equipped.Value;
+        return FinishTransfer(
+            Transfers.Execute(
+                new ObjectTransferRequest(
+                    item.Id,
+                    item.Location,
+                    ObjectLocation.InContainer(PlayerId))),
+            $"Unequipped {item.Name}.");
+    }
+
+    public SliceActionResult ToggleMainHand()
+    {
+        if (EquippedIn(EquipmentSlot.MainHand) is not null)
+        {
+            return UnequipToBackpack(EquipmentSlot.MainHand);
+        }
+
+        var candidate = BackpackItems
+            .Select((item, index) => (Item: item, Index: index))
+            .FirstOrDefault(pair =>
+                pair.Item.EquipmentSlots.Accepts(
+                    (byte)EquipmentSlot.MainHand));
+        return candidate.Item.Id.IsNone
+            ? Finish(false, "There is no main-hand item in the backpack.")
+            : EquipFromBackpack(candidate.Index, EquipmentSlot.MainHand);
+    }
+
+    public SliceActionResult DropFromBackpack(int itemIndex = 0)
+    {
+        var backpack = BackpackItems;
+        if (itemIndex < 0 || itemIndex >= backpack.Count)
+        {
+            return Finish(false, "There is nothing in the backpack to drop.");
+        }
+
+        var item = backpack[itemIndex];
+        return FinishTransfer(
+            Transfers.Execute(
+                new ObjectTransferRequest(
+                    item.Id,
+                    item.Location,
+                    Player.Location)),
+            $"Dropped {item.Name}.");
+    }
+
+    public SliceActionResult PickUpAtPlayerFeet()
+    {
+        var item = GroundItems
+            .Where(candidate => candidate.Location == Player.Location)
+            .OrderBy(candidate => candidate.Id)
+            .Cast<WorldObject?>()
+            .FirstOrDefault();
+        if (item is null)
+        {
+            return Finish(false, "There is nothing here to pick up.");
+        }
+
+        return FinishTransfer(
+            Transfers.Execute(
+                new ObjectTransferRequest(
+                    item.Value.Id,
+                    item.Value.Location,
+                    ObjectLocation.InContainer(PlayerId))),
+            $"Picked up {item.Value.Name}.");
     }
 
     public SliceActionResult AttackAdjacentMonster()
@@ -431,7 +572,8 @@ public sealed class PlayableSliceWorld
         ObjectId parent,
         string typeId,
         string name,
-        string shapeId = "loot.generic")
+        string shapeId = "loot.generic",
+        EquipmentSlotMask equipmentSlots = EquipmentSlotMask.None)
     {
         objects.Create(new ObjectSpawn
         {
@@ -445,6 +587,7 @@ public sealed class PlayableSliceWorld
                 ObjectFlags.Item |
                 ObjectFlags.Movable |
                 ObjectFlags.Visible,
+            EquipmentSlots = equipmentSlots,
         });
     }
 
@@ -480,4 +623,11 @@ public sealed class PlayableSliceWorld
         LastMessage = message;
         return new SliceActionResult(succeeded, message);
     }
+
+    private SliceActionResult FinishTransfer(
+        ObjectTransferResult transfer,
+        string successMessage) =>
+        Finish(
+            transfer.Succeeded,
+            transfer.Succeeded ? successMessage : transfer.Message);
 }
