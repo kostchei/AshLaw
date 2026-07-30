@@ -218,6 +218,53 @@ public sealed class PlayableSliceTests
             world.PlayerPosition);
     }
 
+    [Fact]
+    public void SolidTerrainBlocksTheAvatarAndNamesTheCell()
+    {
+        var world = PlayableSliceWorld.CreateDemo();
+
+        while (world.PlayerPosition.Y > 3)
+        {
+            Assert.True(world.MovePlayer(0, -1).Succeeded);
+        }
+
+        Assert.True(world.MovePlayer(-1, 0).Succeeded);
+        Assert.Equal(new GridPosition(3, 3), world.PlayerPosition);
+
+        var result = world.MovePlayer(-1, 0);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("(2, 3)", result.Message);
+        Assert.Equal(new GridPosition(3, 3), world.PlayerPosition);
+        world.Map.ValidateIndex();
+    }
+
+    [Fact]
+    public void NoSuccessfulMoveLeavesOverlappingSolidVolumes()
+    {
+        var world = PlayableSliceWorld.CreateDemo();
+
+        for (var step = 0; step < 40; step++)
+        {
+            world.MovePlayer(step % 3 == 0 ? 0 : 1, step % 3 == 0 ? 1 : 0);
+            var solids = world.Map.QueryAll(ObjectFlags.Solid);
+            foreach (var first in solids)
+            {
+                foreach (var second in solids)
+                {
+                    Assert.True(
+                        first.Id == second.Id ||
+                        !WorldMap.VolumeFor(first)
+                            .Overlaps(WorldMap.VolumeFor(second)),
+                        $"{first.Name} overlaps {second.Name}.");
+                }
+            }
+        }
+
+        world.Objects.ValidateInvariants();
+        world.Map.ValidateIndex();
+    }
+
     private static void MoveToFirstChest(PlayableSliceWorld world)
     {
         MoveNextTo(

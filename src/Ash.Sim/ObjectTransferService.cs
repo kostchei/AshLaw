@@ -19,12 +19,18 @@ public enum ObjectTransferFailure
     ParentCycle,
     EquipmentSlotOccupied,
     EquipmentRestriction,
+    UnknownMap,
+    OutOfMapBounds,
+    Immovable,
+    TerrainBlocked,
+    ObjectBlocked,
 }
 
 public readonly record struct ObjectTransferResult(
     bool Succeeded,
     ObjectTransferFailure Failure,
-    string Message)
+    string Message,
+    PlacementBlocker Blocker = default)
 {
     public static ObjectTransferResult Success(int objectCount) =>
         new(
@@ -36,8 +42,9 @@ public readonly record struct ObjectTransferResult(
 
     public static ObjectTransferResult Rejected(
         ObjectTransferFailure failure,
-        string message) =>
-        new(false, failure, message);
+        string message,
+        PlacementBlocker blocker = default) =>
+        new(false, failure, message, blocker);
 }
 
 public sealed class ObjectTransferException : InvalidOperationException
@@ -249,8 +256,72 @@ public sealed class ObjectTransferService
             }
         }
 
+        return ValidatePlacement(requests, byId);
+    }
+
+    /// <summary>
+    /// Physical placement is a validation stage of the same transaction: every
+    /// object whose destination is a map must fit there before anything commits.
+    /// </summary>
+    private ObjectTransferResult ValidatePlacement(
+        IReadOnlyList<ObjectTransferRequest> requests,
+        IReadOnlyDictionary<ObjectId, WorldObject> byId)
+    {
+        var moving = requests
+            .Where(request =>
+                request.Destination.Kind == LocationKind.OnMap)
+            .ToDictionary(
+                request => request.ObjectId,
+                request => request.Destination);
+        foreach (var request in requests.OrderBy(request => request.ObjectId))
+        {
+            if (request.Destination.Kind != LocationKind.OnMap)
+            {
+                continue;
+            }
+
+            var mapId = request.Destination.MapId;
+            if (!_objects.Maps.TryGet(mapId, out var map))
+            {
+                return Reject(
+                    ObjectTransferFailure.UnknownMap,
+                    $"Map {mapId} is not registered in this world.");
+            }
+
+            var placement = map.ValidatePlacement(
+                byId[request.ObjectId] with
+                {
+                    Location = request.Destination,
+                },
+                request.ExpectedSource,
+                moving);
+            if (!placement.Allowed)
+            {
+                return Reject(
+                    ToTransferFailure(placement.Failure),
+                    placement.Message,
+                    placement.Blocker);
+            }
+        }
+
         return ObjectTransferResult.Success(requests.Count);
     }
+
+    private static ObjectTransferFailure ToTransferFailure(
+        PlacementFailure failure) =>
+        failure switch
+        {
+            PlacementFailure.UnknownMap => ObjectTransferFailure.UnknownMap,
+            PlacementFailure.OutOfMapBounds =>
+                ObjectTransferFailure.OutOfMapBounds,
+            PlacementFailure.Immovable => ObjectTransferFailure.Immovable,
+            PlacementFailure.TerrainBlocked =>
+                ObjectTransferFailure.TerrainBlocked,
+            PlacementFailure.ObjectBlocked =>
+                ObjectTransferFailure.ObjectBlocked,
+            _ => throw new InvalidOperationException(
+                $"Placement failure {failure} has no transfer failure."),
+        };
 
     private static ObjectTransferResult? ValidateParentChain(
         ObjectId start,
@@ -278,6 +349,7 @@ public sealed class ObjectTransferService
 
     private static ObjectTransferResult Reject(
         ObjectTransferFailure failure,
-        string message) =>
-        ObjectTransferResult.Rejected(failure, message);
+        string message,
+        PlacementBlocker blocker = default) =>
+        ObjectTransferResult.Rejected(failure, message, blocker);
 }

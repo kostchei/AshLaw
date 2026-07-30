@@ -76,12 +76,61 @@ public readonly record struct WorldVolume(
 }
 
 /// <summary>
+/// The live maps of one world, keyed by map id. A map registers itself here
+/// when it is constructed, which is what lets the object transaction validate
+/// physical placement without a second world model.
+/// </summary>
+public sealed class WorldMapSet
+{
+    private readonly SortedDictionary<ushort, WorldMap> _maps = [];
+
+    public WorldMap Get(ushort mapId) =>
+        _maps.TryGetValue(mapId, out var map)
+            ? map
+            : throw new InvalidOperationException(
+                $"Map {mapId} is not registered in this world.");
+
+    public bool TryGet(ushort mapId, out WorldMap map) =>
+        _maps.TryGetValue(mapId, out map!);
+
+    internal void Register(WorldMap map)
+    {
+        if (_maps.TryGetValue(map.MapId, out var existing))
+        {
+            throw new InvalidOperationException(
+                $"Map {map.MapId} is already registered as {existing}.");
+        }
+
+        _maps.Add(map.MapId, map);
+    }
+
+    internal void Unregister(WorldMap map)
+    {
+        if (_maps.TryGetValue(map.MapId, out var existing) &&
+            ReferenceEquals(existing, map))
+        {
+            _maps.Remove(map.MapId);
+        }
+    }
+}
+
+/// <summary>
 /// Authoritative terrain container and derived spatial index for one map.
 /// Object identity and locations remain owned by <see cref="ObjectStore"/>.
 /// </summary>
 public sealed class WorldMap : IDisposable
 {
     public const int DefaultBucketSize = 256;
+
+    /// <summary>
+    /// One terrain cell is 256 world units wide and deep. Object footprints are
+    /// anchored at the far corner of the cell they occupy, so the anchor of the
+    /// object in cell <c>c</c> is <c>(c + 1) * WorldUnitsPerTile</c>.
+    /// </summary>
+    public const int WorldUnitsPerTile = 256;
+
+    private static readonly Dictionary<ObjectId, ObjectLocation>
+        EmptyProjection = [];
 
     private readonly ObjectStore _objects;
     private readonly TerrainCell[] _terrain;
@@ -119,10 +168,16 @@ public sealed class WorldMap : IDisposable
         Width = width;
         Depth = depth;
         BucketSize = bucketSize;
+        WorldBounds = new WorldRectangle(
+            0,
+            checked(width * WorldUnitsPerTile),
+            0,
+            checked(depth * WorldUnitsPerTile));
         _terrain = Enumerable.Repeat(
                 defaultTerrain ?? TerrainCell.Floor,
                 checked(width * depth))
             .ToArray();
+        _objects.Maps.Register(this);
         _objects.Committed += OnObjectStoreCommitted;
         RebuildIndex();
     }
@@ -134,6 +189,9 @@ public sealed class WorldMap : IDisposable
     public int Depth { get; }
 
     public int BucketSize { get; }
+
+    /// <summary>The horizontal world extent every placed footprint must fit in.</summary>
+    public WorldRectangle WorldBounds { get; }
 
     public long Revision { get; private set; }
 
@@ -150,6 +208,113 @@ public sealed class WorldMap : IDisposable
         ValidateTerrainCoordinate(x, y);
         _terrain[(y * Width) + x] = value;
         Revision++;
+    }
+
+    /// <summary>
+    /// Every terrain cell of this map touched by <paramref name="bounds"/>,
+    /// ordered by cell coordinate and clipped to the map.
+    /// </summary>
+    public IEnumerable<(int X, int Y, TerrainCell Cell)> TerrainSpan(
+        WorldRectangle bounds)
+    {
+        bounds.Validate(nameof(bounds));
+        var minX = Math.Max(0, FloorDiv(bounds.XMin, WorldUnitsPerTile));
+        var maxX = Math.Min(
+            Width - 1,
+            FloorDiv(bounds.XMax - 1, WorldUnitsPerTile));
+        var minY = Math.Max(0, FloorDiv(bounds.YMin, WorldUnitsPerTile));
+        var maxY = Math.Min(
+            Depth - 1,
+            FloorDiv(bounds.YMax - 1, WorldUnitsPerTile));
+        for (var y = minY; y <= maxY; y++)
+        {
+            for (var x = minX; x <= maxX; x++)
+            {
+                yield return (x, y, _terrain[(y * Width) + x]);
+            }
+        }
+    }
+
+    public PlacementResult ValidatePlacement(
+        WorldObject projected,
+        ObjectLocation source) =>
+        ValidatePlacement(projected, source, EmptyProjection);
+
+    /// <summary>
+    /// The one physical placement contract. <paramref name="projection"/> holds
+    /// the destination location of every object moving in the same transaction,
+    /// so overlap is tested against the projected world, not the committed one.
+    /// </summary>
+    public PlacementResult ValidatePlacement(
+        WorldObject projected,
+        ObjectLocation source,
+        IReadOnlyDictionary<ObjectId, ObjectLocation> projection)
+    {
+        ArgumentNullException.ThrowIfNull(projection);
+        if (projected.Location.Kind != LocationKind.OnMap ||
+            projected.Location.MapId != MapId)
+        {
+            throw new InvalidOperationException(
+                $"Object {projected.Id} is not placed on map {MapId}.");
+        }
+
+        var volume = VolumeFor(projected);
+        var bounds = volume.Horizontal;
+        if (bounds.XMin < WorldBounds.XMin ||
+            bounds.XMax > WorldBounds.XMax ||
+            bounds.YMin < WorldBounds.YMin ||
+            bounds.YMax > WorldBounds.YMax)
+        {
+            return PlacementResult.Reject(
+                PlacementFailure.OutOfMapBounds,
+                PlacementBlocker.MapEdge,
+                $"{projected.Name} does not fit inside map {MapId}.");
+        }
+
+        if (projected.HasFlag(ObjectFlags.Fixed) &&
+            (source.Kind != LocationKind.OnMap ||
+             source.MapId != MapId ||
+             source.Position != projected.Location.Position))
+        {
+            return PlacementResult.Reject(
+                PlacementFailure.Immovable,
+                PlacementBlocker.Object(projected.Id),
+                $"{projected.Name} is fixed in place.");
+        }
+
+        foreach (var (x, y, cell) in TerrainSpan(bounds))
+        {
+            if (cell.Flags.HasFlag(TerrainFlags.Solid) &&
+                volume.ZMax > cell.FloorZ)
+            {
+                return PlacementResult.Reject(
+                    PlacementFailure.TerrainBlocked,
+                    PlacementBlocker.Terrain(x, y),
+                    $"Solid terrain at ({x}, {y}) blocks " +
+                    $"{projected.Name}.");
+            }
+        }
+
+        if (!projected.HasFlag(ObjectFlags.Solid))
+        {
+            return PlacementResult.Allow($"{projected.Name} fits.");
+        }
+
+        foreach (var candidate in ProjectedSolids(bounds, projection))
+        {
+            if (candidate.Id == projected.Id ||
+                !VolumeFor(candidate).Overlaps(volume))
+            {
+                continue;
+            }
+
+            return PlacementResult.Reject(
+                PlacementFailure.ObjectBlocked,
+                PlacementBlocker.Object(candidate.Id),
+                $"{candidate.Name} occupies that space.");
+        }
+
+        return PlacementResult.Allow($"{projected.Name} fits.");
     }
 
     public IReadOnlyList<WorldObject> QueryAll(
@@ -294,7 +459,39 @@ public sealed class WorldMap : IDisposable
         }
 
         _objects.Committed -= OnObjectStoreCommitted;
+        _objects.Maps.Unregister(this);
         _disposed = true;
+    }
+
+    /// <summary>
+    /// Solid objects whose projected location overlaps <paramref name="bounds"/>,
+    /// in <see cref="ObjectId"/> order. Objects moving in the same transaction
+    /// are considered at their destination, wherever the index still holds them.
+    /// </summary>
+    private IEnumerable<WorldObject> ProjectedSolids(
+        WorldRectangle bounds,
+        IReadOnlyDictionary<ObjectId, ObjectLocation> projection)
+    {
+        var candidates = new SortedSet<ObjectId>(CandidateIds(bounds));
+        candidates.UnionWith(projection.Keys);
+        foreach (var id in candidates)
+        {
+            var value = _objects.Get(id);
+            var location = projection.TryGetValue(id, out var projected)
+                ? projected
+                : value.Location;
+            if (location.Kind != LocationKind.OnMap ||
+                location.MapId != MapId)
+            {
+                continue;
+            }
+
+            var snapshot = value with { Location = location };
+            if (snapshot.HasFlag(ObjectFlags.Solid))
+            {
+                yield return snapshot;
+            }
+        }
     }
 
     private void OnObjectStoreCommitted(ObjectStoreCommit _commit) =>

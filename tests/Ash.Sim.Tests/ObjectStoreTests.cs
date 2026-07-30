@@ -26,6 +26,7 @@ public sealed class ObjectStoreTests
     public void OneHandleSurvivesEveryLocationKind()
     {
         var store = new ObjectStore();
+        using var map = new WorldMap(store, 3, width: 9, depth: 5);
         var actor = store.Create(Container(
             "actor",
             ObjectFlags.Actor | ObjectFlags.Container | ObjectFlags.Visible));

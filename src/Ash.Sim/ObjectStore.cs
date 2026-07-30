@@ -369,6 +369,13 @@ public sealed class ObjectStore
 
     public event Action<ObjectStoreCommit>? Committed;
 
+    /// <summary>
+    /// The maps of this world. <see cref="ObjectStore"/> still owns identity and
+    /// components; the set exists so one transaction can reach the authoritative
+    /// terrain and spatial index of a destination map.
+    /// </summary>
+    public WorldMapSet Maps { get; } = new();
+
     public int Count { get; private set; }
 
     public ObjectId Create(ObjectSpawn spawn)

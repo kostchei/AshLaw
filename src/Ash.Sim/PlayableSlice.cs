@@ -22,7 +22,7 @@ public sealed class PlayableSliceWorld
     public const ushort DemoMapId = 0;
     public const int MapWidth = 41;
     public const int MapHeight = 29;
-    public const int WorldUnitsPerTile = 256;
+    public const int WorldUnitsPerTile = WorldMap.WorldUnitsPerTile;
     public const int PlayerAttackDamage = 2;
 
     private ObjectId _activeChestId = ObjectId.None;
@@ -31,18 +31,22 @@ public sealed class PlayableSliceWorld
     {
         Objects = objects;
         Transfers = new ObjectTransferService(objects);
+        Movement = new MovementSolver(objects);
         PlayerId = playerId;
         Map = new WorldMap(
             objects,
             DemoMapId,
             MapWidth,
             MapHeight);
+        BuildTerrain(Map);
         LastMessage = "Explore. Open a chest or fight a monster.";
     }
 
     public ObjectStore Objects { get; }
 
     public ObjectTransferService Transfers { get; }
+
+    public MovementSolver Movement { get; }
 
     public WorldMap Map { get; }
 
@@ -212,28 +216,28 @@ public sealed class PlayableSliceWorld
                 "Movement must be exactly one cardinal grid step.");
         }
 
-        var destination = PlayerPosition.Offset(deltaX, deltaY);
-        if (destination.X < 0 || destination.X >= MapWidth ||
-            destination.Y < 0 || destination.Y >= MapHeight)
+        // One swept solve decides the move; the transaction below revalidates
+        // the same placement contract before anything commits.
+        var sweep = Movement.Resolve(
+            PlayerId,
+            new Vec3i(
+                deltaX * WorldUnitsPerTile,
+                deltaY * WorldUnitsPerTile,
+                0));
+        if (!sweep.ReachedTarget)
         {
-            return Finish(false, "The edge of the demo area blocks the way.");
-        }
-
-        var destinationLocation = MapLocation(destination);
-        var blocker = Map.QueryAnchor(
-                destinationLocation.Position,
-                ObjectFlags.Solid)
-            .FirstOrDefault(candidate => candidate.Id != PlayerId);
-        if (!blocker.Id.IsNone)
-        {
-            return Finish(false, $"{blocker.Name} occupies that space.");
+            return Finish(
+                false,
+                sweep.Blocker.Kind == PlacementBlockerKind.MapEdge
+                    ? "The edge of the demo area blocks the way."
+                    : sweep.Message);
         }
 
         var move = Transfers.Execute(
             new ObjectTransferRequest(
                 PlayerId,
                 Player.Location,
-                destinationLocation));
+                ObjectLocation.OnMap(DemoMapId, sweep.ResolvedPosition)));
         if (!move.Succeeded)
         {
             return Finish(false, move.Message);
@@ -603,12 +607,17 @@ public sealed class PlayableSliceWorld
         });
     }
 
+    /// <summary>
+    /// A footprint is anchored at the far corner of the cell it occupies, so
+    /// the anchor of cell <c>c</c> is <c>(c + 1) * WorldUnitsPerTile</c>. That
+    /// keeps every demo footprint inside the map's world bounds.
+    /// </summary>
     private static ObjectLocation MapLocation(GridPosition position) =>
         ObjectLocation.OnMap(
             DemoMapId,
             new Vec3i(
-                position.X * WorldUnitsPerTile,
-                position.Y * WorldUnitsPerTile,
+                (position.X + 1) * WorldUnitsPerTile,
+                (position.Y + 1) * WorldUnitsPerTile,
                 0));
 
     private static GridPosition GridPositionOf(WorldObject value)
@@ -621,8 +630,22 @@ public sealed class PlayableSliceWorld
 
         var position = value.Location.Position;
         return new GridPosition(
-            position.X / WorldUnitsPerTile,
-            position.Y / WorldUnitsPerTile);
+            (position.X / WorldUnitsPerTile) - 1,
+            (position.Y / WorldUnitsPerTile) - 1);
+    }
+
+    private static void BuildTerrain(WorldMap map)
+    {
+        var wall = new TerrainCell(FloorZ: 0, TerrainFlags.Solid);
+        for (var y = 2; y <= 6; y++)
+        {
+            map.SetTerrain(2, y, wall);
+        }
+
+        for (var x = 12; x <= 18; x++)
+        {
+            map.SetTerrain(x, 25, wall);
+        }
     }
 
     private static string ItemTypeId(string name) =>

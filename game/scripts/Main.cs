@@ -847,6 +847,48 @@ public partial class Main : Node2D
                 new Color("d1903b"),
                 1);
         }
+
+        if (_world.Map.GetTerrain(position.X, position.Y).Flags
+            .HasFlag(TerrainFlags.Solid))
+        {
+            DrawSolidTerrainBlock(at);
+        }
+    }
+
+    /// <summary>
+    /// Solid terrain is map state, not an object, so it is drawn with the floor
+    /// pass. It exists so the collision solver has terrain the player can feel.
+    /// </summary>
+    private void DrawSolidTerrainBlock(Vector2 at)
+    {
+        const int BlockHeight = 12;
+        var top = at + new Vector2(0, -BlockHeight);
+        var left = at + new Vector2(-TileHalfWidth, 0);
+        var right = at + new Vector2(TileHalfWidth, 0);
+        var bottom = at + new Vector2(0, TileHalfHeight);
+        DrawColoredPolygon(
+        [
+            left,
+            bottom,
+            bottom + new Vector2(0, -BlockHeight),
+            left + new Vector2(0, -BlockHeight),
+        ],
+            new Color("463f39"));
+        DrawColoredPolygon(
+        [
+            bottom,
+            right,
+            right + new Vector2(0, -BlockHeight),
+            bottom + new Vector2(0, -BlockHeight),
+        ],
+            new Color("3a342f"));
+        DrawColoredPolygon(
+            Diamond(top, TileHalfWidth, TileHalfHeight, close: false),
+            new Color("6d655b"));
+        DrawPolyline(
+            Diamond(top, TileHalfWidth, TileHalfHeight, close: true),
+            Mortar,
+            1);
     }
 
     private static bool IsCarpetTile(GridPosition position) =>

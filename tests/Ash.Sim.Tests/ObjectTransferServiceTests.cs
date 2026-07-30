@@ -8,6 +8,7 @@ public sealed class ObjectTransferServiceTests
     public void IdentityRoundTripCrossesEveryPlayableLocation()
     {
         var store = new ObjectStore();
+        using var map = new WorldMap(store, 2, width: 4, depth: 4);
         var transfers = new ObjectTransferService(store);
         var actor = store.Create(Actor(capacity: 3));
         var chest = store.Create(Container("chest", capacity: 3));
@@ -200,6 +201,7 @@ public sealed class ObjectTransferServiceTests
     public void TenThousandTransfersAndInjectedFailuresPreserveInvariants()
     {
         var store = new ObjectStore();
+        using var map = new WorldMap(store, 0, width: 33, depth: 33);
         var transfers = new ObjectTransferService(store);
         var containers = Enumerable.Range(0, 4)
             .Select(index => store.Create(
@@ -222,8 +224,8 @@ public sealed class ObjectTransferServiceTests
                 ? ObjectLocation.OnMap(
                     0,
                     new Vec3i(
-                        random.Next(32) * 256,
-                        random.Next(32) * 256,
+                        (random.Next(32) + 1) * 256,
+                        (random.Next(32) + 1) * 256,
                         0))
                 : ObjectLocation.InContainer(
                     containers[random.Next(containers.Length)]);

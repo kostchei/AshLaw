@@ -13,18 +13,37 @@ The objective is a persistent physical world in which objects collide, rest on
 terrain or other objects, fall when support disappears, and reload without
 changing identity or state.
 
-**Implementation status (2026-07-30):** checkpoint 1 is complete. `WorldMap`
-owns terrain and a deterministic footprint-bucket/anchor index; store commits
-rebuild one synchronous revision; gameplay and rendering queries have migrated.
-Checkpoint 2, collision and physical placement, is next.
+**Implementation status (2026-07-30):** checkpoints 1 and 2 are complete.
+`WorldMap` owns terrain and a deterministic footprint-bucket/anchor index; store
+commits rebuild one synchronous revision. `WorldMap.ValidatePlacement` is the one
+physical placement contract, `ObjectTransferService` runs it as a validation
+stage of the same transaction, and `MovementSolver` resolves swept integer
+movement against solid objects, solid terrain and map bounds.
+
+Checkpoint 3, elevation, support and gravity, is next. It owns the physical
+components listed in 2.2 that only support and gravity consume —
+`ProvidesSupport`, `AffectedByGravity`, step height, motion state, vertical
+velocity and the support reference. They were deliberately not added in
+checkpoint 2, where nothing would read them.
+
+Two conventions were settled while implementing checkpoint 2:
+
+- a footprint is anchored at the far corner of the cell it occupies, so the
+  anchor of cell `c` is `(c + 1) * 256` and every placed footprint lies inside
+  the map's world bounds;
+- solid terrain blocks every object, while object-versus-object collision is
+  solid-against-solid, so ground items and loot still share a cell with an actor.
+
+`ObjectStore.Create` remains outside placement validation: spawning builds the
+initial world before its maps exist. Placement is enforced on every transfer.
 
 ## Delivery order
 
 | Checkpoint | Result |
 |---|---|
 | 1. Map container and spatial index — done | Authoritative map ownership and shared spatial queries |
-| 2. Collision and placement — next | Solid volumes block movement and invalid placement cannot commit |
-| 3. Elevation, support, and gravity | Objects stack, retain support, fall, and land deterministically |
+| 2. Collision and placement — done | Solid volumes block movement and invalid placement cannot commit |
+| 3. Elevation, support, and gravity — next | Objects stack, retain support, fall, and land deterministically |
 | 4. Object-world Save v1 | The complete object world round-trips byte-identically |
 | 5. Direct manipulation | Mouse selection and drag/drop use the same transfer and placement contract |
 | 6. Quantities and inventory rules | Stack merge, split, partial transfer, weight, and content restrictions |
