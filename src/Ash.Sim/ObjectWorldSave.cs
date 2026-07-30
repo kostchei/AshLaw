@@ -14,7 +14,18 @@ public sealed record ObjectWorldSnapshot(
     string ContentFingerprint,
     long SimulationTick,
     ushort CurrentMapId,
-    ObjectStoreSnapshot Objects);
+    ObjectStoreSnapshot Objects,
+    IReadOnlyList<WorldMapSnapshot> Maps);
+
+/// <summary>
+/// A world rebuilt from a save: a store, its maps and the tick they were saved
+/// on. Loading builds this beside the live world and never mutates it.
+/// </summary>
+public sealed record LoadedObjectWorld(
+    ObjectStore Objects,
+    IReadOnlyList<WorldMap> Maps,
+    long SimulationTick,
+    ushort CurrentMapId);
 
 public sealed class ObjectWorldSaveException : InvalidOperationException
 {
@@ -36,13 +47,17 @@ public static class ObjectWorldSave
     /// <summary>"ASHW", the file magic.</summary>
     public static readonly byte[] Magic = "ASHW"u8.ToArray();
 
-    public const int FormatVersion = 1;
+    /// <summary>
+    /// Version 2 added the terrain section. Version 1 was never written outside
+    /// this repository's tests, so it has no migration and is simply refused.
+    /// </summary>
+    public const int FormatVersion = 2;
 
     /// <summary>
     /// The oldest reader that can still make sense of this file. A reader below
     /// this refuses the file instead of guessing at it.
     /// </summary>
-    public const int MinimumReaderVersion = 1;
+    public const int MinimumReaderVersion = 2;
 
     /// <summary>A sanity bound so a corrupt length cannot ask for a huge buffer.</summary>
     public const int MaximumPayloadBytes = 256 * 1024 * 1024;
@@ -128,12 +143,81 @@ public static class ObjectWorldSave
                 "The save payload does not match its checksum.");
         }
 
+        var (maps, objects) = ReadPayload(payload);
         return new ObjectWorldSnapshot(
             fingerprint,
             tick,
             currentMapId,
-            ReadPayload(payload));
+            objects,
+            maps);
     }
+
+    /// <summary>
+    /// Captures the whole object world: every map in id order and every object
+    /// slot. Derived caches are deliberately absent.
+    /// </summary>
+    public static ObjectWorldSnapshot Capture(
+        ObjectStore objects,
+        string contentFingerprint,
+        long simulationTick,
+        ushort currentMapId)
+    {
+        ArgumentNullException.ThrowIfNull(objects);
+        ArgumentException.ThrowIfNullOrWhiteSpace(contentFingerprint);
+        return new ObjectWorldSnapshot(
+            contentFingerprint,
+            simulationTick,
+            currentMapId,
+            objects.Capture(),
+            objects.Maps.All.Select(map => map.Capture()).ToArray());
+    }
+
+    /// <summary>
+    /// Rebuilds a complete world beside the live one: the store first, then its
+    /// maps, which index and validate what the store now holds. The caller
+    /// decides whether to adopt it — loading never mutates a running world, and
+    /// never re-settles the physics: a world resumes exactly where it was saved.
+    /// </summary>
+    public static LoadedObjectWorld Restore(ObjectWorldSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var objects = ObjectStore.Restore(snapshot.Objects);
+        var maps = new List<WorldMap>(snapshot.Maps.Count);
+        try
+        {
+            foreach (var map in snapshot.Maps)
+            {
+                maps.Add(WorldMap.Restore(objects, map));
+            }
+
+            foreach (var map in maps)
+            {
+                map.ValidateIndex();
+            }
+
+            new PhysicsSystem(objects).ValidateInvariants();
+        }
+        catch
+        {
+            foreach (var map in maps)
+            {
+                map.Dispose();
+            }
+
+            throw;
+        }
+
+        return new LoadedObjectWorld(
+            objects,
+            maps,
+            snapshot.SimulationTick,
+            snapshot.CurrentMapId);
+    }
+
+    public static LoadedObjectWorld RestoreFile(
+        string path,
+        string expectedFingerprint) =>
+        Restore(ReadFile(path, expectedFingerprint));
 
     /// <summary>
     /// Writes through a sibling temporary file whose checksum is verified before
@@ -169,6 +253,36 @@ public static class ObjectWorldSave
     private static byte[] WritePayload(ObjectWorldSnapshot snapshot)
     {
         using var buffer = new MemoryStream();
+
+        // Maps first: a reader can build the world in the order it is written.
+        var maps = snapshot.Maps.OrderBy(map => map.MapId).ToArray();
+        if (maps.Select(map => map.MapId).Distinct().Count() != maps.Length)
+        {
+            throw new ObjectWorldSaveException(
+                "Two maps in the snapshot share one map id.");
+        }
+
+        WriteInt32(buffer, maps.Length);
+        foreach (var map in maps)
+        {
+            WriteUInt16(buffer, map.MapId);
+            WriteInt32(buffer, map.Width);
+            WriteInt32(buffer, map.Depth);
+            WriteInt32(buffer, map.BucketSize);
+            if (map.Terrain.Count != checked(map.Width * map.Depth))
+            {
+                throw new ObjectWorldSaveException(
+                    $"Map {map.MapId} has {map.Terrain.Count} terrain cells " +
+                    $"for a {map.Width}x{map.Depth} grid.");
+            }
+
+            foreach (var cell in map.Terrain)
+            {
+                WriteInt32(buffer, cell.FloorZ);
+                buffer.WriteByte((byte)cell.Flags);
+            }
+        }
+
         var slots = snapshot.Objects.Slots;
         WriteInt32(buffer, slots.Count);
         for (var index = 0; index < slots.Count; index++)
@@ -196,9 +310,11 @@ public static class ObjectWorldSave
         return buffer.ToArray();
     }
 
-    private static ObjectStoreSnapshot ReadPayload(ReadOnlySpan<byte> payload)
+    private static (IReadOnlyList<WorldMapSnapshot> Maps, ObjectStoreSnapshot Objects)
+        ReadPayload(ReadOnlySpan<byte> payload)
     {
         var reader = new SpanReader(payload);
+        var maps = ReadMaps(ref reader);
         var slotCount = reader.ReadInt32();
         if (slotCount < 0 || slotCount > ObjectId.MaxIndex + 1)
         {
@@ -251,7 +367,67 @@ public static class ObjectWorldSave
                 "The payload has trailing bytes after the object store.");
         }
 
-        return new ObjectStoreSnapshot(slots, free);
+        return (maps, new ObjectStoreSnapshot(slots, free));
+    }
+
+    private static IReadOnlyList<WorldMapSnapshot> ReadMaps(ref SpanReader reader)
+    {
+        const int MaximumCellsPerMap = 16 * 1024 * 1024;
+        const byte KnownTerrainFlags =
+            (byte)(TerrainFlags.Walkable |
+                   TerrainFlags.Solid |
+                   TerrainFlags.ProvidesSupport |
+                   TerrainFlags.Hazard);
+
+        var mapCount = reader.ReadInt32();
+        if (mapCount < 0 || mapCount > ushort.MaxValue + 1)
+        {
+            throw new ObjectWorldSaveException(
+                $"The save declares an impossible map count of {mapCount}.");
+        }
+
+        var maps = new List<WorldMapSnapshot>(mapCount);
+        var seen = new HashSet<ushort>();
+        for (var index = 0; index < mapCount; index++)
+        {
+            var mapId = reader.ReadUInt16();
+            if (!seen.Add(mapId))
+            {
+                throw new ObjectWorldSaveException(
+                    $"The save holds map {mapId} twice.");
+            }
+
+            var width = reader.ReadInt32();
+            var depth = reader.ReadInt32();
+            var bucketSize = reader.ReadInt32();
+            if (width <= 0 || depth <= 0 || bucketSize <= 0 ||
+                (long)width * depth > MaximumCellsPerMap)
+            {
+                throw new ObjectWorldSaveException(
+                    $"Map {mapId} declares impossible extents " +
+                    $"{width}x{depth} with bucket size {bucketSize}.");
+            }
+
+            var cells = new TerrainCell[width * depth];
+            for (var cell = 0; cell < cells.Length; cell++)
+            {
+                var floorZ = reader.ReadInt32();
+                var flags = reader.ReadByte();
+                if ((flags & ~KnownTerrainFlags) != 0)
+                {
+                    throw new ObjectWorldSaveException(
+                        $"Map {mapId} cell {cell} has unknown terrain flags " +
+                        $"0x{flags:X2}.");
+                }
+
+                cells[cell] = new TerrainCell(floorZ, (TerrainFlags)flags);
+            }
+
+            maps.Add(
+                new WorldMapSnapshot(mapId, width, depth, bucketSize, cells));
+        }
+
+        return maps;
     }
 
     private static void WriteObject(Stream buffer, WorldObject value)

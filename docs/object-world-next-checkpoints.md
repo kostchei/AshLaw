@@ -38,18 +38,27 @@ Checkpoint 4, object-world Save v1, is in progress. Landed so far:
   stale, and allocation after a load reuses the same slots in the same order;
 - derived caches stay out of the payload — spatial buckets, support back-links,
   visible-object lists and sort order are rebuilt on load, while the
-  authoritative support *references* are saved.
+  authoritative support *references* are saved;
+- the terrain section (format version 2): every map's identity, extents and
+  terrain cells. **Save v1 stores the whole grid, not deltas.** The design in
+  1.1 is authored map content plus a runtime-delta layer, but no authored
+  content exists — the demo map is still built in code — and a save that depends
+  on content it cannot name is worse than one that is self-contained. When
+  authored maps arrive, this section becomes a base-map id plus deltas and the
+  format version bumps again;
+- loading builds a complete world beside the live one — store first, then its
+  maps, then index and physics invariants — and **never re-settles**. A world
+  resumes on the tick it was saved on with mid-fall objects still falling;
+  settling belongs only to starting a world from nothing. `PlayableSliceWorld`
+  gains `Save`/`Load` on exactly those terms.
 
 Still open in checkpoint 4:
 
-- the terrain and map section of the payload, which first needs the decision
-  about whether the demo map is authored data or code (`BuildTerrain` is code
-  today). The format version bumps when that section lands; nothing writes a
-  save it must keep reading yet, so no migration is owed;
 - the save boundary in 4.1: saving only at the end of a completed tick, with no
   transfer in flight and a deferral when a drag is `InTransfer`;
-- the staged load of 4.4: deserialize into a staging store and map set, resolve
-  every reference, run the invariants, then replace the live world atomically.
+- adopting a loaded world into a running session: `ObjectWorldSave.Restore`
+  already builds the replacement without touching the live world, so what
+  remains is the swap itself and the in-game save/load commands.
 
 Conventions settled while implementing checkpoints 2 and 3:
 

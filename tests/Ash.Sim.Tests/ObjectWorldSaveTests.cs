@@ -31,9 +31,9 @@ public sealed class ObjectWorldSaveTests
         var store = BuildWorld(out _, out _);
 
         var first = ObjectWorldSave.Write(Capture(store));
-        var reloaded = ObjectStore.Restore(
-            ObjectWorldSave.Read(first, Fingerprint).Objects);
-        var second = ObjectWorldSave.Write(Capture(reloaded));
+        var reloaded = ObjectWorldSave.Restore(
+            ObjectWorldSave.Read(first, Fingerprint));
+        var second = ObjectWorldSave.Write(Capture(reloaded.Objects));
 
         Assert.Equal(first, second);
         Assert.Equal(
@@ -126,31 +126,148 @@ public sealed class ObjectWorldSaveTests
         Assert.Equal(MotionState.Falling, store.Get(faller).Motion);
         Assert.True(store.Get(faller).VerticalVelocity > 0);
 
-        var restored = ObjectStore.Restore(
+        var loaded = ObjectWorldSave.Restore(
             ObjectWorldSave.Read(
-                ObjectWorldSave.Write(Capture(store)),
-                Fingerprint).Objects);
+                ObjectWorldSave.Write(
+                    ObjectWorldSave.Capture(
+                        store,
+                        Fingerprint,
+                        physics.Tick,
+                        currentMapId: 0)),
+                Fingerprint));
+        var restored = loaded.Objects;
 
         var restoredPlate = restored.Enumerate()
             .Single(value => value.Name == "Plate");
         Assert.Equal(plate, restoredPlate);
         Assert.Equal(store.Get(faller), restored.Get(faller));
+        Assert.Equal(physics.Tick, loaded.SimulationTick);
 
-        // A loaded world resumes; it does not re-settle. Ticking the restored
-        // world reproduces the same next step as the original.
-        using var restoredMap = new WorldMap(restored, 0, width: 8, depth: 8);
-        var restoredPhysics = new PhysicsSystem(restored);
+        // A loaded world resumes; it does not re-settle. Restoring runs no
+        // physics at all, and the next tick matches the original's next tick.
+        var restoredPhysics = new PhysicsSystem(
+            restored,
+            startTick: loaded.SimulationTick);
+        Assert.Equal(physics.Tick, restoredPhysics.Tick);
         restoredPhysics.Advance();
         physics.Advance();
         Assert.Equal(store.Get(faller), restored.Get(faller));
+        Assert.Equal(physics.Tick, restoredPhysics.Tick);
         restoredPhysics.ValidateInvariants();
+    }
+
+    [Fact]
+    public void TerrainRoundTripsCellForCell()
+    {
+        var store = BuildWorld(out _, out var map);
+
+        var loaded = ObjectWorldSave.Restore(
+            ObjectWorldSave.Read(
+                ObjectWorldSave.Write(Capture(store)),
+                Fingerprint));
+        var restored = loaded.Maps.Single();
+
+        Assert.Equal(map.MapId, restored.MapId);
+        Assert.Equal(map.Width, restored.Width);
+        Assert.Equal(map.Depth, restored.Depth);
+        Assert.Equal(map.BucketSize, restored.BucketSize);
+        Assert.Equal(map.WorldBounds, restored.WorldBounds);
+        for (var y = 0; y < map.Depth; y++)
+        {
+            for (var x = 0; x < map.Width; x++)
+            {
+                Assert.Equal(map.GetTerrain(x, y), restored.GetTerrain(x, y));
+            }
+        }
+    }
+
+    [Fact]
+    public void SeveralMapsSurviveAndKeepTheirOwnTerrain()
+    {
+        var store = new ObjectStore();
+        using var ground = new WorldMap(store, 0, width: 4, depth: 4);
+        using var cellar = new WorldMap(store, 9, width: 6, depth: 3);
+        cellar.SetTerrain(
+            5,
+            2,
+            new TerrainCell(-32, TerrainFlags.Walkable | TerrainFlags.ProvidesSupport));
+        store.Create(new ObjectSpawn
+        {
+            TypeId = "prop.crate",
+            Name = "Crate",
+            ShapeId = "prop",
+            Location = ObjectLocation.OnMap(9, new Vec3i(1536, 768, -32)),
+            Footprint = new ObjectFootprint(128, 128),
+            Height = 32,
+            Flags = ObjectFlags.Solid | ObjectFlags.Visible,
+        });
+
+        var loaded = ObjectWorldSave.Restore(
+            ObjectWorldSave.Read(
+                ObjectWorldSave.Write(
+                    ObjectWorldSave.Capture(store, Fingerprint, 0, 9)),
+                Fingerprint));
+
+        Assert.Equal([(ushort)0, (ushort)9], loaded.Maps.Select(map => map.MapId));
+        Assert.Equal(
+            new TerrainCell(-32, TerrainFlags.Walkable | TerrainFlags.ProvidesSupport),
+            loaded.Objects.Maps.Get(9).GetTerrain(5, 2));
+        Assert.Equal(TerrainCell.Floor, loaded.Objects.Maps.Get(0).GetTerrain(3, 3));
+        Assert.Single(loaded.Objects.Maps.Get(9).QueryAll());
+        Assert.Empty(loaded.Objects.Maps.Get(0).QueryAll());
+    }
+
+    [Fact]
+    public void CorruptTerrainIsRejected()
+    {
+        var store = new ObjectStore();
+        using var map = new WorldMap(store, 0, width: 2, depth: 2);
+        var snapshot = ObjectWorldSave.Capture(store, Fingerprint, 0, 0);
+        var bytes = ObjectWorldSave.Write(snapshot);
+
+        // The terrain flags byte of the first cell sits after the header, the
+        // map count, the map header and that cell's floor elevation.
+        var header = ObjectWorldSave.Magic.Length +
+            sizeof(int) + sizeof(int) +
+            sizeof(int) + System.Text.Encoding.UTF8.GetByteCount(Fingerprint) +
+            sizeof(long) + sizeof(ushort) + sizeof(int) + 32;
+        var flagsOffset = header + sizeof(int) +
+            sizeof(ushort) + sizeof(int) + sizeof(int) + sizeof(int) +
+            sizeof(int);
+        var corrupt = bytes.ToArray();
+        corrupt[flagsOffset] = 0x80;
+
+        var mismatched = Assert.Throws<ObjectWorldSaveException>(
+            () => ObjectWorldSave.Read(corrupt, Fingerprint));
+        Assert.Contains("checksum", mismatched.Message);
+
+        // Re-sign the corrupted payload so the terrain check, not the checksum,
+        // is what rejects it.
+        var resigned = ObjectWorldSave.Write(
+            snapshot with
+            {
+                Maps =
+                [
+                    snapshot.Maps[0] with
+                    {
+                        Terrain =
+                        [
+                            new TerrainCell(0, (TerrainFlags)0x80),
+                            .. snapshot.Maps[0].Terrain.Skip(1),
+                        ],
+                    },
+                ],
+            });
+
+        var rejected = Assert.Throws<ObjectWorldSaveException>(
+            () => ObjectWorldSave.Read(resigned, Fingerprint));
+        Assert.Contains("terrain flags", rejected.Message);
     }
 
     [Fact]
     public void DerivedCachesAreRebuiltAndNotSaved()
     {
-        var store = BuildWorld(out _, out var mapId);
-        using var map = new WorldMap(store, mapId, width: 40, depth: 40);
+        var store = BuildWorld(out _, out var map);
         var region = new WorldRectangle(0, 40 * 256, 0, 40 * 256);
         var before = map.QueryAll().Select(value => value.Id).ToArray();
         var beforeRegion = map.Query(region, ObjectFlags.Solid)
@@ -158,9 +275,9 @@ public sealed class ObjectWorldSaveTests
             .ToArray();
 
         var bytes = ObjectWorldSave.Write(Capture(store));
-        var restored = ObjectStore.Restore(
-            ObjectWorldSave.Read(bytes, Fingerprint).Objects);
-        using var restoredMap = new WorldMap(restored, mapId, width: 40, depth: 40);
+        var loaded = ObjectWorldSave.Restore(
+            ObjectWorldSave.Read(bytes, Fingerprint));
+        var restoredMap = loaded.Maps.Single();
 
         Assert.Equal(
             before,
@@ -176,19 +293,19 @@ public sealed class ObjectWorldSaveTests
     [Fact]
     public void HeaderCarriesTheTickFingerprintAndCurrentMap()
     {
-        var store = BuildWorld(out _, out var mapId);
-        var snapshot = new ObjectWorldSnapshot(
+        var store = BuildWorld(out _, out var map);
+        var snapshot = ObjectWorldSave.Capture(
+            store,
             Fingerprint,
-            SimulationTick: 4_294_967_400,
-            CurrentMapId: mapId,
-            store.Capture());
+            simulationTick: 4_294_967_400,
+            currentMapId: map.MapId);
 
         var read = ObjectWorldSave.Read(
             ObjectWorldSave.Write(snapshot),
             Fingerprint);
 
         Assert.Equal(4_294_967_400, read.SimulationTick);
-        Assert.Equal(mapId, read.CurrentMapId);
+        Assert.Equal(map.MapId, read.CurrentMapId);
         Assert.Equal(Fingerprint, read.ContentFingerprint);
     }
 
@@ -268,7 +385,11 @@ public sealed class ObjectWorldSaveTests
     }
 
     private static ObjectWorldSnapshot Capture(ObjectStore store) =>
-        new(Fingerprint, SimulationTick: 12_345, CurrentMapId: 3, store.Capture());
+        ObjectWorldSave.Capture(
+            store,
+            Fingerprint,
+            simulationTick: 12_345,
+            currentMapId: 3);
 
     /// <summary>
     /// A world with a thousand objects across every location kind, plus dead
@@ -276,11 +397,26 @@ public sealed class ObjectWorldSaveTests
     /// </summary>
     private static ObjectStore BuildWorld(
         out IReadOnlyList<ObjectId> destroyed,
-        out ushort mapId)
+        out WorldMap map)
     {
-        mapId = 3;
+        const ushort mapId = 3;
         var store = new ObjectStore();
-        using var map = new WorldMap(store, mapId, width: 40, depth: 40);
+
+        // The map stays alive: a capture has to see the terrain as well as the
+        // objects, and the caller owns it for the rest of the test.
+        map = new WorldMap(store, mapId, width: 40, depth: 40);
+
+        // Distinctive cells well clear of where the objects below stand, so the
+        // fixture stays a physically valid world.
+        map.SetTerrain(
+            37,
+            37,
+            new TerrainCell(24, TerrainFlags.Walkable | TerrainFlags.ProvidesSupport));
+        map.SetTerrain(36, 36, new TerrainCell(0, TerrainFlags.Solid));
+        map.SetTerrain(
+            38,
+            38,
+            new TerrainCell(-64, TerrainFlags.Walkable | TerrainFlags.Hazard));
         var containers = new List<ObjectId>();
         var actors = new List<ObjectId>();
         for (var index = 0; index < 40; index++)
@@ -292,7 +428,10 @@ public sealed class ObjectWorldSaveTests
                 ShapeId = "container.chest",
                 Location = ObjectLocation.OnMap(
                     mapId,
-                    new Vec3i(((index % 20) + 1) * 256, 256, 0)),
+                    new Vec3i(
+                        ((index % 20) + 1) * 256,
+                        ((index / 20) + 1) * 256,
+                        0)),
                 Footprint = new ObjectFootprint(128, 128),
                 Height = 40,
                 Flags =
@@ -308,7 +447,10 @@ public sealed class ObjectWorldSaveTests
                 ShapeId = "actor.guard",
                 Location = ObjectLocation.OnMap(
                     mapId,
-                    new Vec3i(((index % 20) + 1) * 256, 1024, 8)),
+                    new Vec3i(
+                        ((index % 20) + 1) * 256,
+                        ((index / 20) + 4) * 256,
+                        0)),
                 Footprint = new ObjectFootprint(128, 128),
                 Height = 64,
                 StepHeight = 8,

@@ -366,6 +366,71 @@ public sealed class PlayableSliceTests
         world.Physics.ValidateInvariants();
     }
 
+    [Fact]
+    public void TheDemoWorldSavesAndLoadsWithoutSettlingAgain()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            $"ash-slice-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "demo.ashw");
+            var world = PlayableSliceWorld.CreateDemo();
+            WalkTo(world, new GridPosition(25, 5));
+            for (var step = 0; step < 3; step++)
+            {
+                Assert.True(world.MovePlayer(1, 0).Succeeded);
+            }
+
+            // Step off the raised stairs so an object is mid-fall when saved.
+            var urn = world.GroundItems.Single(item => item.Name == "Clay Urn");
+            Assert.True(world.RemoveTrestleSupport().Succeeded);
+            world.AdvancePhysics();
+            Assert.Equal(
+                MotionState.Falling,
+                world.Objects.Get(urn.Id).Motion);
+            var savedUrn = world.Objects.Get(urn.Id);
+            var savedPlayer = world.Player;
+            var savedTick = world.Physics.Tick;
+            var savedTerrain = world.Map.GetTerrain(
+                PlayableSliceWorld.PlatformXMin,
+                PlayableSliceWorld.TerraceYMin);
+
+            world.Save(path);
+            var loaded = PlayableSliceWorld.Load(path);
+
+            Assert.Equal(savedTick, loaded.Physics.Tick);
+            Assert.Equal(savedPlayer, loaded.Player);
+            Assert.Equal(savedUrn, loaded.Objects.Get(urn.Id));
+            Assert.Equal(
+                savedTerrain,
+                loaded.Map.GetTerrain(
+                    PlayableSliceWorld.PlatformXMin,
+                    PlayableSliceWorld.TerraceYMin));
+            Assert.Equal(
+                world.Map.IndexedObjectCount,
+                loaded.Map.IndexedObjectCount);
+
+            // Loading resumes rather than settles: the urn is still falling,
+            // and one tick on each world lands it in the same place.
+            Assert.Equal(
+                MotionState.Falling,
+                loaded.Objects.Get(urn.Id).Motion);
+            world.AdvancePhysics();
+            loaded.AdvancePhysics();
+            Assert.Equal(
+                world.Objects.Get(urn.Id),
+                loaded.Objects.Get(urn.Id));
+            loaded.Physics.ValidateInvariants();
+            loaded.Map.ValidateIndex();
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     // The demo's props and monsters sit on the rows the Avatar starts on, so
     // the walk clears the column first and then runs along the empty row.
     private static void WalkTo(PlayableSliceWorld world, GridPosition target)

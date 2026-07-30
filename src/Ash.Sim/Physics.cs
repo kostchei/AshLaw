@@ -60,7 +60,8 @@ public sealed class PhysicsSystem
     public PhysicsSystem(
         ObjectStore objects,
         int gravityPerTick = DefaultGravityPerTick,
-        int terminalVelocity = DefaultTerminalVelocity)
+        int terminalVelocity = DefaultTerminalVelocity,
+        long startTick = 0)
     {
         _objects = objects ?? throw new ArgumentNullException(nameof(objects));
         if (gravityPerTick <= 0)
@@ -75,8 +76,17 @@ public sealed class PhysicsSystem
 
         _transfers = new ObjectTransferService(objects);
         _movement = new MovementSolver(objects);
+        if (startTick < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(startTick));
+        }
+
         GravityPerTick = gravityPerTick;
         TerminalVelocity = terminalVelocity;
+
+        // A loaded world resumes on the tick it was saved on: the tick counter
+        // is authoritative sequence state, not a fresh counter per session.
+        Tick = startTick;
     }
 
     public int GravityPerTick { get; }

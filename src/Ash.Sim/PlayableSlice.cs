@@ -45,26 +45,31 @@ public sealed class PlayableSliceWorld
     public const int PitYMax = 26;
     public const int BridgeY = 24;
 
+    /// <summary>
+    /// Identifies the content this world's type and shape ids belong to. A save
+    /// written for different content is refused rather than reinterpreted.
+    /// </summary>
+    public const string ContentFingerprint = "ash.playable-slice.v1";
+
+    private const string AvatarTypeId = "actor.avatar";
     private const int TableHeight = 40;
     private const int CrateHeight = 32;
     private const int BridgeDeckHeight = 4;
 
     private ObjectId _activeChestId = ObjectId.None;
 
-    private PlayableSliceWorld(ObjectStore objects, ObjectId playerId)
+    private PlayableSliceWorld(
+        ObjectStore objects,
+        WorldMap map,
+        ObjectId playerId,
+        long startTick)
     {
         Objects = objects;
         Transfers = new ObjectTransferService(objects);
         Movement = new MovementSolver(objects);
         PlayerId = playerId;
-        Map = new WorldMap(
-            objects,
-            DemoMapId,
-            MapWidth,
-            MapHeight);
-        BuildTerrain(Map);
-        Physics = new PhysicsSystem(objects);
-        Settle();
+        Map = map;
+        Physics = new PhysicsSystem(objects, startTick: startTick);
         LastMessage = "Explore. Open a chest or fight a monster.";
     }
 
@@ -133,7 +138,7 @@ public sealed class PlayableSliceWorld
         var objects = new ObjectStore();
         var player = objects.Create(new ObjectSpawn
         {
-            TypeId = "actor.avatar",
+            TypeId = AvatarTypeId,
             Name = "Avatar",
             ShapeId = "avatar.knight",
             Location = MapLocation(new GridPosition(4, 14)),
@@ -218,7 +223,51 @@ public sealed class PlayableSliceWorld
             loot: ["Iron Buckle", "Guard Token"]);
 
         SpawnPhysicsArea(objects);
-        return new PlayableSliceWorld(objects, player);
+        var map = new WorldMap(objects, DemoMapId, MapWidth, MapHeight);
+        BuildTerrain(map);
+        var world = new PlayableSliceWorld(objects, map, player, startTick: 0);
+        world.Settle();
+        return world;
+    }
+
+    /// <summary>
+    /// Writes the whole object world — objects, physics state and terrain — to
+    /// <paramref name="path"/>.
+    /// </summary>
+    public void Save(string path) =>
+        ObjectWorldSave.WriteFile(
+            path,
+            ObjectWorldSave.Capture(
+                Objects,
+                ContentFingerprint,
+                Physics.Tick,
+                DemoMapId));
+
+    /// <summary>
+    /// Loads a world saved by <see cref="Save"/>. The loaded world is built
+    /// beside the caller's and is never settled: a mid-fall object resumes its
+    /// fall, and the physics tick continues where it stopped. Settling belongs
+    /// to <see cref="CreateDemo"/>, which starts a world from nothing.
+    /// </summary>
+    public static PlayableSliceWorld Load(string path)
+    {
+        var loaded = ObjectWorldSave.RestoreFile(path, ContentFingerprint);
+        var map = loaded.Objects.Maps.Get(loaded.CurrentMapId);
+        var avatars = loaded.Objects.Enumerate()
+            .Where(value => value.TypeId == AvatarTypeId)
+            .ToArray();
+        if (avatars.Length != 1)
+        {
+            throw new InvalidOperationException(
+                $"A demo save must hold exactly one {AvatarTypeId}, but this " +
+                $"one holds {avatars.Length}.");
+        }
+
+        return new PlayableSliceWorld(
+            loaded.Objects,
+            map,
+            avatars[0].Id,
+            loaded.SimulationTick);
     }
 
     /// <summary>

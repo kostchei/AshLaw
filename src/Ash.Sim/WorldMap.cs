@@ -76,6 +76,24 @@ public readonly record struct WorldVolume(
 }
 
 /// <summary>
+/// One map's authoritative state: identity, extents, and every terrain cell in
+/// row-major order.
+/// </summary>
+/// <remarks>
+/// Save v1 stores the whole grid. The design in 1.1 is authored map content
+/// plus a runtime-delta layer, but no authored content exists yet — the demo
+/// map is still built in code — and a save that depends on content it cannot
+/// name is worse than one that is self-contained. When authored maps arrive
+/// this section becomes a base-map id plus deltas, and the format version bumps.
+/// </remarks>
+public sealed record WorldMapSnapshot(
+    ushort MapId,
+    int Width,
+    int Depth,
+    int BucketSize,
+    IReadOnlyList<TerrainCell> Terrain);
+
+/// <summary>
 /// The live maps of one world, keyed by map id. A map registers itself here
 /// when it is constructed, which is what lets the object transaction validate
 /// physical placement without a second world model.
@@ -83,6 +101,9 @@ public readonly record struct WorldVolume(
 public sealed class WorldMapSet
 {
     private readonly SortedDictionary<ushort, WorldMap> _maps = [];
+
+    /// <summary>Every live map, ordered by id, which is the order a save writes.</summary>
+    public IReadOnlyList<WorldMap> All => _maps.Values.ToArray();
 
     public WorldMap Get(ushort mapId) =>
         _maps.TryGetValue(mapId, out var map)
@@ -147,6 +168,18 @@ public sealed class WorldMap : IDisposable
         int depth,
         int bucketSize = DefaultBucketSize,
         TerrainCell? defaultTerrain = null)
+        : this(objects, mapId, width, depth, bucketSize, defaultTerrain, null)
+    {
+    }
+
+    private WorldMap(
+        ObjectStore objects,
+        ushort mapId,
+        int width,
+        int depth,
+        int bucketSize,
+        TerrainCell? defaultTerrain,
+        IReadOnlyList<TerrainCell>? terrain)
     {
         _objects = objects ??
             throw new ArgumentNullException(nameof(objects));
@@ -174,10 +207,18 @@ public sealed class WorldMap : IDisposable
             checked(width * WorldUnitsPerTile),
             0,
             checked(depth * WorldUnitsPerTile));
-        _terrain = Enumerable.Repeat(
-                defaultTerrain ?? TerrainCell.Floor,
-                checked(width * depth))
-            .ToArray();
+        var cellCount = checked(width * depth);
+        if (terrain is not null && terrain.Count != cellCount)
+        {
+            throw new ArgumentException(
+                $"Map {mapId} needs {cellCount} terrain cells but was given " +
+                $"{terrain.Count}.",
+                nameof(terrain));
+        }
+
+        _terrain = terrain?.ToArray() ??
+            Enumerable.Repeat(defaultTerrain ?? TerrainCell.Floor, cellCount)
+                .ToArray();
         _objects.Maps.Register(this);
         _objects.Committed += OnObjectStoreCommitted;
         RebuildIndex();
@@ -197,6 +238,34 @@ public sealed class WorldMap : IDisposable
     public long Revision { get; private set; }
 
     public int IndexedObjectCount => _mapObjects.Length;
+
+    /// <summary>
+    /// The map's authoritative state for a save: its identity, extents and
+    /// every terrain cell in row-major order. The spatial index and support
+    /// back-links are not here — they are rebuilt from the object store.
+    /// </summary>
+    public WorldMapSnapshot Capture() =>
+        new(MapId, Width, Depth, BucketSize, _terrain.ToArray());
+
+    /// <summary>
+    /// Rebuilds a map from <paramref name="snapshot"/> and registers it with
+    /// <paramref name="objects"/>, which indexes whatever is already there.
+    /// Restore the object store first.
+    /// </summary>
+    public static WorldMap Restore(
+        ObjectStore objects,
+        WorldMapSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        return new WorldMap(
+            objects,
+            snapshot.MapId,
+            snapshot.Width,
+            snapshot.Depth,
+            snapshot.BucketSize,
+            defaultTerrain: null,
+            snapshot.Terrain);
+    }
 
     public TerrainCell GetTerrain(int x, int y)
     {
