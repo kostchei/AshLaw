@@ -96,6 +96,30 @@ the Godot .NET SDK:
 dotnet build Ash.sln
 ```
 
+### Run the game and check that it worked
+
+```powershell
+pwsh ./tools/run-game.ps1
+```
+
+Builds the game, runs it, plays a short scripted input sequence, validates the object,
+physics and index invariants inside the running engine, and prints a report. Useful
+variants:
+
+```powershell
+pwsh ./tools/run-game.ps1 -Screenshot -Goto 32,5   # walk to a cell, save a PNG
+pwsh ./tools/run-game.ps1 -DebugOverlay -Screenshot # with the F3 overlay on
+pwsh ./tools/run-game.ps1 -Interactive              # just play it
+```
+
+Artifacts land in `artifacts/run-game/` (git-ignored): `smoke-report.txt`, `godot.log`,
+and `screenshot.png`. A screenshot needs a window, so `-Screenshot` implies `-Windowed`;
+a headless run has no renderer to capture.
+
+**Godot's exit code is not a verdict on the game.** A scene can fail to load or a script
+can throw every frame and the process still exits zero, so the script judges the run by
+the report the game writes, not by the exit code.
+
 ### Prefer the scripts over `Ash.sln` for library work
 
 `Ash.sln` includes `game/Ash.Game.csproj`, which needs the Godot SDK. Nothing under
@@ -142,6 +166,25 @@ Two different causes, and they need opposite responses:
    needs Godot. `pwsh ./tools/preflight.ps1` tells you which of the two you have.
 
 Neither is a reason to stop testing the libraries.
+
+### Godot starts, prints its version, and then hangs forever
+
+**Cause: it was launched through the WinGet symlink.** WinGet puts `godot` on `PATH` as a
+symlink in `WinGet/Links`. Godot mono resolves `GodotSharp/Api` relative to *its own
+executable*, so launching it by that name makes it look in `WinGet/Links/GodotSharp`,
+find nothing, and open a modal dialog:
+
+```text
+Unable to find the .NET assemblies directory.
+Make sure the '.../WinGet/Links/GodotSharp/Api/Debug' directory exists ...
+```
+
+Nothing in the project ever runs, and headless there is nothing on stdout to say why —
+the process just sits there waiting for a click. The engine's own shutdown noise ("RID
+allocations ... were leaked at exit") is unrelated and harmless.
+
+Launch the real executable the link points at, or let `tools/run-game.ps1` do it: it
+resolves the link and refuses to start when `GodotSharp` is not beside the binary.
 
 ### Godot is not installed at all
 
