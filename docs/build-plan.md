@@ -846,4 +846,8 @@ the `uid://` on `Main.cs`, which the same rewrite had produced.
    exposes main-hand equip/unequip plus world drop/pickup.
 7. **Next:** add the map container, region activation, and commit-rebuilt uniform
    spatial index, then route collision and visibility through its queries.
+   Collision, physical placement, support/elevation, gravity, and a deterministic
+   object-world Save v1 follow in that order. The implementation contract and
+   exit proofs are in
+   [object-world-next-checkpoints.md](object-world-next-checkpoints.md).
    Palette polish follows playable interaction.

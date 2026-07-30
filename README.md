@@ -270,7 +270,9 @@ The visual contract for new rooms and assets is
 
 1. [`docs/build-plan.md`](docs/build-plan.md) — milestones, risks, and current status
    (§6 for where the project actually is).
-2. [`docs/adr/`](docs/adr/) — the five decisions that are expensive to reverse.
-3. [`vendor/ash-v1-rules/INTEGRATION.md`](vendor/ash-v1-rules/INTEGRATION.md) — the
+2. [`docs/object-world-next-checkpoints.md`](docs/object-world-next-checkpoints.md) —
+   the concrete spatial, collision, support, gravity, and Save v1 implementation plan.
+3. [`docs/adr/`](docs/adr/) — the five decisions that are expensive to reverse.
+4. [`vendor/ash-v1-rules/INTEGRATION.md`](vendor/ash-v1-rules/INTEGRATION.md) — the
    proposed boundary between rules and engine.
-4. [`src/Ash.Rules/README.md`](src/Ash.Rules/README.md) — how resolution works.
+5. [`src/Ash.Rules/README.md`](src/Ash.Rules/README.md) — how resolution works.
