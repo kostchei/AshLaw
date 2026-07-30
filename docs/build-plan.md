@@ -824,7 +824,10 @@ the `uid://` on `Main.cs`, which the same rewrite had produced.
    not copied. Pentagram carries `fixed` metadata but does not use it as a depth rule;
    AshLaw preserves that metadata without inventing a fixed-vs-dynamic ordering.
    See [ADR 0005](adr/0005-gplv2-and-reuse-over-reimplementation.md).
-3. **Next:** grow the slice into M1/M2 infrastructure as the working game demands:
-   shape resource format, camera, sprite draw pass, object store, containers, and
-   transactional transfers. Palette polish and debug overlays follow playable
-   interaction.
+3. **Done — Shape Pack v1:** strict JSON metadata, PNG atlases, packed per-frame
+   alpha masks, attribution, a reproducible Flare importer, and the first Godot
+   sprite draw pass. The live room now feeds actors, chests, monsters, and props
+   through `VolumeSorter` using authored footprints, heights, flags, and sort bias.
+4. **Next:** add the camera and object store, then move containers and transfers
+   onto generational object handles and transactional commits. Palette polish and
+   debug overlays follow playable interaction.

@@ -1,3 +1,5 @@
+using Ash.Content;
+using Ash.Core;
 using Ash.Sim;
 using Godot;
 
@@ -11,6 +13,9 @@ public partial class Main : Node2D
     private const int TileHalfWidth = 8;
     private const int TileHalfHeight = 4;
     private const int InventoryRowHeight = 12;
+    private const int WorldUnitsPerTile = 256;
+    private const string ShapePackRoot =
+        "res://assets/shape-packs/flare-starter";
 
     private static readonly Color Void = new("12110f");
     private static readonly Color Mortar = new("36322e");
@@ -29,9 +34,23 @@ public partial class Main : Node2D
     private static readonly Color TextShadow = new("100c09c0");
 
     private PlayableSliceWorld _world = PlayableSliceWorld.CreateDemo();
+    private ShapePackDefinition? _shapePack;
+    private IReadOnlyDictionary<string, Texture2D> _shapeTextures =
+        new Dictionary<string, Texture2D>();
+    private double _animationElapsedMilliseconds;
+    private int _playerDirection = 6;
+
+    private sealed record WorldDrawItem(SortItem SortItem, Action Draw);
 
     public override void _Ready()
     {
+        LoadShapePack();
+        QueueRedraw();
+    }
+
+    public override void _Process(double delta)
+    {
+        _animationElapsedMilliseconds += delta * 1000;
         QueueRedraw();
     }
 
@@ -78,18 +97,22 @@ public partial class Main : Node2D
         {
             case Key.W:
             case Key.Up:
+                _playerDirection = 3;
                 _world.MovePlayer(0, -1);
                 return true;
             case Key.S:
             case Key.Down:
+                _playerDirection = 7;
                 _world.MovePlayer(0, 1);
                 return true;
             case Key.A:
             case Key.Left:
+                _playerDirection = 1;
                 _world.MovePlayer(-1, 0);
                 return true;
             case Key.D:
             case Key.Right:
+                _playerDirection = 5;
                 _world.MovePlayer(1, 0);
                 return true;
             case Key.B:
@@ -108,6 +131,7 @@ public partial class Main : Node2D
                 return true;
             case Key.R:
                 _world = PlayableSliceWorld.CreateDemo();
+                _playerDirection = 6;
                 return true;
             default:
                 return false;
@@ -147,6 +171,188 @@ public partial class Main : Node2D
         return false;
     }
 
+    private void LoadShapePack()
+    {
+        try
+        {
+            var manifestPath =
+                $"{ShapePackRoot}/{ShapePackLoader.ManifestFileName}";
+            using var manifest = Godot.FileAccess.Open(
+                manifestPath,
+                Godot.FileAccess.ModeFlags.Read);
+            if (manifest is null)
+            {
+                throw new ShapePackException(
+                    $"Godot could not open {manifestPath}.");
+            }
+
+            var pack = ShapePackLoader.Parse(manifest.GetAsText());
+            var textures = new Dictionary<string, Texture2D>(
+                StringComparer.Ordinal);
+            foreach (var shape in pack.Shapes)
+            {
+                var maskPath = $"{ShapePackRoot}/{shape.Mask}";
+                using var mask = Godot.FileAccess.Open(
+                    maskPath,
+                    Godot.FileAccess.ModeFlags.Read);
+                if (mask is null)
+                {
+                    throw new ShapePackException(
+                        $"Godot could not open shape mask {maskPath}.");
+                }
+
+                var expectedMaskLength = shape.Animations
+                    .SelectMany(animation => animation.Frames)
+                    .Select(frame =>
+                        checked((long)frame.MaskOffset + frame.MaskByteLength))
+                    .DefaultIfEmpty(0)
+                    .Max();
+                if ((long)mask.GetLength() != expectedMaskLength)
+                {
+                    throw new ShapePackException(
+                        $"Shape '{shape.Id}' mask is {mask.GetLength()} bytes; " +
+                        $"metadata requires exactly {expectedMaskLength}.");
+                }
+
+                var atlasPath = $"{ShapePackRoot}/{shape.Atlas}";
+                var texture = GD.Load<Texture2D>(atlasPath)
+                    ?? throw new ShapePackException(
+                        $"Godot could not load shape atlas {atlasPath}.");
+                if (texture.GetWidth() != shape.AtlasWidth ||
+                    texture.GetHeight() != shape.AtlasHeight)
+                {
+                    throw new ShapePackException(
+                        $"Shape '{shape.Id}' declares a " +
+                        $"{shape.AtlasWidth}x{shape.AtlasHeight} atlas, but Godot " +
+                        $"loaded {texture.GetWidth()}x{texture.GetHeight()}.");
+                }
+
+                textures.Add(shape.Id, texture);
+            }
+
+            _shapePack = pack;
+            _shapeTextures = textures;
+            GD.Print(
+                $"Loaded shape pack '{pack.PackId}' with " +
+                $"{pack.Shapes.Count} shapes.");
+        }
+        catch (Exception exception)
+        {
+            _shapePack = null;
+            _shapeTextures = new Dictionary<string, Texture2D>();
+            GD.PushError(
+                $"Shape Pack v1 failed to load; using procedural fallbacks. " +
+                exception.Message);
+        }
+    }
+
+    private bool DrawShape(
+        string shapeId,
+        string animationName,
+        int direction,
+        Vector2 at,
+        int? fixedSequence = null)
+    {
+        var shape = _shapePack?.Shapes.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, shapeId, StringComparison.Ordinal));
+        if (shape is null ||
+            !_shapeTextures.TryGetValue(shapeId, out var texture))
+        {
+            return false;
+        }
+
+        var animation = shape.Animations.FirstOrDefault(candidate =>
+            string.Equals(
+                candidate.Name,
+                animationName,
+                StringComparison.Ordinal));
+        if (animation is null)
+        {
+            return false;
+        }
+
+        var safeDirection = Math.Clamp(direction, 0, animation.Directions - 1);
+        var sequence = fixedSequence is null
+            ? SelectAnimationSequence(animation)
+            : Math.Clamp(
+                fixedSequence.Value,
+                0,
+                animation.FramesPerDirection - 1);
+        var frame = animation.GetFrame(safeDirection, sequence);
+        var scale = shape.RenderScale;
+        var nativeAt = at * RenderScale;
+        var destination = new Rect2(
+            nativeAt - (new Vector2(frame.OriginX, frame.OriginY) * scale),
+            new Vector2(frame.Width, frame.Height) * scale);
+        var source = new Rect2(
+            frame.X,
+            frame.Y,
+            frame.Width,
+            frame.Height);
+
+        // Atlas pixels are already authored at the target logical resolution,
+        // so draw them in native framebuffer coordinates rather than scaling a
+        // tiny substitute through the 320x200 compact authoring transform.
+        DrawSetTransform(Vector2.Zero, rotation: 0, scale: Vector2.One);
+        DrawTextureRectRegion(
+            texture,
+            destination,
+            source,
+            modulate: Colors.White,
+            transpose: false);
+        RestoreCompactTransform();
+        return true;
+    }
+
+    private int SelectAnimationSequence(ShapeAnimation animation)
+    {
+        if (animation.FramesPerDirection == 1)
+        {
+            return 0;
+        }
+
+        int[] timeline = animation.Playback switch
+        {
+            ShapePlayback.Loop =>
+                Enumerable.Range(0, animation.FramesPerDirection).ToArray(),
+            ShapePlayback.PingPong =>
+            [
+                .. Enumerable.Range(0, animation.FramesPerDirection),
+                .. Enumerable.Range(1, animation.FramesPerDirection - 2)
+                    .Reverse(),
+            ],
+            ShapePlayback.Once =>
+                Enumerable.Range(0, animation.FramesPerDirection).ToArray(),
+            _ => throw new ArgumentOutOfRangeException(),
+        };
+
+        var durations = timeline
+            .Select(sequence => animation.GetFrame(0, sequence).DurationMs)
+            .ToArray();
+        var totalDuration = durations.Sum();
+        var elapsed = animation.Playback == ShapePlayback.Once
+            ? Math.Min(_animationElapsedMilliseconds, totalDuration - 1)
+            : _animationElapsedMilliseconds % totalDuration;
+
+        for (var index = 0; index < timeline.Length; index++)
+        {
+            if (elapsed < durations[index])
+            {
+                return timeline[index];
+            }
+
+            elapsed -= durations[index];
+        }
+
+        return timeline[^1];
+    }
+
+    private void RestoreCompactTransform() =>
+        DrawSetTransform(
+            Vector2.Zero,
+            rotation: 0,
+            scale: new Vector2(RenderScale, RenderScale));
+
     private void DrawWorld()
     {
         DrawRect(new Rect2(0, 0, 240, 200), Void);
@@ -161,30 +367,16 @@ public partial class Main : Node2D
             }
         }
 
-        // Ultima VIII's look depends on a painter's algorithm. Everything sharing
-        // the floor is emitted by diagonal depth so feet, furniture and bodies
-        // overlap naturally as the player moves through the room.
-        var maximumDepth = PlayableSliceWorld.MapWidth + PlayableSliceWorld.MapHeight;
-        for (var depth = 0; depth < maximumDepth; depth++)
+        // The visible set now goes through the same Pentagram-derived volume
+        // sorter used by the headless engine. This makes the playable slice the
+        // first real consumer of shape footprints, height, flags and sort bias.
+        var drawItems = BuildWorldDrawItems();
+        var drawById = drawItems.ToDictionary(item => item.SortItem.Id);
+        var sortResult = VolumeSorter.Sort(
+            drawItems.Select(item => item.SortItem).ToArray());
+        foreach (var objectId in sortResult.DrawOrder)
         {
-            DrawDecorations(depth);
-
-            foreach (var chest in _world.Chests.Where(chest =>
-                         Depth(chest.Position) == depth))
-            {
-                DrawChest(chest);
-            }
-
-            foreach (var monster in _world.Monsters.Where(monster =>
-                         Depth(monster.Position) == depth))
-            {
-                DrawMonster(monster);
-            }
-
-            if (Depth(_world.PlayerPosition) == depth)
-            {
-                DrawPlayer();
-            }
+            drawById[objectId].Draw();
         }
     }
 
@@ -193,43 +385,10 @@ public partial class Main : Node2D
         var at = Iso(_world.PlayerPosition) + new Vector2(0, 3);
         DrawShadow(at, 7);
 
-        // The backpack is always visible on the character's back.
-        DrawRect(
-            new Rect2(at + new Vector2(-7, -14), new Vector2(6, 10)),
-            new Color("694124"));
-        DrawRect(
-            new Rect2(at + new Vector2(-6, -13), new Vector2(4, 2)),
-            new Color("b17a39"));
-
-        DrawRect(
-            new Rect2(at + new Vector2(-4, -6), new Vector2(3, 7)),
-            new Color("26364b"));
-        DrawRect(
-            new Rect2(at + new Vector2(2, -6), new Vector2(3, 7)),
-            new Color("1d293b"));
-        DrawColoredPolygon(
-            [
-                at + new Vector2(-6, -15),
-                at + new Vector2(1, -18),
-                at + new Vector2(6, -13),
-                at + new Vector2(5, -5),
-                at + new Vector2(-4, -5),
-            ],
-            new Color("315d85"));
-        DrawLine(
-            at + new Vector2(2, -15),
-            at + new Vector2(5, -6),
-            new Color("79a2bc"),
-            1);
-        DrawCircle(at + new Vector2(0, -20), 4, new Color("c6976d"));
-        DrawRect(
-            new Rect2(at + new Vector2(-4, -23), new Vector2(8, 3)),
-            new Color("3b2a20"));
-        DrawLine(
-            at + new Vector2(6, -13),
-            at + new Vector2(8, -5),
-            new Color("b7a58b"),
-            2);
+        if (!DrawShape("avatar.knight", "stance", _playerDirection, at))
+        {
+            DrawPlayerFallback(at);
+        }
 
         if (_world.Chests.Any(chest =>
                 _world.PlayerPosition.ManhattanDistance(chest.Position) <= 1) ||
@@ -242,6 +401,33 @@ public partial class Main : Node2D
                 Highlight,
                 1);
         }
+    }
+
+    private void DrawPlayerFallback(Vector2 at)
+    {
+        // Kept as a resilient fallback if an external pack is missing or invalid.
+        DrawRect(
+            new Rect2(at + new Vector2(-7, -14), new Vector2(6, 10)),
+            new Color("694124"));
+        DrawRect(
+            new Rect2(at + new Vector2(-6, -13), new Vector2(4, 2)),
+            new Color("b17a39"));
+        DrawRect(
+            new Rect2(at + new Vector2(-4, -6), new Vector2(3, 7)),
+            new Color("26364b"));
+        DrawRect(
+            new Rect2(at + new Vector2(2, -6), new Vector2(3, 7)),
+            new Color("1d293b"));
+        DrawColoredPolygon(
+        [
+            at + new Vector2(-6, -15),
+            at + new Vector2(1, -18),
+            at + new Vector2(6, -13),
+            at + new Vector2(5, -5),
+            at + new Vector2(-4, -5),
+        ],
+            new Color("315d85"));
+        DrawCircle(at + new Vector2(0, -20), 4, new Color("c6976d"));
     }
 
     private void DrawChest(ChestState chest)
@@ -266,6 +452,16 @@ public partial class Main : Node2D
         }
 
         DrawShadow(at, 8);
+        if (DrawShape(
+                "container.chest",
+                "state",
+                direction: 0,
+                at,
+                fixedSequence: chest.IsOpen ? 1 : 0))
+        {
+            return;
+        }
+
         DrawColoredPolygon(
             [
                 at + new Vector2(-8, -7),
@@ -337,17 +533,22 @@ public partial class Main : Node2D
         }
         else
         {
-            DrawCaveRat(at);
+            DrawShadow(at, 7);
+            if (!DrawShape("monster.goblin", "stance", direction: 6, at))
+            {
+                DrawCaveRat(at);
+            }
         }
 
         if (monster.Health < monster.MaxHealth)
         {
             var healthWidth = 14f * monster.Health / monster.MaxHealth;
+            var healthOffset = monster.Id == "many-eyed-tyrant" ? -27 : -21;
             DrawRect(
-                new Rect2(at.X - 7, at.Y - 27, 14, 2),
+                new Rect2(at.X - 7, at.Y + healthOffset, 14, 2),
                 new Color("351212"));
             DrawRect(
-                new Rect2(at.X - 7, at.Y - 27, healthWidth, 2),
+                new Rect2(at.X - 7, at.Y + healthOffset, healthWidth, 2),
                 new Color("b93b30"));
         }
     }
@@ -500,27 +701,213 @@ public partial class Main : Node2D
         }
     }
 
-    private void DrawDecorations(int depth)
+    private List<WorldDrawItem> BuildWorldDrawItems()
     {
-        if (depth == Depth(new GridPosition(3, 2)))
+        var items = new List<WorldDrawItem>
         {
-            DrawBarrel(Iso(new GridPosition(3, 2)) + new Vector2(0, 3));
+            CreateDrawItem(
+                id: 10,
+                new GridPosition(3, 2),
+                footprintWidth: 128,
+                footprintDepth: 128,
+                height: 96,
+                shapeNumber: 10,
+                () => DrawBarrel(
+                    Iso(new GridPosition(3, 2)) + new Vector2(0, 3))),
+            CreateDrawItem(
+                id: 11,
+                new GridPosition(11, 2),
+                footprintWidth: 256,
+                footprintDepth: 192,
+                height: 160,
+                shapeNumber: 11,
+                () => DrawAltar(
+                    Iso(new GridPosition(11, 2)) + new Vector2(0, 3))),
+            CreateDrawItem(
+                id: 12,
+                new GridPosition(1, 8),
+                footprintWidth: 96,
+                footprintDepth: 96,
+                height: 160,
+                shapeNumber: 12,
+                () => DrawBrazier(
+                    Iso(new GridPosition(1, 8)) + new Vector2(0, 3))),
+            CreateDrawItem(
+                id: 13,
+                new GridPosition(15, 4),
+                footprintWidth: 96,
+                footprintDepth: 96,
+                height: 160,
+                shapeNumber: 12,
+                () => DrawBrazier(
+                    Iso(new GridPosition(15, 4)) + new Vector2(0, 3))),
+        };
+
+        for (var index = 0; index < _world.Chests.Count; index++)
+        {
+            var chest = _world.Chests[index];
+            var isCorpse = chest.Id.StartsWith(
+                "remains-",
+                StringComparison.Ordinal);
+            items.Add(isCorpse
+                ? CreateDrawItem(
+                    id: 100 + index,
+                    chest.Position,
+                    footprintWidth: 128,
+                    footprintDepth: 128,
+                    height: 24,
+                    shapeNumber: 20,
+                    () => DrawChest(chest))
+                : CreateShapeDrawItem(
+                    id: 100 + index,
+                    chest.Position,
+                    shapeId: "container.chest",
+                    shapeNumber: 21,
+                    () => DrawChest(chest)));
         }
 
-        if (depth == Depth(new GridPosition(11, 2)))
+        for (var index = 0; index < _world.Monsters.Count; index++)
         {
-            DrawAltar(Iso(new GridPosition(11, 2)) + new Vector2(0, 3));
+            var monster = _world.Monsters[index];
+            items.Add(monster.Id == "many-eyed-tyrant"
+                ? CreateDrawItem(
+                    id: 200 + index,
+                    monster.Position,
+                    footprintWidth: 160,
+                    footprintDepth: 160,
+                    height: monster.IsAlive ? 104 : 24,
+                    shapeNumber: 30,
+                    () => DrawMonster(monster))
+                : CreateShapeDrawItem(
+                    id: 200 + index,
+                    monster.Position,
+                    shapeId: "monster.goblin",
+                    shapeNumber: 31,
+                    () => DrawMonster(monster)));
         }
 
-        if (depth == Depth(new GridPosition(1, 8)))
+        items.Add(CreateShapeDrawItem(
+            id: 1,
+            _world.PlayerPosition,
+            shapeId: "avatar.knight",
+            shapeNumber: 1,
+            DrawPlayer));
+        return items;
+    }
+
+    private WorldDrawItem CreateShapeDrawItem(
+        int id,
+        GridPosition position,
+        string shapeId,
+        int shapeNumber,
+        Action draw)
+    {
+        var shape = _shapePack?.Shapes.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, shapeId, StringComparison.Ordinal));
+        return shape is null
+            ? CreateDrawItem(
+                id,
+                position,
+                footprintWidth: 128,
+                footprintDepth: 128,
+                height: 64,
+                shapeNumber,
+                draw)
+            : CreateDrawItem(
+                id,
+                position,
+                shape.Footprint.Width,
+                shape.Footprint.Depth,
+                shape.Height,
+                shapeNumber,
+                draw,
+                shape.SortBias,
+                ToSortFlags(shape.Flags));
+    }
+
+    private static WorldDrawItem CreateDrawItem(
+        int id,
+        GridPosition position,
+        int footprintWidth,
+        int footprintDepth,
+        int height,
+        int shapeNumber,
+        Action draw,
+        int sortBias = 0,
+        SortItemFlags flags = SortItemFlags.None) =>
+        new(
+            new SortItem(
+                id,
+                SortVolumeAt(
+                    position,
+                    footprintWidth,
+                    footprintDepth,
+                    height),
+                IsSprite: false,
+                SortBias: sortBias,
+                Flags: flags,
+                ShapeNumber: shapeNumber),
+            draw);
+
+    private static SortVolume SortVolumeAt(
+        GridPosition position,
+        int footprintWidth,
+        int footprintDepth,
+        int height)
+    {
+        var xMax = position.X * WorldUnitsPerTile;
+        var yMax = position.Y * WorldUnitsPerTile;
+        return new SortVolume(
+            xMax - footprintWidth,
+            xMax,
+            yMax - footprintDepth,
+            yMax,
+            ZMin: 0,
+            ZMax: height);
+    }
+
+    private static SortItemFlags ToSortFlags(ShapeFlags flags)
+    {
+        var result = SortItemFlags.None;
+        if (flags.HasFlag(ShapeFlags.Animated))
         {
-            DrawBrazier(Iso(new GridPosition(1, 8)) + new Vector2(0, 3));
+            result |= SortItemFlags.Animated;
         }
 
-        if (depth == Depth(new GridPosition(15, 4)))
+        if (flags.HasFlag(ShapeFlags.Translucent))
         {
-            DrawBrazier(Iso(new GridPosition(15, 4)) + new Vector2(0, 3));
+            result |= SortItemFlags.Translucent;
         }
+
+        if (flags.HasFlag(ShapeFlags.Draw))
+        {
+            result |= SortItemFlags.Draw;
+        }
+
+        if (flags.HasFlag(ShapeFlags.Solid))
+        {
+            result |= SortItemFlags.Solid;
+        }
+
+        if (flags.HasFlag(ShapeFlags.Occludes))
+        {
+            result |= SortItemFlags.Occludes;
+        }
+
+        if (flags.HasFlag(ShapeFlags.LargeFlatSquare))
+        {
+            result |= SortItemFlags.LargeFlatSquare;
+        }
+
+        if (flags.HasFlag(ShapeFlags.Fixed))
+        {
+            result |= SortItemFlags.Fixed;
+        }
+
+        // ShapeFlags.Sprite describes an atlas-backed shape. SortItem.IsSprite
+        // is Pentagram's Crusader-style always-on-top billboard rule and remains
+        // deliberately false for Ultima VIII-style world actors.
+        return result;
     }
 
     private void DrawBarrel(Vector2 at)
@@ -627,7 +1014,6 @@ public partial class Main : Node2D
 
     private void DrawCaveRat(Vector2 at)
     {
-        DrawShadow(at, 7);
         DrawColoredPolygon(
         [
             at + new Vector2(-7, -4),
@@ -719,15 +1105,29 @@ public partial class Main : Node2D
         for (var index = 0; index < rows; index++)
         {
             var y = origin.Y + (index * InventoryRowHeight);
+            var item = inventory.Items[index];
+            var hasSwordIcon = item.Contains(
+                "sword",
+                StringComparison.OrdinalIgnoreCase);
             DrawRect(new Rect2(origin.X, y, width, 10), new Color("38291d"));
             DrawLine(
                 new Vector2(origin.X, y + 10),
                 new Vector2(origin.X + width, y + 10),
                 new Color("56402a"),
                 1);
+            if (hasSwordIcon)
+            {
+                DrawShape(
+                    "loot.shortsword",
+                    "power",
+                    direction: 0,
+                    new Vector2(origin.X + 7, y + 9),
+                    fixedSequence: 0);
+            }
+
             DrawText(
-                new Vector2(origin.X + 3, y + 8),
-                Shorten(inventory.Items[index], width < 80 ? 12 : 16),
+                new Vector2(origin.X + (hasSwordIcon ? 15 : 3), y + 8),
+                Shorten(item, width < 80 ? 12 : 16),
                 7,
                 Text);
         }
@@ -810,9 +1210,6 @@ public partial class Main : Node2D
 
     private static string Shorten(string value, int length) =>
         value.Length <= length ? value : $"{value[..(length - 1)]}…";
-
-    private static int Depth(GridPosition position) =>
-        position.X + position.Y;
 
     private static Vector2 Iso(GridPosition position) =>
         new(

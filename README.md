@@ -33,10 +33,11 @@ The main scene now boots directly into a small playable room:
 - dead monsters leave lootable remains;
 - press **R** to reset the demo.
 
-The presentation is intentionally made from simple drawn shapes. It proves the
-character/inventory/container/combat loop before the final shape and art pipeline.
-The authoritative interaction state lives in `Ash.Sim.PlayableSliceWorld`, not in
-Godot nodes.
+The room now mixes procedural terrain with the first runtime **Shape Pack v1**:
+a directional Flare knight, animated goblin, shortsword inventory icon, and
+open/closed chest. The pack is deliberately desaturated and its attribution is
+shipped beside it. The authoritative interaction state still lives in
+`Ash.Sim.PlayableSliceWorld`, not in Godot nodes.
 
 ## Layout
 
@@ -242,9 +243,11 @@ Nothing here uses Ultima VIII's own content — no Origin data files are read, t
 original, and the rules are an unrelated MERP/AD&D blend. The relationship is one of
 genre and behaviour.
 
-Two licensing questions are **open and block public distribution**, both recorded in
-ADR 0005: `vendor/ash-v1-rules` carries no licence of its own, and game assets are not
-covered by a software licence and need separate terms.
+One licensing question still **blocks public distribution**, recorded in ADR 0005:
+`vendor/ash-v1-rules` carries no licence of its own. Runtime art is not covered by the
+software licence: the Flare starter pack now ships under CC-BY-SA-3.0-or-later with
+attribution beside it, and each future original or community pack needs equally
+explicit asset terms.
 
 ## Where to start reading
 
