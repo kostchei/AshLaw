@@ -524,7 +524,7 @@ public sealed class ObjectWorldSaveTests
                     ObjectFlags.Container |
                     ObjectFlags.Solid |
                     ObjectFlags.Visible,
-                ContainerCapacity = 12,
+                SlotCapacity = 12,
             }));
             actors.Add(store.Create(new ObjectSpawn
             {
@@ -545,7 +545,7 @@ public sealed class ObjectWorldSaveTests
                     ObjectFlags.Container |
                     ObjectFlags.Solid |
                     ObjectFlags.Visible,
-                ContainerCapacity = 8,
+                Strength = 8,
                 Health = 5,
                 MaxHealth = 9,
                 Quality = index,
@@ -582,11 +582,11 @@ public sealed class ObjectWorldSaveTests
                 ShapeId = "loot.shortsword",
                 Location = ObjectLocation.Equipped(
                     actors[slot],
-                    (byte)EquipmentSlot.MainHand),
+                    (byte)EquipmentSlot.RightHand),
                 Footprint = new ObjectFootprint(32, 32),
                 Height = 8,
                 Flags = ObjectFlags.Item | ObjectFlags.Movable,
-                EquipmentSlots = EquipmentSlotMask.MainHand,
+                EquipmentSlots = EquipmentSlotMask.RightHand,
             });
         }
 
@@ -622,9 +622,14 @@ public sealed class ObjectWorldSaveTests
             Footprint = new ObjectFootprint(32, 32),
             Height = 8,
             StepHeight = index % 3,
-            Flags = ObjectFlags.Item | ObjectFlags.Movable | ObjectFlags.Visible,
+            Flags =
+                ObjectFlags.Item |
+                ObjectFlags.Movable |
+                ObjectFlags.Stackable |
+                ObjectFlags.Visible,
             Quality = index % 7,
             Quantity = (index % 5) + 1,
+            MaxQuantity = 20,
             Condition = 100 - (index % 40),
         };
 }

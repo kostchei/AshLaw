@@ -49,7 +49,7 @@ public sealed class WorldMapTests
             ShapeId = "actor",
             Location = ObjectLocation.OnMap(0, new Vec3i(256, 256, 0)),
             Flags = ObjectFlags.Actor | ObjectFlags.Container,
-            ContainerCapacity = 2,
+            Strength = 2,
         });
         var item = store.Create(Spawn(
             "item",

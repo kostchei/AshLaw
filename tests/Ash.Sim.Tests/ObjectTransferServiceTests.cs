@@ -16,7 +16,7 @@ public sealed class ObjectTransferServiceTests
         var sword = store.Create(Item(
             "sword",
             start,
-            EquipmentSlotMask.MainHand,
+            EquipmentSlotMask.RightHand,
             quality: 7,
             quantity: 2));
 
@@ -24,7 +24,7 @@ public sealed class ObjectTransferServiceTests
         Transfer(sword, ObjectLocation.InContainer(chest));
         Transfer(
             sword,
-            ObjectLocation.Equipped(actor, EquipmentSlot.MainHand));
+            ObjectLocation.Equipped(actor, EquipmentSlot.RightHand));
         Transfer(sword, start);
 
         var result = store.Get(sword);
@@ -77,34 +77,34 @@ public sealed class ObjectTransferServiceTests
         var transfers = new ObjectTransferService(store);
         var actor = store.Create(Actor(capacity: 2));
         var accepted =
-            EquipmentSlotMask.MainHand | EquipmentSlotMask.OffHand;
+            EquipmentSlotMask.RightHand | EquipmentSlotMask.LeftHand;
         var sword = store.Create(
             Item(
                 "sword",
-                ObjectLocation.Equipped(actor, EquipmentSlot.MainHand),
+                ObjectLocation.Equipped(actor, EquipmentSlot.RightHand),
                 accepted));
         var shield = store.Create(
             Item(
                 "shield",
-                ObjectLocation.Equipped(actor, EquipmentSlot.OffHand),
+                ObjectLocation.Equipped(actor, EquipmentSlot.LeftHand),
                 accepted));
 
         var result = transfers.Execute(
             new ObjectTransferRequest(
                 sword,
                 store.Get(sword).Location,
-                ObjectLocation.Equipped(actor, EquipmentSlot.OffHand)),
+                ObjectLocation.Equipped(actor, EquipmentSlot.LeftHand)),
             new ObjectTransferRequest(
                 shield,
                 store.Get(shield).Location,
-                ObjectLocation.Equipped(actor, EquipmentSlot.MainHand)));
+                ObjectLocation.Equipped(actor, EquipmentSlot.RightHand)));
 
         Assert.True(result.Succeeded, result.Message);
         Assert.Equal(
-            (byte)EquipmentSlot.OffHand,
+            (byte)EquipmentSlot.LeftHand,
             store.Get(sword).Location.Slot);
         Assert.Equal(
-            (byte)EquipmentSlot.MainHand,
+            (byte)EquipmentSlot.RightHand,
             store.Get(shield).Location.Slot);
     }
 
@@ -121,7 +121,7 @@ public sealed class ObjectTransferServiceTests
             Item(
                 "sword",
                 ObjectLocation.InContainer(actor),
-                EquipmentSlotMask.MainHand));
+                EquipmentSlotMask.RightHand));
         var apple = store.Create(
             Item("apple", ObjectLocation.InContainer(actor)));
         var swordSource = store.Get(sword).Location;
@@ -131,7 +131,7 @@ public sealed class ObjectTransferServiceTests
             new ObjectTransferRequest(
                 sword,
                 swordSource,
-                ObjectLocation.Equipped(actor, EquipmentSlot.MainHand)),
+                ObjectLocation.Equipped(actor, EquipmentSlot.RightHand)),
             new ObjectTransferRequest(
                 apple,
                 appleSource,
@@ -156,7 +156,7 @@ public sealed class ObjectTransferServiceTests
             Item(
                 "sword",
                 ObjectLocation.InContainer(actor),
-                EquipmentSlotMask.MainHand));
+                EquipmentSlotMask.RightHand));
         var apple = store.Create(
             Item("apple", ObjectLocation.InContainer(actor)));
 
@@ -164,7 +164,7 @@ public sealed class ObjectTransferServiceTests
             new ObjectTransferRequest(
                 apple,
                 store.Get(apple).Location,
-                ObjectLocation.Equipped(actor, EquipmentSlot.MainHand)));
+                ObjectLocation.Equipped(actor, EquipmentSlot.RightHand)));
         Assert.False(restriction.Succeeded);
         Assert.Equal(
             ObjectTransferFailure.EquipmentRestriction,
@@ -174,16 +174,16 @@ public sealed class ObjectTransferServiceTests
             Item(
                 "second-sword",
                 ObjectLocation.OnMap(0, Vec3i.Zero),
-                EquipmentSlotMask.MainHand));
+                EquipmentSlotMask.RightHand));
         var conflict = transfers.Execute(
             new ObjectTransferRequest(
                 sword,
                 store.Get(sword).Location,
-                ObjectLocation.Equipped(actor, EquipmentSlot.MainHand)),
+                ObjectLocation.Equipped(actor, EquipmentSlot.RightHand)),
             new ObjectTransferRequest(
                 secondSword,
                 store.Get(secondSword).Location,
-                ObjectLocation.Equipped(actor, EquipmentSlot.MainHand)));
+                ObjectLocation.Equipped(actor, EquipmentSlot.RightHand)));
 
         Assert.False(conflict.Succeeded);
         Assert.Equal(
@@ -266,7 +266,7 @@ public sealed class ObjectTransferServiceTests
                 ObjectFlags.Actor |
                 ObjectFlags.Container |
                 ObjectFlags.Visible,
-            ContainerCapacity = capacity,
+            Strength = capacity,
         };
 
     private static ObjectSpawn Container(string name, int capacity) =>
@@ -277,7 +277,7 @@ public sealed class ObjectTransferServiceTests
             ShapeId = "container.test",
             Location = ObjectLocation.OnMap(0, Vec3i.Zero),
             Flags = ObjectFlags.Container,
-            ContainerCapacity = capacity,
+            SlotCapacity = capacity,
         };
 
     private static ObjectSpawn Item(
@@ -292,10 +292,13 @@ public sealed class ObjectTransferServiceTests
             Name = name,
             ShapeId = "item.test",
             Location = location,
-            Flags = ObjectFlags.Item | ObjectFlags.Movable,
+            Flags = quantity > 1
+                ? ObjectFlags.Item | ObjectFlags.Movable | ObjectFlags.Stackable
+                : ObjectFlags.Item | ObjectFlags.Movable,
             EquipmentSlots = slots,
             Quality = quality,
             Quantity = quantity,
+            MaxQuantity = Math.Max(1, quantity),
             Footprint = new ObjectFootprint(32, 32),
             Height = 8,
         };

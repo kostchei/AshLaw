@@ -15,7 +15,7 @@ public sealed class PlayableSliceTests
             world.BackpackItems,
             item =>
                 item.Name == "Rusty Sword" &&
-                item.EquipmentSlots == EquipmentSlotMask.MainHand);
+                item.EquipmentSlots == EquipmentSlotMask.RightHand);
         Assert.Equal(4, world.Chests.Count);
         Assert.Equal(4, world.Monsters.Count);
         Assert.Equal(20, world.Map.IndexedObjectCount);
@@ -62,7 +62,7 @@ public sealed class PlayableSliceTests
     }
 
     [Fact]
-    public void LootTransferIsAtomicWhenBackpackIsFull()
+    public void AFullPackSendsFurtherLootToTheFloor()
     {
         var world = PlayableSliceWorld.CreateDemo();
         MoveToFirstChest(world);
@@ -83,12 +83,28 @@ public sealed class PlayableSliceTests
             });
         }
 
+        Assert.Equal(world.BackpackCapacity, world.BackpackSlotsUsed);
         var chest = world.ActiveChest!.Value;
-        var chestCount = world.ContentsOf(chest.Id).Count;
+        var loot = world.ContentsOf(chest.Id)[0];
+
         var result = world.TakeFromOpenChest(0);
 
-        Assert.False(result.Succeeded);
-        Assert.Equal(chestCount, world.ContentsOf(chest.Id).Count);
+        // Gear slots are a hard limit, but a full pack does not stop you
+        // taking things: the overflow lands at your feet.
+        Assert.True(result.Succeeded, result.Message);
+        Assert.Contains("falls at your feet", result.Message);
+        Assert.DoesNotContain(
+            world.BackpackItems,
+            item => item.Id == loot.Id);
+        Assert.DoesNotContain(
+            world.ContentsOf(chest.Id),
+            item => item.Id == loot.Id);
+        Assert.Equal(
+            world.PlayerPosition,
+            world.GetGridPosition(loot.Id));
+        Assert.Equal(world.BackpackCapacity, world.BackpackSlotsUsed);
+        world.Objects.ValidateInvariants();
+        world.Physics.ValidateInvariants();
     }
 
     [Fact]
@@ -108,10 +124,10 @@ public sealed class PlayableSliceTests
             world.Objects.Get(sword.Id).Location.Kind);
         Assert.Equal(
             sword.Id,
-            world.EquippedIn(EquipmentSlot.MainHand)!.Value.Id);
+            world.EquippedIn(EquipmentSlot.RightHand)!.Value.Id);
 
         Assert.True(
-            world.UnequipToBackpack(EquipmentSlot.MainHand).Succeeded);
+            world.UnequipToBackpack(EquipmentSlot.RightHand).Succeeded);
         swordIndex = world.BackpackItems
             .Select((item, index) => (item, index))
             .Single(pair => pair.item.Id == sword.Id)
@@ -151,8 +167,8 @@ public sealed class PlayableSliceTests
     public void FailedUnequipKeepsItemEquippedWhenBackpackIsFull()
     {
         var world = PlayableSliceWorld.CreateDemo();
-        Assert.True(world.ToggleMainHand().Succeeded);
-        var sword = world.EquippedIn(EquipmentSlot.MainHand)!.Value;
+        Assert.True(world.ToggleRightHand().Succeeded);
+        var sword = world.EquippedIn(EquipmentSlot.RightHand)!.Value;
 
         while (world.BackpackItems.Count < world.BackpackCapacity)
         {
@@ -169,7 +185,7 @@ public sealed class PlayableSliceTests
             });
         }
 
-        var result = world.UnequipToBackpack(EquipmentSlot.MainHand);
+        var result = world.UnequipToBackpack(EquipmentSlot.RightHand);
 
         Assert.False(result.Succeeded);
         Assert.Equal(
@@ -177,7 +193,7 @@ public sealed class PlayableSliceTests
             world.Objects.Get(sword.Id).Location.Kind);
         Assert.Equal(
             sword.Id,
-            world.EquippedIn(EquipmentSlot.MainHand)!.Value.Id);
+            world.EquippedIn(EquipmentSlot.RightHand)!.Value.Id);
     }
 
     [Fact]
@@ -397,6 +413,75 @@ public sealed class PlayableSliceTests
         Assert.False(dropped.Support.IsNone);
         world.Physics.ValidateInvariants();
         world.Map.ValidateIndex();
+    }
+
+    [Fact]
+    public void TwoFindsOfGoldBecomeOnePurseInTheBackpack()
+    {
+        var world = PlayableSliceWorld.CreateDemo();
+        var chests = world.Chests
+            .Where(chest => world.ContentsOf(chest.Id)
+                .Any(item => item.Name == "Gold Coins"))
+            .ToArray();
+        Assert.Equal(2, chests.Length);
+
+        var carried = 0;
+        foreach (var chest in chests)
+        {
+            // Stand west of each chest: walking onto the one just looted would
+            // be blocked by the chest itself.
+            WalkTo(world, world.GetGridPosition(chest.Id).Offset(-1, 0));
+            Assert.True(world.ToggleNearestChest().Succeeded);
+            var contents = world.ContentsOf(chest.Id);
+            var goldIndex = contents
+                .Select((item, index) => (item, index))
+                .Single(pair => pair.item.Name == "Gold Coins")
+                .index;
+            carried += contents[goldIndex].Quantity;
+            Assert.True(world.TakeFromOpenChest(goldIndex).Succeeded);
+        }
+
+        var purses = world.BackpackItems
+            .Where(item => item.Name == "Gold Coins")
+            .ToArray();
+
+        // Two chests, one purse: 12 and 18 arrive as a single stack of 30.
+        Assert.Single(purses);
+        Assert.Equal(carried, purses[0].Quantity);
+        Assert.Equal(30, purses[0].Quantity);
+        world.Objects.ValidateInvariants();
+    }
+
+    [Fact]
+    public void DroppingGoldOntoGoldMergesInsteadOfStackingUpRows()
+    {
+        var world = PlayableSliceWorld.CreateDemo();
+        var chest = world.Chests.First(candidate =>
+            world.ContentsOf(candidate.Id)
+                .Any(item => item.Name == "Gold Coins"));
+        MoveNextTo(world, world.GetGridPosition(chest.Id));
+        Assert.True(world.ToggleNearestChest().Succeeded);
+        var gold = world.ContentsOf(chest.Id)
+            .Single(item => item.Name == "Gold Coins");
+
+        // Split a few coins into the pack, then drag the rest onto them.
+        var split = world.Stacks.Split(
+            gold.Id,
+            4,
+            ObjectLocation.InContainer(world.PlayerId));
+        Assert.True(split.Succeeded, split.Message);
+        Assert.Equal(8, world.Objects.Get(gold.Id).Quantity);
+
+        Assert.True(world.BeginDrag(gold.Id).Succeeded);
+        var dropped = world.DropDragInBackpack();
+
+        Assert.True(dropped.Succeeded, dropped.Message);
+        var purse = Assert.Single(
+            world.BackpackItems.Where(item => item.Name == "Gold Coins"));
+        Assert.Equal(12, purse.Quantity);
+        Assert.False(world.Objects.TryGet(gold.Id, out _));
+        Assert.Null(world.HeldObject);
+        world.Objects.ValidateInvariants();
     }
 
     [Fact]

@@ -272,7 +272,7 @@ public sealed class SaveBoundaryTests : IDisposable
             Footprint = new ObjectFootprint(128, 128),
             Height = 40,
             Flags = ObjectFlags.Container | ObjectFlags.Solid,
-            ContainerCapacity = 4,
+            SlotCapacity = 4,
         });
         var chest = store.Enumerate().Single(value => value.Name == "Chest").Id;
         store.Create(new ObjectSpawn

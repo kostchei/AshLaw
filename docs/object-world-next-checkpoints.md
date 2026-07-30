@@ -13,7 +13,8 @@ The objective is a persistent physical world in which objects collide, rest on
 terrain or other objects, fall when support disappears, and reload without
 changing identity or state.
 
-**Implementation status (2026-07-30):** checkpoints 1 to 5 are complete.
+**Implementation status (2026-07-30):** checkpoints 1 to 5 are complete and
+checkpoint 6 is under way.
 `WorldMap` owns terrain and a deterministic footprint-bucket/anchor index; store
 commits rebuild one synchronous revision. `WorldMap.ValidatePlacement` is the one
 physical placement contract, `ObjectTransferService` runs it as a validation
@@ -82,7 +83,73 @@ Checkpoint 5, direct manipulation, is complete:
   turned to rock — the object stays in hand and says so instead of being
   dropped somewhere nobody asked for.
 
-Checkpoint 6, quantities and inventory rules, is next.
+Checkpoint 6 is under way. Stacks — compatibility, merge, split and partial
+transfer — are done:
+
+- a stack is one object carrying a `Quantity` and a `MaxQuantity`, gated by
+  `ObjectFlags.Stackable`. The store refuses a quantity above the limit and a
+  limit above one on anything not stackable, so "quantity" can never quietly
+  mean two different things;
+- compatibility is authored identity plus the state a player can tell apart:
+  type, shape, frame, quality, condition and accepted equipment slots. A
+  container never stacks, because its contents are part of what it is;
+- merge, split and partial transfer each commit **once**. `CommitStackChange`
+  applies quantity changes, at most one creation and any emptied stacks in a
+  single transaction, so goods are never briefly duplicated or briefly missing;
+- a split is validated against the destination — container capacity, or the same
+  physical placement contract on a map — before either side changes;
+- every arrival of goods goes through those rules, whether the player clicked,
+  dragged or dropped, so two finds of gold become one purse rather than two rows;
+- the save format is at version 3, and **version 2 migrates rather than being
+  refused** — the first real use of the migration policy in 4.5. A version 2
+  object carrying more than one becomes a stack whose limit is exactly what it
+  carried: the reading that keeps the invariants without inventing capacity.
+
+Carrying capacity is **gear slots**, not weight — a Shadowdark-style model:
+
+- **Worn gear is free.** Thirteen places on the body — head, necklace, cloak,
+  body (the matched outfit: none, robes, leather, chain, plate), belt, scabbard,
+  belt pouch, gloves, both hands, both ring fingers, boots — hold one thing each
+  and cost no gear slots. This falls out of the object model: worn things are
+  `Equipped`, carried things are `InContainer`, and only the latter are counted.
+- **Carried capacity is `max(Strength, 10)`**, plus whatever a class ability
+  grants, capped at 25 — which is therefore the number of rows the carried panel
+  must have room for. An actor's capacity is derived from strength, never
+  authored; a corpse keeps the capacity the body carried with.
+- **A slot is bulk, not a count.** Most things cost one; plate, two-handed
+  weapons and awkward loot cost two. Goods measured by the slotful pool with
+  everything in their group: 100 coins of any mix, 10 gems of any kind, 20
+  arrows, 10 spikes, 3 rations. Fifty gold and fifty silver are one slot of
+  coins, not two of coins.
+- **Over capacity, it lands at your feet.** A full pack does not stop you taking
+  something — the overflow is dropped at the actor's position through the same
+  placement contract. If the ground is blocked, that refuses.
+- **A corpse is one container.** Death moves everything the body wore into the
+  body itself, so a corpse holds its gear and its loot together, and anything
+  that will not fit spills onto the ground — the same overflow rule a full pack
+  follows. This also closes a latent hole: `Transform` refuses to drop the
+  `Actor` flag while anything is still equipped, so a monster wearing gear could
+  not have been killed at all.
+- Worn containers organise rather than extend: a scabbard holds a blade, a belt
+  pouch holds a slot's worth of coins, and both are worn, so both are free.
+  Nothing nests capacity. A quiver of arrows is one carried stack with a count,
+  not a container. A bag of holding — one carried slot granting access to
+  storage reachable anywhere — is the intended exception and is not built.
+
+The carried panel draws the model directly: **one cell per gear slot**, five to
+a row, hanging from the top right and growing downward — two rows at least, five
+at the twenty-five a class bonus can reach. A two-slot item fills two cells,
+pooled goods appear once with their combined count, and cells past capacity are
+drawn dark. Press `I` to show or hide it, drag a cell to move what is in it,
+click a cell to wear it. The compact canvas is 320x200 units, so 25 rows of a
+list would not fit but a 5-wide grid has room to spare.
+
+The rest of the panel is a scrolling log rather than a list of key bindings; the
+controls live behind `H`. The UI still owes this model a paper doll for the
+thirteen body slots.
+
+Still open in checkpoint 6: volume and container content restrictions, and
+derived statistics from authoritative equipped objects.
 
 Conventions settled while implementing checkpoints 2 and 3:
 
@@ -119,7 +186,7 @@ speed are already recorded on the landing event.
 | 3. Elevation, support, and gravity — done | Objects stack, retain support, fall, and land deterministically |
 | 4. Object-world Save v1 — done | The complete object world round-trips byte-identically |
 | 5. Direct manipulation — done | Mouse selection and drag/drop use the same transfer and placement contract |
-| 6. Quantities and inventory rules — next | Stack merge, split, partial transfer, weight, and content restrictions |
+| 6. Quantities and inventory rules — stacks and gear slots done | Stack merge, split, partial transfer, weight, and content restrictions |
 
 Checkpoints 1–4 are the immediate object-world milestone. Direct manipulation
 and quantities follow after physical placement and persistence are trustworthy.

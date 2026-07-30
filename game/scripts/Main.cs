@@ -13,6 +13,21 @@ public partial class Main : Node2D
     private const int TileHalfWidth = 8;
     private const int TileHalfHeight = 4;
     private const int InventoryRowHeight = 12;
+    private const int CarriedGridColumns = 5;
+    private const int CarriedCellSize = 13;
+    private const int CarriedCellStride = 14;
+    private const int CarriedGridX = 245;
+    private const int CarriedGridY = 51;
+
+    /// <summary>
+    /// The pack always shows at least two rows, and grows downward from there
+    /// as capacity allows — up to five rows for the twenty-five slots a class
+    /// bonus can reach.
+    /// </summary>
+    private const int CarriedGridMinimumRows = 2;
+
+    /// <summary>How many messages the side log remembers.</summary>
+    private const int LogHistory = 12;
     private const int WorldUnitsPerTile = 256;
     private const int WorldViewportWidth = 240;
     private const int WorldViewportHeight = 200;
@@ -48,11 +63,15 @@ public partial class Main : Node2D
     private double _animationElapsedMilliseconds;
     private int _playerDirection = 6;
     private bool _debugOverlayVisible;
+    private bool _helpVisible;
+    private readonly List<string> _log = [];
+    private string _lastLogged = string.Empty;
     private SmokeRun? _smoke;
     private IReadOnlyDictionary<string, byte[]> _shapeMasks =
         new Dictionary<string, byte[]>();
 
     private readonly List<DrawnSprite> _drawnSprites = [];
+    private int _pressedCarriedCell = -1;
     private int _drawingSortId;
     private Vector2 _cursor;
 
@@ -117,6 +136,9 @@ public partial class Main : Node2D
             "--debug-overlay",
             StringComparer.Ordinal);
         _smoke = ParseSmokeRun(userArguments);
+        _helpVisible = userArguments.Contains(
+            "--help-open",
+            StringComparer.Ordinal);
         if (userArguments.Contains("--backpack-open", StringComparer.Ordinal))
         {
             _world.ToggleBackpack();
@@ -124,7 +146,7 @@ public partial class Main : Node2D
 
         if (userArguments.Contains("--equip-main-hand", StringComparer.Ordinal))
         {
-            _world.ToggleMainHand();
+            _world.ToggleRightHand();
         }
 
         LoadShapePack();
@@ -139,6 +161,7 @@ public partial class Main : Node2D
     public override void _Process(double delta)
     {
         _animationElapsedMilliseconds += delta * 1000;
+        RecordMessage();
         AdvanceSmokeRun();
         QueueRedraw();
     }
@@ -339,6 +362,8 @@ public partial class Main : Node2D
             $"falling_objects={falling}",
             $"last_message={_world.LastMessage}",
             $"save_pending={_world.SaveGate.IsSavePending}",
+            $"backpack_open={_world.BackpackOpen}",
+            $"backpack_slots={_world.BackpackSlotsUsed}/{_world.BackpackCapacity}",
         };
 
         if (smoke.DragDrop)
@@ -408,6 +433,48 @@ public partial class Main : Node2D
         {
             DrawChestTransfer();
         }
+
+        if (_helpVisible)
+        {
+            DrawHelp();
+        }
+    }
+
+    /// <summary>
+    /// The controls, on request. They do not belong on the panel: that space is
+    /// the log.
+    /// </summary>
+    private void DrawHelp()
+    {
+        DrawRect(new Rect2(30, 22, 180, 156), new Color("17110df2"));
+        DrawRect(new Rect2(33, 25, 174, 150), PanelInset);
+        DrawRect(new Rect2(30, 22, 180, 156), PanelEdge, filled: false, width: 1);
+        DrawText(new Vector2(40, 38), "CONTROLS", 10, Highlight);
+
+        var lines = new[]
+        {
+            ("WASD / ARROWS", "walk"),
+            ("MOUSE DRAG", "pick up and place"),
+            ("RIGHT CLICK", "let go"),
+            ("I / B", "carried gear"),
+            ("E", "open what you stand by"),
+            ("F / SPACE", "attack"),
+            ("Q", "hand the top weapon"),
+            ("G / X", "grab / drop"),
+            ("T", "collapse the trestle"),
+            ("F5 / F9", "save / load"),
+            ("R", "restart"),
+            ("F3", "debug overlay"),
+            ("ESC", "close, or cancel a drag"),
+        };
+        for (var index = 0; index < lines.Length; index++)
+        {
+            var y = 54 + (index * 9);
+            DrawText(new Vector2(40, y), lines[index].Item1, 7, Text);
+            DrawText(new Vector2(110, y), lines[index].Item2, 7, MutedText);
+        }
+
+        DrawText(new Vector2(40, 172), "H CLOSES THIS", 7, MutedText);
     }
 
     public override void _UnhandledInput(InputEvent @event)
@@ -463,7 +530,7 @@ public partial class Main : Node2D
                 _world.ToggleBackpack();
                 return true;
             case Key.Q:
-                _world.ToggleMainHand();
+                _world.ToggleRightHand();
                 return true;
             case Key.G:
                 _world.PickUpAtPlayerFeet();
@@ -485,6 +552,12 @@ public partial class Main : Node2D
                     return true;
                 }
 
+                if (_helpVisible)
+                {
+                    _helpVisible = false;
+                    return true;
+                }
+
                 _world.ClosePanels();
                 return true;
             case Key.R:
@@ -495,6 +568,9 @@ public partial class Main : Node2D
                 return true;
             case Key.F9:
                 LoadSavedWorld();
+                return true;
+            case Key.H:
+                _helpVisible = !_helpVisible;
                 return true;
             case Key.F3:
                 _debugOverlayVisible = !_debugOverlayVisible;
@@ -574,7 +650,35 @@ public partial class Main : Node2D
 
         if (!pressed)
         {
+            // A press and release on the same gear slot is a click, not a
+            // drag: it wears the thing rather than moving it.
+            var released = CarriedCellAt(_cursor);
+            var wasPressed = _pressedCarriedCell;
+            _pressedCarriedCell = -1;
+            if (released >= 0 && released == wasPressed)
+            {
+                var cells = BuildCarriedCells();
+                if (released < cells.Count)
+                {
+                    _world.EquipFromBackpack(cells[released].ObjectId);
+                    return true;
+                }
+            }
+
             return false;
+        }
+
+        var cell = CarriedCellAt(_cursor);
+        if (cell >= 0)
+        {
+            _pressedCarriedCell = cell;
+            var cells = BuildCarriedCells();
+            if (cell < cells.Count)
+            {
+                _world.BeginDrag(cells[cell].ObjectId);
+            }
+
+            return true;
         }
 
         return HandleClick(_cursor) || BeginDragAt(nativePosition);
@@ -641,6 +745,7 @@ public partial class Main : Node2D
 
     private bool DropHeldObject(Vector2 mouse)
     {
+        _pressedCarriedCell = -1;
         if (_world.ActiveChest is not null && mouse.X < WorldViewportWidth)
         {
             _world.DropDragInOpenChest();
@@ -649,8 +754,9 @@ public partial class Main : Node2D
 
         if (mouse.X >= 242)
         {
-            _ = mouse.Y is >= 129 and < 144
-                ? _world.DropDragOnMainHand()
+            // Anywhere on the pack panel stows it; the hand line equips it.
+            _ = mouse.Y is >= 37 and < 47
+                ? _world.DropDragOnRightHand()
                 : _world.DropDragInBackpack();
             return true;
         }
@@ -703,7 +809,7 @@ public partial class Main : Node2D
         {
             if (mouse.Y is >= 129 and < 144)
             {
-                _world.UnequipToBackpack(EquipmentSlot.MainHand);
+                _world.UnequipToBackpack(EquipmentSlot.RightHand);
                 return true;
             }
 
@@ -2004,54 +2110,213 @@ public partial class Main : Node2D
             $"HP {_world.PlayerHealth}/{_world.PlayerMaxHealth}",
             8,
             Text);
-
-        DrawText(new Vector2(246, 45), "MOVE WASD", 7, MutedText);
-        DrawText(new Vector2(246, 55), "E OPEN", 7, MutedText);
-        DrawText(new Vector2(246, 65), "F ATTACK", 7, MutedText);
-        DrawText(new Vector2(246, 75), "B PACK", 7, MutedText);
-        DrawText(new Vector2(246, 85), "Q HAND", 7, MutedText);
-        DrawText(new Vector2(246, 95), "G GET  X DROP", 7, MutedText);
-        DrawText(new Vector2(246, 105), "R RESET", 7, MutedText);
+        var rightHand = _world.EquippedIn(EquipmentSlot.RightHand);
         DrawText(
-            new Vector2(246, 115),
-            "F5 SAVE  F9 LOAD",
+            new Vector2(246, 39),
+            rightHand is null
+                ? "HAND (empty)"
+                : $"HAND {Shorten(rightHand.Value.Name, 9)}",
             7,
-            _world.SaveGate.IsSavePending ? Highlight : MutedText);
-        DrawText(
-            new Vector2(246, 125),
-            _debugOverlayVisible ? "F3 DEBUG ON" : "F3 DEBUG",
-            7,
-            _debugOverlayVisible ? DebugSortOrder : MutedText);
+            rightHand is null ? MutedText : Text);
 
         if (_world.BackpackOpen && _world.ActiveChest is null)
         {
-            DrawText(new Vector2(246, 127), "BACKPACK", 8, Highlight);
-            var mainHand = _world.EquippedIn(EquipmentSlot.MainHand);
+            DrawCarriedGrid();
+        }
+        else
+        {
             DrawText(
-                new Vector2(246, 139),
-                mainHand is null
-                    ? "HAND (empty)"
-                    : $"HAND {Shorten(mainHand.Value.Name, 9)}",
+                new Vector2(246, 53),
+                _world.SaveGate.IsSavePending ? "SAVING…" : "H HELP",
                 7,
-                mainHand is null ? MutedText : Text);
-            DrawText(
-                new Vector2(246, 148),
-                "click item: equip",
-                6,
-                MutedText);
-            DrawInventory(
-                _world.BackpackItems,
-                _world.BackpackCapacity,
-                new Vector2(246, 150),
-                width: 70,
-                maxRows: 3);
+                _world.SaveGate.IsSavePending ? Highlight : MutedText);
+
         }
 
-        if (!_world.BackpackOpen || _world.ActiveChest is not null)
+        // Whatever the pack does not use is the log.
+        var logTop = _world.BackpackOpen && _world.ActiveChest is null
+            ? CarriedGridY + (CarriedGridRows() * CarriedCellStride) + 8
+            : 66;
+        DrawMessageLog(logTop);
+    }
+
+    /// <summary>
+    /// The carried inventory as gear slots: one cell per slot, five to a row,
+    /// hanging from the top right and growing downward as capacity allows. A
+    /// two-slot item fills two cells, because that is what it costs.
+    /// </summary>
+    private void DrawCarriedGrid()
+    {
+        var capacity = _world.BackpackCapacity;
+        var used = _world.BackpackSlotsUsed;
+        DrawText(
+            new Vector2(CarriedGridX, CarriedGridY - 4),
+            $"PACK {used}/{capacity}",
+            8,
+            used >= capacity ? Highlight : Highlight);
+
+        var cells = BuildCarriedCells();
+        var rows = CarriedGridRows();
+        for (var index = 0; index < rows * CarriedGridColumns; index++)
         {
-            DrawWrappedMessage(_world.LastMessage);
+            var at = CarriedCellOrigin(index);
+            var beyondCapacity = index >= capacity;
+            DrawRect(
+                new Rect2(at, new Vector2(CarriedCellSize, CarriedCellSize)),
+                beyondCapacity ? new Color("1a1512") : new Color("2b211a"));
+            DrawRect(
+                new Rect2(at, new Vector2(CarriedCellSize, CarriedCellSize)),
+                beyondCapacity ? new Color("2a2420") : new Color("56402a"),
+                filled: false,
+                width: 1);
+            if (index >= cells.Count)
+            {
+                continue;
+            }
+
+            DrawCarriedCell(at, cells[index], index == _pressedCarriedCell);
+        }
+
+    }
+
+    /// <summary>
+    /// Two rows at least, and one more for every five slots of capacity, so
+    /// the pack grows downward rather than needing a scrollbar.
+    /// </summary>
+    private int CarriedGridRows() =>
+        Math.Max(
+            CarriedGridMinimumRows,
+            (Math.Max(_world.BackpackCapacity, _world.BackpackSlotsUsed) +
+                CarriedGridColumns - 1) / CarriedGridColumns);
+
+    private void DrawCarriedCell(
+        Vector2 at,
+        CarriedCell cell,
+        bool pressed)
+    {
+        if (pressed)
+        {
+            DrawRect(
+                new Rect2(at, new Vector2(CarriedCellSize, CarriedCellSize)),
+                Highlight,
+                filled: false,
+                width: 1);
+        }
+
+        // A continuation cell shows the item carries on rather than repeating
+        // its icon: two cells, one thing.
+        if (cell.Continuation)
+        {
+            DrawLine(
+                at + new Vector2(2, CarriedCellSize / 2),
+                at + new Vector2(CarriedCellSize - 2, CarriedCellSize / 2),
+                MutedText,
+                1);
+            return;
+        }
+
+        // Atlas frames are authored for the world, not for a thirteen-pixel
+        // cell, so a slot draws a glyph coloured by what kind of thing it is.
+        var centre = at + new Vector2(CarriedCellSize / 2f, 6);
+        var colour = cell.ShapeId switch
+        {
+            "loot.shortsword" => new Color("c9c2b4"),
+            "container.chest" => new Color("8a6a3a"),
+            _ => new Color("b8873d"),
+        };
+        if (cell.ShapeId == "loot.shortsword")
+        {
+            DrawLine(
+                centre + new Vector2(-3, 3),
+                centre + new Vector2(3, -3),
+                colour,
+                1);
+            DrawLine(
+                centre + new Vector2(-1, -1),
+                centre + new Vector2(2, 2),
+                colour.Darkened(0.3f),
+                1);
+        }
+        else
+        {
+            DrawColoredPolygon(Diamond(centre, 4, 3, close: false), colour);
+        }
+
+        if (cell.Quantity > 1)
+        {
+            DrawText(
+                at + new Vector2(1, CarriedCellSize - 1),
+                cell.Quantity > 999 ? "999+" : cell.Quantity.ToString(),
+                6,
+                Text);
         }
     }
+
+    /// <summary>
+    /// One cell per gear slot, in the order the slot layout reports them, so
+    /// the panel never has to know what a slot costs.
+    /// </summary>
+    private List<CarriedCell> BuildCarriedCells()
+    {
+        var cells = new List<CarriedCell>();
+        foreach (var entry in _world.BackpackSlots)
+        {
+            var shapeId = _world.Objects.TryGet(entry.ObjectId, out var value)
+                ? value.ShapeId
+                : "loot.generic";
+            for (var cell = 0; cell < entry.Cells; cell++)
+            {
+                cells.Add(
+                    new CarriedCell(
+                        entry.ObjectId,
+                        entry.Label,
+                        shapeId,
+                        cell == 0 ? entry.Quantity : 0,
+                        cell > 0));
+            }
+        }
+
+        return cells;
+    }
+
+    private static Vector2 CarriedCellOrigin(int index) =>
+        new(
+            CarriedGridX + ((index % CarriedGridColumns) * CarriedCellStride),
+            CarriedGridY + ((index / CarriedGridColumns) * CarriedCellStride));
+
+    /// <summary>The carried cell under a compact-pixel position, or -1.</summary>
+    private int CarriedCellAt(Vector2 compact)
+    {
+        if (!_world.BackpackOpen || _world.ActiveChest is not null)
+        {
+            return -1;
+        }
+
+        var column = (int)((compact.X - CarriedGridX) / CarriedCellStride);
+        var row = (int)((compact.Y - CarriedGridY) / CarriedCellStride);
+        if (compact.X < CarriedGridX ||
+            compact.Y < CarriedGridY ||
+            column < 0 ||
+            column >= CarriedGridColumns ||
+            row < 0)
+        {
+            return -1;
+        }
+
+        var index = (row * CarriedGridColumns) + column;
+        return index < Math.Max(
+            _world.BackpackCapacity,
+            CarriedGridMinimumRows * CarriedGridColumns)
+            ? index
+            : -1;
+    }
+
+    private sealed record CarriedCell(
+        ObjectId ObjectId,
+        string Label,
+        string ShapeId,
+        int Quantity,
+        bool Continuation);
 
     private void DrawChestTransfer()
     {
@@ -2073,7 +2338,7 @@ public partial class Main : Node2D
             maxRows: 9);
         DrawInventory(
             _world.ContentsOf(chest.Id),
-            chest.ContainerCapacity,
+            chest.CarryCapacity,
             new Vector2(123, 49),
             95,
             maxRows: 9);
@@ -2113,9 +2378,14 @@ public partial class Main : Node2D
                     fixedSequence: 0);
             }
 
+            // A stack is one object carrying a count, so the row shows the
+            // count rather than repeating the row N times.
+            var label = item.Quantity > 1
+                ? $"{Shorten(item.Name, width < 80 ? 9 : 13)} x{item.Quantity}"
+                : Shorten(item.Name, width < 80 ? 12 : 16);
             DrawText(
                 new Vector2(origin.X + (hasSwordIcon ? 15 : 3), y + 8),
-                Shorten(item.Name, width < 80 ? 12 : 16),
+                label,
                 7,
                 Text);
         }
@@ -2125,14 +2395,67 @@ public partial class Main : Node2D
             DrawText(origin + new Vector2(3, 8), "(empty)", 7, MutedText);
         }
 
+        // Rows are objects; the number that matters is gear slots, where a
+        // hundred coins are one slot and plate is two.
+        var used = GearSlots.UsedBy(items);
+        var overflow = items.Count - rows;
         DrawText(
             new Vector2(origin.X, origin.Y + (maxRows * InventoryRowHeight) + 8),
-            $"{items.Count}/{capacity}",
+            overflow > 0
+                ? $"{used}/{capacity} slots  +{overflow} more"
+                : $"{used}/{capacity} slots",
             7,
-            MutedText);
+            used > capacity ? Highlight : MutedText);
     }
 
-    private void DrawWrappedMessage(string message)
+    /// <summary>
+    /// The world reports one message at a time; the panel keeps a scrolling
+    /// log of them, so what just happened does not vanish on the next step.
+    /// </summary>
+    private void RecordMessage()
+    {
+        var message = _world.LastMessage;
+        if (message.Length == 0 ||
+            string.Equals(message, _lastLogged, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _lastLogged = message;
+        _log.Add(message);
+        if (_log.Count > LogHistory)
+        {
+            _log.RemoveRange(0, _log.Count - LogHistory);
+        }
+    }
+
+    /// <summary>
+    /// The log, newest at the bottom, filling whatever panel space is left
+    /// under the pack.
+    /// </summary>
+    private void DrawMessageLog(float top)
+    {
+        var lines = new List<string>();
+        foreach (var message in _log)
+        {
+            lines.AddRange(WrapMessage(message));
+        }
+
+        var rows = Math.Max(0, (int)((196 - top) / 9));
+        var visible = lines.TakeLast(rows).ToArray();
+        for (var index = 0; index < visible.Length; index++)
+        {
+            // The newest line reads brightest; older ones recede.
+            var age = visible.Length - 1 - index;
+            DrawText(
+                new Vector2(246, top + (index * 9)),
+                visible[index],
+                7,
+                age == 0 ? Text : MutedText);
+        }
+    }
+
+    private static IReadOnlyList<string> WrapMessage(string message)
     {
         var words = message.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var lines = new List<string>();
@@ -2155,15 +2478,7 @@ public partial class Main : Node2D
             lines.Add(current);
         }
 
-        var visibleLines = lines.TakeLast(4).ToArray();
-        for (var index = 0; index < visibleLines.Length; index++)
-        {
-            DrawText(
-                new Vector2(246, 162 + (index * 9)),
-                visibleLines[index],
-                7,
-                Text);
-        }
+        return lines;
     }
 
     private void DrawText(Vector2 at, string value, int size, Color colour)

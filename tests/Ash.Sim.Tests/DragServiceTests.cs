@@ -57,7 +57,7 @@ public sealed class DragServiceTests
             Footprint = new ObjectFootprint(32, 32),
             Height = 8,
             Flags = ObjectFlags.Item | ObjectFlags.Movable,
-            EquipmentSlots = EquipmentSlotMask.MainHand,
+            EquipmentSlots = EquipmentSlotMask.RightHand,
         });
         var drag = new DragService(world);
 
@@ -69,11 +69,11 @@ public sealed class DragServiceTests
             world.Get(apple).Location);
 
         Assert.True(drag.Begin(actor, sword).Succeeded);
-        var equipped = drag.DropOnEquipment(actor, EquipmentSlot.MainHand);
+        var equipped = drag.DropOnEquipment(actor, EquipmentSlot.RightHand);
 
         Assert.True(equipped.Succeeded, equipped.Message);
         Assert.Equal(
-            ObjectLocation.Equipped(actor, EquipmentSlot.MainHand),
+            ObjectLocation.Equipped(actor, EquipmentSlot.RightHand),
             world.Get(sword).Location);
         world.ValidateInvariants();
     }
@@ -337,7 +337,7 @@ public sealed class DragServiceTests
                 ObjectFlags.Container |
                 ObjectFlags.Solid |
                 ObjectFlags.Visible,
-            ContainerCapacity = 8,
+            Strength = 8,
             Health = 10,
             MaxHealth = 10,
         });

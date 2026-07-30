@@ -218,36 +218,93 @@ public enum ObjectFlags
     ProvidesSupport = 1 << 12,
 
     AffectedByGravity = 1 << 13,
+
+    /// <summary>
+    /// Identical objects of this kind combine into one handle carrying a
+    /// quantity, rather than sitting beside each other as separate objects.
+    /// </summary>
+    Stackable = 1 << 14,
+}
+
+/// <summary>
+/// Where a thing is worn. These are places on the body, not carrying capacity:
+/// worn gear costs no gear slots, so what you wear is what you get for free.
+/// </summary>
+public enum EquipmentSlot : byte
+{
+    RightHand = 0,
+    LeftHand = 1,
+
+    /// <summary>Helmet.</summary>
+    Head = 2,
+
+    /// <summary>The matched outfit: none, robes, leather, chain or plate.</summary>
+    Body = 3,
+
+    Gloves = 4,
+
+    /// <summary>Boots, which are a pair and one slot.</summary>
+    Boots = 5,
+
+    Cloak = 6,
+    Necklace = 7,
+    Belt = 8,
+
+    /// <summary>Hangs from the belt and holds a blade.</summary>
+    Scabbard = 9,
+
+    /// <summary>Hangs from the belt and holds small goods.</summary>
+    BeltPouch = 10,
+
+    RingLeft = 11,
+    RingRight = 12,
 }
 
 [Flags]
 public enum EquipmentSlotMask : ushort
 {
     None = 0,
-    MainHand = 1 << 0,
-    OffHand = 1 << 1,
-    Head = 1 << 2,
-    Body = 1 << 3,
-    Hands = 1 << 4,
-    Feet = 1 << 5,
-    Neck = 1 << 6,
-    Ring = 1 << 7,
-}
+    RightHand = 1 << EquipmentSlot.RightHand,
+    LeftHand = 1 << EquipmentSlot.LeftHand,
+    Head = 1 << EquipmentSlot.Head,
+    Body = 1 << EquipmentSlot.Body,
+    Gloves = 1 << EquipmentSlot.Gloves,
+    Boots = 1 << EquipmentSlot.Boots,
+    Cloak = 1 << EquipmentSlot.Cloak,
+    Necklace = 1 << EquipmentSlot.Necklace,
+    Belt = 1 << EquipmentSlot.Belt,
+    Scabbard = 1 << EquipmentSlot.Scabbard,
+    BeltPouch = 1 << EquipmentSlot.BeltPouch,
+    RingLeft = 1 << EquipmentSlot.RingLeft,
+    RingRight = 1 << EquipmentSlot.RingRight,
 
-public enum EquipmentSlot : byte
-{
-    MainHand = 0,
-    OffHand = 1,
-    Head = 2,
-    Body = 3,
-    Hands = 4,
-    Feet = 5,
-    Neck = 6,
-    Ring = 7,
+    /// <summary>Either hand.</summary>
+    EitherHand = RightHand | LeftHand,
+
+    /// <summary>Either ring finger.</summary>
+    EitherRing = RingLeft | RingRight,
 }
 
 public static class EquipmentSlots
 {
+    /// <summary>Every place on the body, in the order a paper doll reads.</summary>
+    public static readonly IReadOnlyList<EquipmentSlot> All =
+    [
+        EquipmentSlot.Head,
+        EquipmentSlot.Necklace,
+        EquipmentSlot.Cloak,
+        EquipmentSlot.Body,
+        EquipmentSlot.Belt,
+        EquipmentSlot.Scabbard,
+        EquipmentSlot.BeltPouch,
+        EquipmentSlot.Gloves,
+        EquipmentSlot.RightHand,
+        EquipmentSlot.LeftHand,
+        EquipmentSlot.RingRight,
+        EquipmentSlot.RingLeft,
+        EquipmentSlot.Boots,
+    ];
+
     public static EquipmentSlotMask MaskFor(byte slot) =>
         slot < 16
             ? (EquipmentSlotMask)(1 << slot)
@@ -255,6 +312,184 @@ public static class EquipmentSlots
 
     public static bool Accepts(this EquipmentSlotMask mask, byte slot) =>
         (mask & MaskFor(slot)) != 0;
+
+    public static bool IsBody(byte slot) =>
+        All.Contains((EquipmentSlot)slot);
+}
+
+/// <summary>
+/// Carrying capacity, measured in gear slots rather than weight.
+/// </summary>
+public static class GearSlots
+{
+    /// <summary>
+    /// Even the weakest character carries this much:
+    /// <c>capacity = max(Strength, MinimumCapacity)</c>.
+    /// </summary>
+    public const int MinimumCapacity = 10;
+
+    /// <summary>
+    /// The largest carried inventory that can exist, and so the number of rows
+    /// the UI must have room for: strength alone reaches 20, and class
+    /// abilities can add up to five more slots on top.
+    /// </summary>
+    public const int PanelCapacity = 25;
+
+    /// <summary>One slot: most gear, a weapon, a whole stack, a torch.</summary>
+    public const int StandardCost = 1;
+
+    /// <summary>A hundred coins of any mix fill one slot.</summary>
+    public const int CoinsPerSlot = 100;
+
+    /// <summary>Ten gems of any kind fill one slot.</summary>
+    public const int GemsPerSlot = 10;
+
+    /// <summary>Twenty arrows or bolts fill one slot.</summary>
+    public const int AmmunitionPerSlot = 20;
+
+    /// <summary>Ten iron spikes fill one slot.</summary>
+    public const int SpikesPerSlot = 10;
+
+    /// <summary>Three rations fill one slot.</summary>
+    public const int RationsPerSlot = 3;
+
+    /// <summary>Coins pool across denominations; gems pool across kinds.</summary>
+    public const string CoinGroup = "coins";
+
+    public const string GemGroup = "gems";
+
+    /// <summary>
+    /// One entry of a carried inventory as the player sees it: what it is, how
+    /// many, and how many gear slots it fills. Pooled goods appear once with
+    /// their combined count, because that is how they take up room.
+    /// </summary>
+    public readonly record struct GearSlotEntry(
+        ObjectId ObjectId,
+        string Label,
+        int Quantity,
+        int Cells,
+        bool IsPooled);
+
+    /// <summary>
+    /// Lays a carried inventory out slot by slot, so a panel can draw one cell
+    /// per gear slot without knowing the rules. The entries always add up to
+    /// <see cref="UsedBy"/>.
+    /// </summary>
+    public static IReadOnlyList<GearSlotEntry> LayOut(
+        IEnumerable<WorldObject> contents)
+    {
+        ArgumentNullException.ThrowIfNull(contents);
+        var entries = new List<GearSlotEntry>();
+        var groups = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var value in contents)
+        {
+            if (value.QuantityPerSlot <= 0)
+            {
+                entries.Add(
+                    new GearSlotEntry(
+                        value.Id,
+                        value.Name,
+                        value.Quantity,
+                        Math.Max(1, value.SlotCost),
+                        false));
+                continue;
+            }
+
+            var group = value.SlotGroup.Length > 0
+                ? value.SlotGroup
+                : value.TypeId;
+            if (groups.TryGetValue(group, out var at))
+            {
+                var running = entries[at];
+                entries[at] = running with
+                {
+                    Quantity = checked(running.Quantity + value.Quantity),
+                    Cells = (checked(running.Quantity + value.Quantity) +
+                        value.QuantityPerSlot - 1) / value.QuantityPerSlot,
+                    Label = value.SlotGroup.Length > 0
+                        ? char.ToUpperInvariant(value.SlotGroup[0]) +
+                          value.SlotGroup[1..]
+                        : running.Label,
+                    IsPooled = true,
+                };
+                continue;
+            }
+
+            groups.Add(group, entries.Count);
+            entries.Add(
+                new GearSlotEntry(
+                    value.Id,
+                    value.Name,
+                    value.Quantity,
+                    (value.Quantity + value.QuantityPerSlot - 1) /
+                        value.QuantityPerSlot,
+                    false));
+        }
+
+        return entries;
+    }
+
+    /// <summary>
+    /// The gear slots a set of carried objects takes up. Objects that measure
+    /// themselves by count — coins, gems, ammunition — pool with everything in
+    /// the same group, so fifty gold and fifty silver are still one slot of
+    /// coins. Everything else costs its own slots.
+    /// </summary>
+    public static int UsedBy(IEnumerable<WorldObject> contents)
+    {
+        ArgumentNullException.ThrowIfNull(contents);
+        var used = 0;
+        var pooled = new Dictionary<string, (int Quantity, int PerSlot)>(
+            StringComparer.Ordinal);
+        foreach (var value in contents)
+        {
+            if (value.QuantityPerSlot <= 0)
+            {
+                used = checked(used + value.SlotCost);
+                continue;
+            }
+
+            var group = value.SlotGroup.Length > 0
+                ? value.SlotGroup
+                : value.TypeId;
+            if (pooled.TryGetValue(group, out var running))
+            {
+                if (running.PerSlot != value.QuantityPerSlot)
+                {
+                    throw new InvalidOperationException(
+                        $"Group '{group}' is authored with both " +
+                        $"{running.PerSlot} and {value.QuantityPerSlot} per " +
+                        "slot.");
+                }
+
+                pooled[group] = (
+                    checked(running.Quantity + value.Quantity),
+                    running.PerSlot);
+                continue;
+            }
+
+            pooled[group] = (value.Quantity, value.QuantityPerSlot);
+        }
+
+        foreach (var (quantity, perSlot) in pooled.Values)
+        {
+            used = checked(used + ((quantity + perSlot - 1) / perSlot));
+        }
+
+        return used;
+    }
+
+    /// <summary>Two slots: plate, two-handed weapons, awkward loot.</summary>
+    public const int BulkyCost = 2;
+
+    /// <summary>
+    /// <c>max(Strength, 10)</c>, plus whatever a class ability grants, and
+    /// never more than the panel can show.
+    /// </summary>
+    public static int CapacityFor(int strength, int bonus = 0) =>
+        Math.Min(
+            checked(Math.Max(strength, MinimumCapacity) + bonus),
+            PanelCapacity);
 }
 
 public readonly record struct ObjectFootprint(int Width, int Depth)
@@ -300,13 +535,85 @@ public sealed record ObjectSpawn
 
     public int Quantity { get; init; } = 1;
 
+    /// <summary>
+    /// How many of this kind one handle may carry. One means the object never
+    /// stacks, which is the default and what every non-stackable object uses.
+    /// </summary>
+    public int MaxQuantity { get; init; } = 1;
+
     public int Condition { get; init; } = 100;
 
-    public int ContainerCapacity { get; init; }
+    /// <summary>
+    /// Gear slots this occupies while carried. A stack costs its slots once,
+    /// however many it holds; worn gear costs nothing at all.
+    /// </summary>
+    public int SlotCost { get; init; } = GearSlots.StandardCost;
+
+    /// <summary>
+    /// Slots this container holds. Actors derive theirs from
+    /// <see cref="Strength"/> instead and must leave this at zero.
+    /// </summary>
+    public int SlotCapacity { get; init; }
+
+    /// <summary>
+    /// How many of this fit in one gear slot, for goods measured by count:
+    /// 100 coins, 10 gems, 20 arrows, 10 spikes, 3 rations. Zero means the
+    /// object costs <see cref="SlotCost"/> whatever its quantity.
+    /// </summary>
+    public int QuantityPerSlot { get; init; }
+
+    /// <summary>
+    /// Goods that share a slot with other kinds — coins of any denomination,
+    /// gems of any sort. Empty means it pools only with its own type.
+    /// </summary>
+    public string SlotGroup { get; init; } = string.Empty;
+
+    /// <summary>The actor stat carrying capacity is derived from.</summary>
+    public int Strength { get; init; }
+
+    /// <summary>
+    /// Extra gear slots from a class ability or similar, added on top of the
+    /// strength-derived capacity.
+    /// </summary>
+    public int GearSlotBonus { get; init; }
 
     public int Health { get; init; }
 
     public int MaxHealth { get; init; }
+
+    /// <summary>
+    /// The object this spawn would become, so capacity and placement can be
+    /// validated before anything is created.
+    /// </summary>
+    public WorldObject AsProbe(ObjectLocation location) =>
+        new(
+            ObjectId.None,
+            TypeId,
+            Name,
+            ShapeId,
+            FrameId,
+            location,
+            Footprint,
+            Height,
+            StepHeight,
+            MotionState.Resting,
+            0,
+            SupportRef.None,
+            Flags,
+            EquipmentSlots,
+            Quality,
+            Quantity,
+            MaxQuantity,
+            Condition,
+            Health,
+            MaxHealth,
+            SlotCost,
+            SlotCapacity,
+            QuantityPerSlot,
+            SlotGroup,
+            Strength,
+            GearSlotBonus,
+            false);
 }
 
 public readonly record struct WorldObject(
@@ -326,10 +633,16 @@ public readonly record struct WorldObject(
     EquipmentSlotMask EquipmentSlots,
     int Quality,
     int Quantity,
+    int MaxQuantity,
     int Condition,
     int Health,
     int MaxHealth,
-    int ContainerCapacity,
+    int SlotCost,
+    int SlotCapacity,
+    int QuantityPerSlot,
+    string SlotGroup,
+    int Strength,
+    int GearSlotBonus,
     bool IsContainerOpen)
 {
     public bool HasFlag(ObjectFlags flag) => (Flags & flag) != 0;
@@ -343,6 +656,18 @@ public readonly record struct WorldObject(
     /// </summary>
     public bool CanSupport =>
         HasFlag(ObjectFlags.Solid) || HasFlag(ObjectFlags.ProvidesSupport);
+
+    /// <summary>
+    /// How many gear slots this container offers. An actor's capacity comes
+    /// from its strength — <c>max(Strength, 10)</c> — and everything else uses
+    /// the slots it was authored with.
+    /// </summary>
+    public int CarryCapacity =>
+        !HasFlag(ObjectFlags.Container)
+            ? 0
+            : Strength > 0
+                ? GearSlots.CapacityFor(Strength, GearSlotBonus)
+                : SlotCapacity;
 }
 
 public sealed class InvalidObjectIdException : InvalidOperationException
@@ -363,6 +688,11 @@ public enum ObjectStoreChangeKind
     Transferred,
     Destroyed,
 }
+
+/// <summary>A stack's new size, committed with the rest of its transaction.</summary>
+public readonly record struct ObjectQuantityUpdate(
+    ObjectId ObjectId,
+    int Quantity);
 
 public sealed record ObjectStoreCommit(
     ObjectStoreChangeKind Kind,
@@ -405,10 +735,16 @@ public sealed class ObjectStore
     private readonly List<EquipmentSlotMask> _equipmentSlots = [];
     private readonly List<int> _qualities = [];
     private readonly List<int> _quantities = [];
+    private readonly List<int> _maxQuantities = [];
     private readonly List<int> _conditions = [];
     private readonly List<int> _health = [];
     private readonly List<int> _maxHealth = [];
-    private readonly List<int> _containerCapacities = [];
+    private readonly List<int> _slotCosts = [];
+    private readonly List<int> _slotCapacities = [];
+    private readonly List<int> _quantitiesPerSlot = [];
+    private readonly List<string> _slotGroups = [];
+    private readonly List<int> _strengths = [];
+    private readonly List<int> _gearSlotBonuses = [];
     private readonly List<bool> _containerOpen = [];
     private readonly Stack<int> _freeSlots = [];
 
@@ -517,9 +853,20 @@ public sealed class ObjectStore
 
     public ObjectId Create(ObjectSpawn spawn)
     {
+        var id = CreateWithoutPublishing(spawn);
+        AssertInvariants();
+        Publish(ObjectStoreChangeKind.Created, id);
+        return id;
+    }
+
+    private ObjectId CreateWithoutPublishing(ObjectSpawn spawn)
+    {
         ArgumentNullException.ThrowIfNull(spawn);
         ValidateSpawn(spawn);
-        ValidateLocation(ObjectId.None, spawn.Location);
+        ValidateLocation(
+            ObjectId.None,
+            spawn.Location,
+            spawn.AsProbe(spawn.Location));
 
         var index = AllocateSlot();
         var id = ObjectId.FromParts(index, _generations[index]);
@@ -547,14 +894,18 @@ public sealed class ObjectStore
         _equipmentSlots[index] = spawn.EquipmentSlots;
         _qualities[index] = spawn.Quality;
         _quantities[index] = spawn.Quantity;
+        _maxQuantities[index] = spawn.MaxQuantity;
         _conditions[index] = spawn.Condition;
         _health[index] = spawn.Health;
         _maxHealth[index] = spawn.MaxHealth;
-        _containerCapacities[index] = spawn.ContainerCapacity;
+        _slotCosts[index] = spawn.SlotCost;
+        _slotCapacities[index] = spawn.SlotCapacity;
+        _quantitiesPerSlot[index] = spawn.QuantityPerSlot;
+        _slotGroups[index] = spawn.SlotGroup;
+        _strengths[index] = spawn.Strength;
+        _gearSlotBonuses[index] = spawn.GearSlotBonus;
         _containerOpen[index] = false;
         Count++;
-        AssertInvariants();
-        Publish(ObjectStoreChangeKind.Created, id);
         return id;
     }
 
@@ -656,7 +1007,7 @@ public sealed class ObjectStore
         ValidateText(shapeId, nameof(shapeId));
         var index = ResolveSlot(id);
         if (flags.HasFlag(ObjectFlags.Container) !=
-            (_containerCapacities[index] > 0))
+            (CarryCapacityAt(index) > 0))
         {
             throw new InvalidOperationException(
                 $"Object {id} cannot change its container capability without " +
@@ -712,6 +1063,13 @@ public sealed class ObjectStore
 
     public void Destroy(ObjectId id)
     {
+        DestroyWithoutPublishing(id);
+        AssertInvariants();
+        Publish(ObjectStoreChangeKind.Destroyed, id);
+    }
+
+    private void DestroyWithoutPublishing(ObjectId id)
+    {
         var index = ResolveSlot(id);
         if (HasChildren(id))
         {
@@ -733,8 +1091,6 @@ public sealed class ObjectStore
         _generations[index] = NextGeneration(_generations[index]);
         _freeSlots.Push(index);
         Count--;
-        AssertInvariants();
-        Publish(ObjectStoreChangeKind.Destroyed, id);
     }
 
     public void ValidateInvariants()
@@ -758,11 +1114,20 @@ public sealed class ObjectStore
             location.Validate();
             _footprints[index].Validate();
             if (_quantities[index] <= 0 ||
+                _maxQuantities[index] < 1 ||
+                _quantities[index] > _maxQuantities[index] ||
                 _health[index] < 0 ||
                 _health[index] > _maxHealth[index])
             {
                 throw new InvalidOperationException(
                     $"Object {id} has invalid quantity or health.");
+            }
+
+            if (_maxQuantities[index] > 1 &&
+                !_flags[index].HasFlag(ObjectFlags.Stackable))
+            {
+                throw new InvalidOperationException(
+                    $"Non-stackable object {id} has a stack limit above one.");
             }
 
             if (_verticalVelocities[index] < 0)
@@ -795,7 +1160,9 @@ public sealed class ObjectStore
             }
 
             var isContainer = _flags[index].HasFlag(ObjectFlags.Container);
-            if (isContainer != (_containerCapacities[index] > 0))
+            if (isContainer
+                ? CarryCapacityAt(index) <= 0
+                : _slotCapacities[index] != 0)
             {
                 throw new InvalidOperationException(
                     $"Object {id} container capability and capacity disagree.");
@@ -843,11 +1210,11 @@ public sealed class ObjectStore
                 }
             }
 
-            if (isContainer &&
-                GetContents(id).Count > _containerCapacities[index])
+            if (isContainer && UsedSlots(id) > CarryCapacityAt(index))
             {
                 throw new InvalidOperationException(
-                    $"Container {id} exceeds its capacity.");
+                    $"Container {id} holds {UsedSlots(id)} slots of a " +
+                    $"{CarryCapacityAt(index)}-slot capacity.");
             }
         }
     }
@@ -883,10 +1250,16 @@ public sealed class ObjectStore
         _equipmentSlots.Add(EquipmentSlotMask.None);
         _qualities.Add(0);
         _quantities.Add(0);
+        _maxQuantities.Add(1);
         _conditions.Add(0);
         _health.Add(0);
         _maxHealth.Add(0);
-        _containerCapacities.Add(0);
+        _slotCosts.Add(GearSlots.StandardCost);
+        _slotCapacities.Add(0);
+        _quantitiesPerSlot.Add(0);
+        _slotGroups.Add(string.Empty);
+        _strengths.Add(0);
+        _gearSlotBonuses.Add(0);
         _containerOpen.Add(false);
         return index;
     }
@@ -926,11 +1299,64 @@ public sealed class ObjectStore
             throw new ArgumentOutOfRangeException(nameof(spawn.Quantity));
         }
 
-        if (spawn.Flags.HasFlag(ObjectFlags.Container) !=
-            (spawn.ContainerCapacity > 0))
+        if (spawn.SlotCost < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(spawn.SlotCost));
+        }
+
+        if (spawn.SlotCapacity < 0 ||
+            spawn.Strength < 0 ||
+            spawn.GearSlotBonus < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(spawn.SlotCapacity));
+        }
+
+        if (!spawn.Flags.HasFlag(ObjectFlags.Actor) && spawn.GearSlotBonus != 0)
         {
             throw new ArgumentException(
-                "Container flag and positive container capacity must agree.");
+                "Only actors carry gear slots, so only actors can have a bonus.");
+        }
+
+        if (spawn.Flags.HasFlag(ObjectFlags.Actor) && spawn.SlotCapacity != 0)
+        {
+            throw new ArgumentException(
+                "An actor's carrying capacity comes from its strength, so its " +
+                "slot capacity must be left at zero.");
+        }
+
+        if (spawn.MaxQuantity < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(spawn.MaxQuantity));
+        }
+
+        if (spawn.Quantity > spawn.MaxQuantity)
+        {
+            throw new ArgumentException(
+                $"A stack of {spawn.Quantity} exceeds the maximum of " +
+                $"{spawn.MaxQuantity} for {spawn.TypeId}.");
+        }
+
+        if (spawn.MaxQuantity > 1 &&
+            !spawn.Flags.HasFlag(ObjectFlags.Stackable))
+        {
+            throw new ArgumentException(
+                "Only stackable objects can carry more than one.");
+        }
+
+        if (spawn.Flags.HasFlag(ObjectFlags.Container) &&
+            spawn.SlotCapacity <= 0 &&
+            spawn.Strength <= 0)
+        {
+            throw new ArgumentException(
+                "A container needs slots: authored capacity, or the strength " +
+                "an actor carries with.");
+        }
+
+        if (!spawn.Flags.HasFlag(ObjectFlags.Container) &&
+            spawn.SlotCapacity != 0)
+        {
+            throw new ArgumentException(
+                "Only a container has slot capacity.");
         }
 
         if (spawn.EquipmentSlots != EquipmentSlotMask.None &&
@@ -957,7 +1383,10 @@ public sealed class ObjectStore
         }
     }
 
-    private void ValidateLocation(ObjectId moving, ObjectLocation location)
+    private void ValidateLocation(
+        ObjectId moving,
+        ObjectLocation location,
+        WorldObject incoming)
     {
         location.Validate();
         if (location.Kind == LocationKind.OnMap ||
@@ -976,8 +1405,12 @@ public sealed class ObjectStore
                 _locations[ResolveSlot(moving)].Kind ==
                 LocationKind.InContainer &&
                 _locations[ResolveSlot(moving)].Parent == parent;
+            var projected = GetContents(parent)
+                .Select(Get)
+                .Append(incoming)
+                .ToArray();
             if (!alreadyThere &&
-                GetContents(parent).Count >= _containerCapacities[parentIndex])
+                GearSlots.UsedBy(projected) > CarryCapacityAt(parentIndex))
             {
                 throw new InvalidOperationException(
                     $"Container {parent} is full.");
@@ -1054,6 +1487,26 @@ public sealed class ObjectStore
         return false;
     }
 
+    /// <summary>
+    /// The gear slots a container's contents take up. Worn gear is not counted:
+    /// it is on the body, not in the pack.
+    /// </summary>
+    private int UsedSlots(ObjectId container) =>
+        GearSlots.UsedBy(GetContents(container).Select(Get));
+
+    /// <summary>
+    /// A body carries what its strength allows, alive or dead — a corpse is
+    /// still a container of that size. Everything else uses its authored slots.
+    /// </summary>
+    private int CarryCapacityAt(int index) =>
+        !_flags[index].HasFlag(ObjectFlags.Container)
+            ? 0
+            : _strengths[index] > 0
+                ? GearSlots.CapacityFor(
+                    _strengths[index],
+                    _gearSlotBonuses[index])
+                : _slotCapacities[index];
+
     private void RequireFlag(int index, ObjectFlags required)
     {
         if (!_flags[index].HasFlag(required))
@@ -1085,6 +1538,64 @@ public sealed class ObjectStore
 
     private ObjectId IdAt(int index) =>
         ObjectId.FromParts(index, _generations[index]);
+
+    /// <summary>
+    /// Applies a stack change as one commit: quantity changes, at most one
+    /// object created, and any emptied stacks destroyed. Splitting and merging
+    /// must not be two commits, or a crash between them would create or destroy
+    /// goods out of nothing.
+    /// </summary>
+    internal ObjectId CommitStackChange(
+        IReadOnlyList<ObjectQuantityUpdate> quantities,
+        IReadOnlyList<ObjectId> destroy,
+        ObjectSpawn? create)
+    {
+        IsCommitting = true;
+        try
+        {
+            var touched = new List<ObjectId>();
+            foreach (var update in quantities)
+            {
+                var index = ResolveSlot(update.ObjectId);
+                if (update.Quantity < 1 ||
+                    update.Quantity > _maxQuantities[index])
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(quantities),
+                        $"Object {update.ObjectId} cannot hold " +
+                        $"{update.Quantity} of a maximum " +
+                        $"{_maxQuantities[index]}.");
+                }
+
+                _quantities[index] = update.Quantity;
+                touched.Add(update.ObjectId);
+            }
+
+            var created = ObjectId.None;
+            if (create is not null)
+            {
+                created = CreateWithoutPublishing(create);
+                touched.Add(created);
+            }
+
+            foreach (var id in destroy)
+            {
+                DestroyWithoutPublishing(id);
+                touched.Add(id);
+            }
+
+            AssertInvariants();
+            Committed?.Invoke(
+                new ObjectStoreCommit(
+                    ObjectStoreChangeKind.Updated,
+                    touched.Distinct().Order().ToArray()));
+            return created;
+        }
+        finally
+        {
+            IsCommitting = false;
+        }
+    }
 
     internal void CommitTransfer(
         IReadOnlyList<ObjectTransferRequest> requests,
@@ -1165,10 +1676,16 @@ public sealed class ObjectStore
         _equipmentSlots[index] = value.EquipmentSlots;
         _qualities[index] = value.Quality;
         _quantities[index] = value.Quantity;
+        _maxQuantities[index] = value.MaxQuantity;
         _conditions[index] = value.Condition;
         _health[index] = value.Health;
         _maxHealth[index] = value.MaxHealth;
-        _containerCapacities[index] = value.ContainerCapacity;
+        _slotCosts[index] = value.SlotCost;
+        _slotCapacities[index] = value.SlotCapacity;
+        _quantitiesPerSlot[index] = value.QuantityPerSlot;
+        _slotGroups[index] = value.SlotGroup;
+        _strengths[index] = value.Strength;
+        _gearSlotBonuses[index] = value.GearSlotBonus;
         _containerOpen[index] = value.IsContainerOpen;
     }
 
@@ -1190,10 +1707,16 @@ public sealed class ObjectStore
             _equipmentSlots[index],
             _qualities[index],
             _quantities[index],
+            _maxQuantities[index],
             _conditions[index],
             _health[index],
             _maxHealth[index],
-            _containerCapacities[index],
+            _slotCosts[index],
+            _slotCapacities[index],
+            _quantitiesPerSlot[index],
+            _slotGroups[index],
+            _strengths[index],
+            _gearSlotBonuses[index],
             _containerOpen[index]);
 
     [Conditional("DEBUG")]

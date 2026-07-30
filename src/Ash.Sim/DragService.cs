@@ -67,6 +67,7 @@ public sealed class DragService
 
     private readonly ObjectStore _objects;
     private readonly ObjectTransferService _transfers;
+    private readonly StackService _stacks;
     private uint _nextTransferId = 1;
 
     public DragService(ObjectStore objects, int reachUnits = DefaultReachUnits)
@@ -78,6 +79,7 @@ public sealed class DragService
         }
 
         _transfers = new ObjectTransferService(objects);
+        _stacks = new StackService(objects);
         ReachUnits = reachUnits;
     }
 
@@ -236,8 +238,28 @@ public sealed class DragService
             return failure;
         }
 
+        // Dropping goods onto goods of the same kind tops the pile up rather
+        // than leaving two piles side by side, and does it in one commit.
+        var destination = ObjectLocation.InContainer(container);
+        var held = _objects.Get(State.ObjectId);
+        if (held.HasFlag(ObjectFlags.Stackable) &&
+            !_stacks.FindMergeTarget(held, destination).IsNone)
+        {
+            var merged = _stacks.TransferQuantity(
+                State.ObjectId,
+                held.Quantity,
+                destination);
+            if (!merged.Succeeded)
+            {
+                return DragResult.Reject(DragFailure.Rejected, merged.Message);
+            }
+
+            State = DragState.None;
+            return DragResult.Ok(merged.Message);
+        }
+
         return Commit(
-            ObjectLocation.InContainer(container),
+            destination,
             physics: null,
             $"Put {Name(State.ObjectId)} in {target.Name}.");
     }

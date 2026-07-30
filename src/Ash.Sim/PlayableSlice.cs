@@ -52,6 +52,12 @@ public sealed class PlayableSliceWorld : IDisposable
     public const string ContentFingerprint = "ash.playable-slice.v1";
 
     private const string AvatarTypeId = "actor.avatar";
+    private const string GoldTypeId = "item.gold";
+
+    /// <summary>The Avatar's strength, and so a 12-slot pack.</summary>
+    private const int AvatarStrength = 12;
+
+
     private const int TableHeight = 40;
     private const int CrateHeight = 32;
     private const int BridgeDeckHeight = 4;
@@ -72,6 +78,7 @@ public sealed class PlayableSliceWorld : IDisposable
         Physics = new PhysicsSystem(objects, startTick: startTick);
         SaveGate = new WorldSaveGate(objects, Physics, ContentFingerprint);
         Drag = new DragService(objects);
+        Stacks = new StackService(objects);
         LastMessage = "Explore. Open a chest or fight a monster.";
     }
 
@@ -86,6 +93,8 @@ public sealed class PlayableSliceWorld : IDisposable
     public WorldSaveGate SaveGate { get; }
 
     public DragService Drag { get; }
+
+    public StackService Stacks { get; }
 
     /// <summary>The object currently held by the cursor, if any.</summary>
     public WorldObject? HeldObject =>
@@ -143,7 +152,18 @@ public sealed class PlayableSliceWorld : IDisposable
     public IReadOnlyList<WorldObject> GroundItems =>
         Map.QueryAll(ObjectFlags.Item);
 
-    public int BackpackCapacity => Player.ContainerCapacity;
+    /// <summary>Gear slots the Avatar can carry: max(Strength, 10).</summary>
+    public int BackpackCapacity => Player.CarryCapacity;
+
+    /// <summary>Gear slots the carried inventory is using.</summary>
+    public int BackpackSlotsUsed => GearSlots.UsedBy(BackpackItems);
+
+    /// <summary>
+    /// The carried inventory laid out one entry per thing, sized in gear slots,
+    /// which is what the carried panel draws cells from.
+    /// </summary>
+    public IReadOnlyList<GearSlots.GearSlotEntry> BackpackSlots =>
+        GearSlots.LayOut(BackpackItems);
 
     public static PlayableSliceWorld CreateDemo()
     {
@@ -163,7 +183,7 @@ public sealed class PlayableSliceWorld : IDisposable
                 ObjectFlags.Solid |
                 ObjectFlags.AffectedByGravity |
                 ObjectFlags.Visible,
-            ContainerCapacity = 12,
+            Strength = AvatarStrength,
             Health = 12,
             MaxHealth = 12,
         });
@@ -173,7 +193,7 @@ public sealed class PlayableSliceWorld : IDisposable
             "item.rusty-sword",
             "Rusty Sword",
             "loot.shortsword",
-            EquipmentSlotMask.MainHand);
+            EquipmentSlotMask.RightHand);
         SpawnItem(objects, player, "item.apple", "Apple");
 
         SpawnChest(
@@ -181,7 +201,8 @@ public sealed class PlayableSliceWorld : IDisposable
             "container.store-room",
             "Store-room Chest",
             new GridPosition(8, 13),
-            ["Health Tonic", "Iron Key", "12 Gold"]);
+            ["Health Tonic", "Iron Key"],
+            gold: 12);
         SpawnChest(
             objects,
             "container.old-coffer",
@@ -193,13 +214,15 @@ public sealed class PlayableSliceWorld : IDisposable
             "container.pilgrims-cache",
             "Pilgrim's Cache",
             new GridPosition(31, 21),
-            ["Silver Mirror", "Incense", "18 Gold"]);
+            ["Silver Mirror", "Incense"],
+            gold: 18);
         SpawnChest(
             objects,
             "container.vault-box",
             "Vault Box",
             new GridPosition(37, 12),
             ["Star Sapphire", "Antidote"]);
+        SpawnCountedGoods(objects);
 
         SpawnMonster(
             objects,
@@ -216,7 +239,8 @@ public sealed class PlayableSliceWorld : IDisposable
             "monster.goblin",
             new GridPosition(24, 18),
             maxHealth: 6,
-            loot: ["Copper Ring", "Throwing Knife"]);
+            loot: ["Copper Ring", "Throwing Knife"],
+            worn: "Notched Blade");
         SpawnMonster(
             objects,
             "monster.many-eyed-tyrant",
@@ -298,8 +322,8 @@ public sealed class PlayableSliceWorld : IDisposable
     public SliceActionResult DropDragInBackpack() =>
         FromDrag(Drag.DropInContainer(PlayerId));
 
-    public SliceActionResult DropDragOnMainHand() =>
-        FromDrag(Drag.DropOnEquipment(PlayerId, EquipmentSlot.MainHand));
+    public SliceActionResult DropDragOnRightHand() =>
+        FromDrag(Drag.DropOnEquipment(PlayerId, EquipmentSlot.RightHand));
 
     public SliceActionResult DropDragInOpenChest() =>
         ActiveChest is { } chest
@@ -332,6 +356,48 @@ public sealed class PlayableSliceWorld : IDisposable
     /// bridge deck over a lower floor, and a trestle whose support the player
     /// can remove with <see cref="RemoveTrestleSupport"/>.
     /// </summary>
+    /// <summary>
+    /// Goods measured by the slotful, in the chests that hold them.
+    /// </summary>
+    private static void SpawnCountedGoods(ObjectStore objects)
+    {
+        var chests = objects.Enumerate()
+            .Where(value =>
+                value.TypeId.StartsWith("container.", StringComparison.Ordinal))
+            .OrderBy(value => value.Id)
+            .ToArray();
+        SpawnStack(
+            objects,
+            chests[1].Id,
+            "item.silver",
+            "Silver Coins",
+            40,
+            GearSlots.CoinsPerSlot,
+            GearSlots.CoinGroup);
+        SpawnStack(
+            objects,
+            chests[1].Id,
+            "item.arrow",
+            "Arrows",
+            20,
+            GearSlots.AmmunitionPerSlot);
+        SpawnStack(
+            objects,
+            chests[3].Id,
+            "item.ration",
+            "Rations",
+            3,
+            GearSlots.RationsPerSlot);
+        SpawnStack(
+            objects,
+            chests[3].Id,
+            "item.gem",
+            "Cut Gems",
+            6,
+            GearSlots.GemsPerSlot,
+            GearSlots.GemGroup);
+    }
+
     private static void SpawnPhysicsArea(ObjectStore objects)
     {
         SpawnProp(
@@ -575,14 +641,7 @@ public sealed class PlayableSliceWorld : IDisposable
             return Finish(false, "That chest slot is empty.");
         }
 
-        var item = contents[itemIndex];
-        return FinishTransfer(
-            Transfers.Execute(
-                new ObjectTransferRequest(
-                    item.Id,
-                    item.Location,
-                    ObjectLocation.InContainer(PlayerId))),
-            $"Took {item.Name}.");
+        return Carry(contents[itemIndex], "Took");
     }
 
     public SliceActionResult PutInOpenChest(int itemIndex)
@@ -601,13 +660,12 @@ public sealed class PlayableSliceWorld : IDisposable
 
         var destination = chest.Value;
         var item = backpack[itemIndex];
-        return FinishTransfer(
-            Transfers.Execute(
-                new ObjectTransferRequest(
-                    item.Id,
-                    item.Location,
-                    ObjectLocation.InContainer(destination.Id))),
-            $"Stored {item.Name}.");
+        return FinishStack(
+            Stacks.TransferQuantity(
+                item.Id,
+                item.Quantity,
+                ObjectLocation.InContainer(destination.Id)),
+            $"Stored {Describe(item)}.");
     }
 
     public WorldObject? EquippedIn(EquipmentSlot slot)
@@ -623,9 +681,52 @@ public sealed class PlayableSliceWorld : IDisposable
         return null;
     }
 
+    /// <summary>
+    /// Equips a specific carried object, which is what a grid of gear slots
+    /// clicks with: cells address objects, not row numbers.
+    /// </summary>
+    public SliceActionResult EquipFromBackpack(
+        ObjectId itemId,
+        EquipmentSlot? slot = null)
+    {
+        if (!Objects.TryGet(itemId, out var item) ||
+            item.Location != ObjectLocation.InContainer(PlayerId))
+        {
+            return Finish(false, "That is not in your pack.");
+        }
+
+        var target = slot ?? FirstAcceptedSlot(item);
+        if (target is null)
+        {
+            return Finish(false, $"{item.Name} is not something you wear.");
+        }
+
+        return FinishTransfer(
+            Transfers.Execute(
+                new ObjectTransferRequest(
+                    itemId,
+                    item.Location,
+                    ObjectLocation.Equipped(PlayerId, target.Value))),
+            $"Equipped {item.Name}.");
+    }
+
+    /// <summary>The first body slot an item accepts, in paper-doll order.</summary>
+    private static EquipmentSlot? FirstAcceptedSlot(WorldObject item)
+    {
+        foreach (var slot in EquipmentSlots.All)
+        {
+            if (item.EquipmentSlots.Accepts((byte)slot))
+            {
+                return slot;
+            }
+        }
+
+        return null;
+    }
+
     public SliceActionResult EquipFromBackpack(
         int itemIndex,
-        EquipmentSlot slot = EquipmentSlot.MainHand)
+        EquipmentSlot slot = EquipmentSlot.RightHand)
     {
         var backpack = BackpackItems;
         if (itemIndex < 0 || itemIndex >= backpack.Count)
@@ -661,21 +762,21 @@ public sealed class PlayableSliceWorld : IDisposable
             $"Unequipped {item.Name}.");
     }
 
-    public SliceActionResult ToggleMainHand()
+    public SliceActionResult ToggleRightHand()
     {
-        if (EquippedIn(EquipmentSlot.MainHand) is not null)
+        if (EquippedIn(EquipmentSlot.RightHand) is not null)
         {
-            return UnequipToBackpack(EquipmentSlot.MainHand);
+            return UnequipToBackpack(EquipmentSlot.RightHand);
         }
 
         var candidate = BackpackItems
             .Select((item, index) => (Item: item, Index: index))
             .FirstOrDefault(pair =>
                 pair.Item.EquipmentSlots.Accepts(
-                    (byte)EquipmentSlot.MainHand));
+                    (byte)EquipmentSlot.RightHand));
         return candidate.Item.Id.IsNone
             ? Finish(false, "There is no main-hand item in the backpack.")
-            : EquipFromBackpack(candidate.Index, EquipmentSlot.MainHand);
+            : EquipFromBackpack(candidate.Index, EquipmentSlot.RightHand);
     }
 
     public SliceActionResult DropFromBackpack(int itemIndex = 0)
@@ -687,13 +788,9 @@ public sealed class PlayableSliceWorld : IDisposable
         }
 
         var item = backpack[itemIndex];
-        return FinishTransfer(
-            Transfers.Execute(
-                new ObjectTransferRequest(
-                    item.Id,
-                    item.Location,
-                    Player.Location)),
-            $"Dropped {item.Name}.");
+        return FinishStack(
+            Stacks.TransferQuantity(item.Id, item.Quantity, Player.Location),
+            $"Dropped {Describe(item)}.");
     }
 
     public SliceActionResult PickUpAtPlayerFeet()
@@ -709,13 +806,7 @@ public sealed class PlayableSliceWorld : IDisposable
             return Finish(false, "There is nothing here to pick up.");
         }
 
-        return FinishTransfer(
-            Transfers.Execute(
-                new ObjectTransferRequest(
-                    item.Value.Id,
-                    item.Value.Location,
-                    ObjectLocation.InContainer(PlayerId))),
-            $"Picked up {item.Value.Name}.");
+        return Carry(item.Value, "Picked up");
     }
 
     public SliceActionResult AttackAdjacentMonster()
@@ -746,7 +837,10 @@ public sealed class PlayableSliceWorld : IDisposable
                 $"({remaining}/{monster.MaxHealth} HP).");
         }
 
-        Objects.Transform(
+        // The body becomes one container holding everything it had, worn gear
+        // included; anything that will not fit spills onto the ground.
+        var corpse = Death.MakeCorpse(
+            Objects,
             monster.Id,
             $"remains.{monster.TypeId}",
             $"Remains of {monster.Name}",
@@ -756,9 +850,17 @@ public sealed class PlayableSliceWorld : IDisposable
             ObjectFlags.Usable |
             ObjectFlags.Visible,
             height: 24);
+        if (!corpse.Succeeded)
+        {
+            return Finish(false, corpse.Message);
+        }
+
         return Finish(
             true,
-            $"{monster.Name} dies. Its remains can be looted.");
+            corpse.Spilled.Count == 0
+                ? $"{monster.Name} dies. Its remains can be looted."
+                : $"{monster.Name} dies, scattering " +
+                  $"{corpse.Spilled.Count} of its things.");
     }
 
     public SliceActionResult ClosePanels()
@@ -785,7 +887,8 @@ public sealed class PlayableSliceWorld : IDisposable
         string typeId,
         string name,
         GridPosition position,
-        IEnumerable<string> items)
+        IEnumerable<string> items,
+        int gold = 0)
     {
         var chest = objects.Create(new ObjectSpawn
         {
@@ -800,12 +903,60 @@ public sealed class PlayableSliceWorld : IDisposable
                 ObjectFlags.Solid |
                 ObjectFlags.Usable |
                 ObjectFlags.Visible,
-            ContainerCapacity = 10,
+            SlotCapacity = 10,
         });
         foreach (var item in items)
         {
             SpawnItem(objects, chest, ItemTypeId(item), item);
         }
+
+        if (gold > 0)
+        {
+            SpawnStack(
+                objects,
+                chest,
+                GoldTypeId,
+                "Gold Coins",
+                gold,
+                GearSlots.CoinsPerSlot,
+                GearSlots.CoinGroup);
+        }
+    }
+
+    /// <summary>
+    /// Goods counted by the slotful: a hundred coins, ten gems, twenty arrows,
+    /// three rations. One object carries the count, so two finds of gold become
+    /// one purse rather than filling the pack with singles, and coins of any
+    /// denomination share their slot.
+    /// </summary>
+    private static void SpawnStack(
+        ObjectStore objects,
+        ObjectId parent,
+        string typeId,
+        string name,
+        int quantity,
+        int perSlot,
+        string group = "")
+    {
+        objects.Create(new ObjectSpawn
+        {
+            TypeId = typeId,
+            Name = name,
+            ShapeId = "loot.generic",
+            Location = ObjectLocation.InContainer(parent),
+            Footprint = new ObjectFootprint(32, 32),
+            Height = 8,
+            Flags =
+                ObjectFlags.Item |
+                ObjectFlags.Movable |
+                ObjectFlags.Stackable |
+                ObjectFlags.AffectedByGravity |
+                ObjectFlags.Visible,
+            Quantity = quantity,
+            MaxQuantity = perSlot,
+            QuantityPerSlot = perSlot,
+            SlotGroup = group,
+        });
     }
 
     private static void SpawnMonster(
@@ -815,7 +966,8 @@ public sealed class PlayableSliceWorld : IDisposable
         string shapeId,
         GridPosition position,
         int maxHealth,
-        IEnumerable<string> loot)
+        IEnumerable<string> loot,
+        string? worn = null)
     {
         var monster = objects.Create(new ObjectSpawn
         {
@@ -833,13 +985,30 @@ public sealed class PlayableSliceWorld : IDisposable
                 ObjectFlags.Container |
                 ObjectFlags.Solid |
                 ObjectFlags.Visible,
-            ContainerCapacity = 10,
+            Strength = 10,
             Health = maxHealth,
             MaxHealth = maxHealth,
         });
         foreach (var item in loot)
         {
             SpawnItem(objects, monster, ItemTypeId(item), item);
+        }
+
+        if (worn is not null)
+        {
+            objects.Create(new ObjectSpawn
+            {
+                TypeId = ItemTypeId(worn),
+                Name = worn,
+                ShapeId = "loot.shortsword",
+                Location = ObjectLocation.Equipped(
+                    monster,
+                    EquipmentSlot.RightHand),
+                Footprint = new ObjectFootprint(32, 32),
+                Height = 8,
+                Flags = ObjectFlags.Item | ObjectFlags.Movable,
+                EquipmentSlots = EquipmentSlotMask.RightHand,
+            });
         }
     }
 
@@ -1041,6 +1210,63 @@ public sealed class PlayableSliceWorld : IDisposable
 
     private SliceActionResult FromDrag(DragResult result) =>
         Finish(result.Succeeded, result.Message);
+
+    /// <summary>
+    /// Where goods bound for the pack actually end up. Gear slots are a hard
+    /// limit, and the rule for exceeding them is not "you cannot take it" but
+    /// "it lands at your feet" — so a full pack never blocks looting, it just
+    /// leaves the overflow on the floor.
+    /// </summary>
+    private ObjectLocation CarryDestination(WorldObject item)
+    {
+        var pack = ObjectLocation.InContainer(PlayerId);
+
+        // Topping up a stack already in the pack costs no extra slot, and
+        // goods that share a slot — coins of any mix — are pooled by the same
+        // rule the capacity check uses.
+        var projected = BackpackItems.Append(item with { Location = pack });
+        if (!Stacks.FindMergeTarget(item, pack).IsNone ||
+            GearSlots.UsedBy(projected) <= BackpackCapacity)
+        {
+            return pack;
+        }
+
+        return Player.Location;
+    }
+
+    private SliceActionResult Carry(WorldObject item, string verb)
+    {
+        var destination = CarryDestination(item);
+        var result = Stacks.TransferQuantity(
+            item.Id,
+            item.Quantity,
+            destination);
+        if (!result.Succeeded)
+        {
+            return Finish(false, result.Message);
+        }
+
+        return Finish(
+            true,
+            destination.Kind == LocationKind.InContainer
+                ? $"{verb} {Describe(item)}."
+                : $"{verb} {Describe(item)}, but your pack is full: it falls " +
+                  "at your feet.");
+    }
+
+    /// <summary>
+    /// Every arrival of goods goes through the stack rules, so a purse joins
+    /// the purse already there whether it was clicked, dragged or dropped.
+    /// </summary>
+    private SliceActionResult FinishStack(
+        StackResult result,
+        string successMessage) =>
+        Finish(
+            result.Succeeded,
+            result.Succeeded ? successMessage : result.Message);
+
+    private static string Describe(WorldObject value) =>
+        value.Quantity > 1 ? $"{value.Quantity} {value.Name}" : value.Name;
 
     private SliceActionResult FinishTransfer(
         ObjectTransferResult transfer,

@@ -48,16 +48,25 @@ public static class ObjectWorldSave
     public static readonly byte[] Magic = "ASHW"u8.ToArray();
 
     /// <summary>
-    /// Version 2 added the terrain section. Version 1 was never written outside
-    /// this repository's tests, so it has no migration and is simply refused.
+    /// Version 2 added the terrain section, version 3 stack limits, and
+    /// version 4 gear slots.
+    /// Version 1 was never written outside this repository's tests, so it has
+    /// no migration and is simply refused.
     /// </summary>
-    public const int FormatVersion = 2;
+    public const int FormatVersion = 4;
 
     /// <summary>
-    /// The oldest reader that can still make sense of this file. A reader below
-    /// this refuses the file instead of guessing at it.
+    /// The oldest format this build still reads. Version 2 migrates forward
+    /// through <see cref="MigrateStackLimit"/> rather than being refused,
+    /// because version 2 files exist.
     /// </summary>
-    public const int MinimumReaderVersion = 2;
+    public const int MinimumSupportedVersion = 2;
+
+    /// <summary>
+    /// The oldest reader that can still make sense of a file this build writes.
+    /// A reader below this refuses the file instead of guessing at it.
+    /// </summary>
+    public const int MinimumReaderVersion = 4;
 
     /// <summary>A sanity bound so a corrupt length cannot ask for a huge buffer.</summary>
     public const int MaximumPayloadBytes = 256 * 1024 * 1024;
@@ -101,11 +110,11 @@ public static class ObjectWorldSave
                 $"build reads format {FormatVersion}.");
         }
 
-        if (formatVersion != FormatVersion)
+        if (formatVersion < MinimumSupportedVersion ||
+            formatVersion > FormatVersion)
         {
             // Compatible older versions migrate through explicit, tested
-            // transforms. There is no such version yet, so there is nothing to
-            // guess at here.
+            // transforms; anything else is refused rather than guessed at.
             throw new ObjectWorldSaveException(
                 $"Save format {formatVersion} has no migration to " +
                 $"{FormatVersion}.");
@@ -143,7 +152,7 @@ public static class ObjectWorldSave
                 "The save payload does not match its checksum.");
         }
 
-        var (maps, objects) = ReadPayload(payload);
+        var (maps, objects) = ReadPayload(payload, formatVersion);
         return new ObjectWorldSnapshot(
             fingerprint,
             tick,
@@ -311,7 +320,7 @@ public static class ObjectWorldSave
     }
 
     private static (IReadOnlyList<WorldMapSnapshot> Maps, ObjectStoreSnapshot Objects)
-        ReadPayload(ReadOnlySpan<byte> payload)
+        ReadPayload(ReadOnlySpan<byte> payload, int formatVersion)
     {
         var reader = new SpanReader(payload);
         var maps = ReadMaps(ref reader);
@@ -337,7 +346,9 @@ public static class ObjectWorldSave
                 new ObjectSlotSnapshot(
                     alive == 1,
                     generation,
-                    alive == 1 ? ReadObject(ref reader, index, generation) : null));
+                    alive == 1
+                        ? ReadObject(ref reader, index, generation, formatVersion)
+                        : null));
         }
 
         var freeCount = reader.ReadInt32();
@@ -448,17 +459,24 @@ public static class ObjectWorldSave
         WriteUInt16(buffer, (ushort)value.EquipmentSlots);
         WriteInt32(buffer, value.Quality);
         WriteInt32(buffer, value.Quantity);
+        WriteInt32(buffer, value.MaxQuantity);
         WriteInt32(buffer, value.Condition);
         WriteInt32(buffer, value.Health);
         WriteInt32(buffer, value.MaxHealth);
-        WriteInt32(buffer, value.ContainerCapacity);
+        WriteInt32(buffer, value.SlotCost);
+        WriteInt32(buffer, value.SlotCapacity);
+        WriteInt32(buffer, value.QuantityPerSlot);
+        WriteText(buffer, value.SlotGroup);
+        WriteInt32(buffer, value.Strength);
+        WriteInt32(buffer, value.GearSlotBonus);
         buffer.WriteByte(value.IsContainerOpen ? (byte)1 : (byte)0);
     }
 
     private static WorldObject ReadObject(
         ref SpanReader reader,
         int index,
-        byte generation)
+        byte generation,
+        int formatVersion)
     {
         if (generation == 0)
         {
@@ -489,10 +507,51 @@ public static class ObjectWorldSave
         var equipmentSlots = (EquipmentSlotMask)reader.ReadUInt16();
         var quality = reader.ReadInt32();
         var quantity = reader.ReadInt32();
+        var maxQuantity = formatVersion >= 3
+            ? reader.ReadInt32()
+            : MigrateStackLimit(quantity);
+        if (formatVersion < 3 && quantity > 1)
+        {
+            // A version 2 object carrying more than one really was a stack; it
+            // simply had no way to say so. Marking it stackable with a limit of
+            // exactly what it carries is the only reading that keeps the store's
+            // invariants and cannot invent capacity that never existed.
+            flags |= ObjectFlags.Stackable;
+        }
+
         var condition = reader.ReadInt32();
         var health = reader.ReadInt32();
         var maxHealth = reader.ReadInt32();
-        var containerCapacity = reader.ReadInt32();
+        // Version 3 wrote one capacity field here; version 4 writes the slot
+        // cost, the capacity, and the strength and bonus behind it.
+        var slotCost = GearSlots.StandardCost;
+        var strength = 0;
+        var gearSlotBonus = 0;
+        if (formatVersion >= 4)
+        {
+            slotCost = reader.ReadInt32();
+        }
+
+        var slotCapacity = reader.ReadInt32();
+        var quantityPerSlot = 0;
+        var slotGroup = string.Empty;
+        if (formatVersion >= 4)
+        {
+            quantityPerSlot = reader.ReadInt32();
+            slotGroup = reader.ReadText();
+            strength = reader.ReadInt32();
+            gearSlotBonus = reader.ReadInt32();
+        }
+
+        if (formatVersion < 4 && flags.HasFlag(ObjectFlags.Actor))
+        {
+            // Version 3 authored an actor's capacity directly. Slots derive it
+            // from strength now, so the old capacity becomes the strength that
+            // produces exactly the same capacity.
+            strength = slotCapacity;
+            slotCapacity = 0;
+        }
+
         var containerOpen = reader.ReadByte() == 1;
         return new WorldObject(
             ObjectId.FromParts(index, generation),
@@ -511,10 +570,16 @@ public static class ObjectWorldSave
             equipmentSlots,
             quality,
             quantity,
+            maxQuantity,
             condition,
             health,
             maxHealth,
-            containerCapacity,
+            slotCost,
+            slotCapacity,
+            quantityPerSlot,
+            slotGroup,
+            strength,
+            gearSlotBonus,
             containerOpen);
     }
 
@@ -609,6 +674,12 @@ public static class ObjectWorldSave
                 $"The save holds an unknown support kind {kind}."),
         };
     }
+
+    /// <summary>
+    /// Version 2 had no stack limit: every object carried whatever quantity it
+    /// had and could not grow, so its limit is exactly that quantity.
+    /// </summary>
+    private static int MigrateStackLimit(int quantity) => Math.Max(1, quantity);
 
     private static ObjectId ObjectIdFromValue(uint value)
     {

@@ -254,15 +254,25 @@ public sealed class ObjectTransferService
             }
         }
 
-        var containerCounts = new Dictionary<ObjectId, int>();
+        var containerContents = new Dictionary<ObjectId, List<WorldObject>>();
         var occupiedSlots = new HashSet<(ObjectId Actor, byte Slot)>();
         foreach (var value in objects)
         {
             var location = projected[value.Id];
             if (location.Kind == LocationKind.InContainer)
             {
-                containerCounts[location.Parent] =
-                    containerCounts.GetValueOrDefault(location.Parent) + 1;
+                // Capacity is gear slots, not a count of things: a hundred
+                // coins are one slot and plate is two, so the whole projected
+                // content set decides, not a running total of objects.
+                if (!containerContents.TryGetValue(
+                        location.Parent,
+                        out var contents))
+                {
+                    contents = [];
+                    containerContents.Add(location.Parent, contents);
+                }
+
+                contents.Add(value with { Location = location });
             }
             else if (location.Kind == LocationKind.Equipped &&
                      !occupiedSlots.Add((location.Parent, location.Slot)))
@@ -274,14 +284,16 @@ public sealed class ObjectTransferService
             }
         }
 
-        foreach (var (containerId, count) in containerCounts)
+        foreach (var (containerId, contents) in containerContents)
         {
             var container = byId[containerId];
-            if (count > container.ContainerCapacity)
+            var used = GearSlots.UsedBy(contents);
+            if (used > container.CarryCapacity)
             {
                 return Reject(
                     ObjectTransferFailure.ContainerCapacity,
-                    $"{container.Name} is full.");
+                    $"{container.Name} has no room: {used} slots of " +
+                    $"{container.CarryCapacity}.");
             }
         }
 

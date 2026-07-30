@@ -134,7 +134,7 @@ public sealed class PhysicsTests
             Footprint = new ObjectFootprint(128, 128),
             Height = 40,
             Flags = ObjectFlags.Container | ObjectFlags.Solid,
-            ContainerCapacity = 4,
+            SlotCapacity = 4,
         });
         var gem = store.Create(Crate(
             "gem",

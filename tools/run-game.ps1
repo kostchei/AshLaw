@@ -47,6 +47,12 @@ param(
     # Turn on the F3 overlay (collision volumes, elevation, motion, support).
     [switch]$DebugOverlay,
 
+    # Open the carried-gear panel, so a screenshot shows it.
+    [switch]$Backpack,
+
+    # Open the help overlay, so a screenshot shows it.
+    [switch]$Help,
+
     # Exercise the in-game save and load commands during the run.
     [switch]$SaveLoad,
 
@@ -172,6 +178,8 @@ $godotArgs += @(
 if ($Screenshot) { $godotArgs += "--screenshot=$screenshotPath" }
 if ($Goto) { $godotArgs += "--smoke-goto=$Goto" }
 if ($DebugOverlay) { $godotArgs += "--debug-overlay" }
+if ($Backpack) { $godotArgs += "--backpack-open" }
+if ($Help) { $godotArgs += "--help-open" }
 if ($SaveLoad) { $godotArgs += "--smoke-save-load" }
 if ($DragDrop) { $godotArgs += "--smoke-drag-drop" }
 if ($Hold) { $godotArgs += "--smoke-hold" }

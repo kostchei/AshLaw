@@ -40,9 +40,9 @@ public sealed class ObjectStoreTests
 
         store.Move(
             item,
-            ObjectLocation.Equipped(actor, EquipmentSlot.MainHand));
+            ObjectLocation.Equipped(actor, EquipmentSlot.RightHand));
         Assert.Equal(actor, store.Get(item).Location.Parent);
-        Assert.Equal((byte)EquipmentSlot.MainHand, store.Get(item).Location.Slot);
+        Assert.Equal((byte)EquipmentSlot.RightHand, store.Get(item).Location.Slot);
 
         store.Move(item, ObjectLocation.InTransfer(42));
         Assert.Equal(42u, store.Get(item).Location.TransferId);
@@ -93,7 +93,7 @@ public sealed class ObjectStoreTests
                 ObjectFlags.Container |
                 ObjectFlags.Solid |
                 ObjectFlags.Visible,
-            ContainerCapacity = 4,
+            Strength = 4,
             Health = 2,
             MaxHealth = 2,
             Height = 56,
@@ -158,7 +158,7 @@ public sealed class ObjectStoreTests
             Location = location ??
                 ObjectLocation.OnMap(0, new Vec3i(0, 0, 0)),
             Flags = ObjectFlags.Item | ObjectFlags.Movable | ObjectFlags.Visible,
-            EquipmentSlots = EquipmentSlotMask.MainHand,
+            EquipmentSlots = EquipmentSlotMask.RightHand,
             Footprint = new ObjectFootprint(32, 32),
             Height = 8,
         };
@@ -176,7 +176,8 @@ public sealed class ObjectStoreTests
             Location = location ??
                 ObjectLocation.OnMap(0, new Vec3i(0, 0, 0)),
             Flags = flags | ObjectFlags.Container,
-            ContainerCapacity = capacity,
+            SlotCapacity = flags.HasFlag(ObjectFlags.Actor) ? 0 : capacity,
+            Strength = flags.HasFlag(ObjectFlags.Actor) ? capacity : 0,
             Footprint = new ObjectFootprint(128, 128),
             Height = 40,
         };
