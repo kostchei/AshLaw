@@ -89,6 +89,10 @@ available to headless tests. The audit covers:
 - equipped-item slot restrictions;
 - positive quantity, valid health, and physical footprint.
 
-This checkpoint intentionally does not implement the M2 spatial index, support
-resolution, gravity, or save format. The next object-world layer is the map
-container and commit-rebuilt uniform-grid spatial index.
+The map container and commit-rebuilt uniform-grid spatial index now live in
+`WorldMap`. It indexes each `OnMap` object across every bucket touched by its
+footprint, maintains a deterministic anchor index, and exposes map, region,
+volume, capability, and exact-anchor queries. Successful store commits publish
+one complete new map revision; rejected transfers publish nothing. The next
+object-world layer is collision and physical placement; support resolution,
+gravity, and Save v1 remain subsequent checkpoints.

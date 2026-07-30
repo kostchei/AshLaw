@@ -456,6 +456,11 @@ public partial class Main : Node2D
             $"CAM {_camera.Offset.X},{_camera.Offset.Y}",
             size: 5,
             DebugSortOrder);
+        DrawText(
+            new Vector2(4, 16),
+            $"MAP r{_world.Map.Revision} n{_world.Map.IndexedObjectCount}",
+            size: 5,
+            DebugSortOrder);
 
         for (var sortIndex = 0;
              sortIndex < sortResult.DrawOrder.Count;
@@ -860,6 +865,7 @@ public partial class Main : Node2D
 
     private List<WorldDrawItem> BuildWorldDrawItems()
     {
+        var visibleObjects = _world.VisibleObjects();
         var items = new List<WorldDrawItem>
         {
             CreateDrawItem(
@@ -945,7 +951,10 @@ public partial class Main : Node2D
                     Iso(new GridPosition(38, 17)) + new Vector2(0, 3))),
         };
 
-        foreach (var chest in _world.Chests)
+        foreach (var chest in visibleObjects.Where(candidate =>
+                     candidate.Id != _world.PlayerId &&
+                     candidate.HasFlag(ObjectFlags.Container) &&
+                     !candidate.HasFlag(ObjectFlags.Monster)))
         {
             items.Add(CreateObjectDrawItem(
                 chest,
@@ -953,7 +962,9 @@ public partial class Main : Node2D
                 () => DrawChest(chest)));
         }
 
-        foreach (var monster in _world.Monsters)
+        foreach (var monster in visibleObjects.Where(candidate =>
+                     candidate.HasFlag(ObjectFlags.Monster) &&
+                     candidate.IsAlive))
         {
             items.Add(CreateObjectDrawItem(
                 monster,
@@ -962,7 +973,8 @@ public partial class Main : Node2D
                 () => DrawMonster(monster)));
         }
 
-        foreach (var item in _world.GroundItems)
+        foreach (var item in visibleObjects.Where(candidate =>
+                     candidate.HasFlag(ObjectFlags.Item)))
         {
             items.Add(CreateObjectDrawItem(
                 item,

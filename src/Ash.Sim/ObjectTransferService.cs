@@ -150,6 +150,24 @@ public sealed class ObjectTransferService
         foreach (var value in objects)
         {
             var location = projected[value.Id];
+            if (location.Kind == LocationKind.OnMap)
+            {
+                try
+                {
+                    _ = WorldMap.VolumeFor(value with
+                    {
+                        Location = location,
+                    });
+                }
+                catch (OverflowException)
+                {
+                    return Reject(
+                        ObjectTransferFailure.InvalidDestination,
+                        $"Destination for {value.Name} exceeds integer world " +
+                        "bounds.");
+                }
+            }
+
             if (location.Kind is not
                 (LocationKind.InContainer or LocationKind.Equipped))
             {

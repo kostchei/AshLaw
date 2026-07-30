@@ -18,6 +18,7 @@ public sealed class PlayableSliceTests
                 item.EquipmentSlots == EquipmentSlotMask.MainHand);
         Assert.Equal(4, world.Chests.Count);
         Assert.Equal(4, world.Monsters.Count);
+        Assert.Equal(9, world.Map.IndexedObjectCount);
         Assert.True(PlayableSliceWorld.MapWidth > 19);
         Assert.True(PlayableSliceWorld.MapHeight > 13);
         Assert.Contains(
@@ -34,6 +35,7 @@ public sealed class PlayableSliceTests
                 Assert.InRange(position.Y, 0, PlayableSliceWorld.MapHeight - 1);
             });
         world.Objects.ValidateInvariants();
+        world.Map.ValidateIndex();
     }
 
     [Fact]
@@ -117,9 +119,11 @@ public sealed class PlayableSliceTests
         Assert.True(world.DropFromBackpack(swordIndex).Succeeded);
         Assert.Equal(world.Player.Location, world.Objects.Get(sword.Id).Location);
         Assert.Contains(world.GroundItems, item => item.Id == sword.Id);
+        Assert.Equal(10, world.Map.IndexedObjectCount);
 
         Assert.True(world.PickUpAtPlayerFeet().Succeeded);
         Assert.Contains(world.BackpackItems, item => item.Id == sword.Id);
+        Assert.Equal(9, world.Map.IndexedObjectCount);
 
         MoveToFirstChest(world);
         Assert.True(world.ToggleNearestChest().Succeeded);

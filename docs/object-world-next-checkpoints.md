@@ -13,12 +13,17 @@ The objective is a persistent physical world in which objects collide, rest on
 terrain or other objects, fall when support disappears, and reload without
 changing identity or state.
 
+**Implementation status (2026-07-30):** checkpoint 1 is complete. `WorldMap`
+owns terrain and a deterministic footprint-bucket/anchor index; store commits
+rebuild one synchronous revision; gameplay and rendering queries have migrated.
+Checkpoint 2, collision and physical placement, is next.
+
 ## Delivery order
 
 | Checkpoint | Result |
 |---|---|
-| 1. Map container and spatial index | Authoritative map ownership and shared spatial queries |
-| 2. Collision and placement | Solid volumes block movement and invalid placement cannot commit |
+| 1. Map container and spatial index — done | Authoritative map ownership and shared spatial queries |
+| 2. Collision and placement — next | Solid volumes block movement and invalid placement cannot commit |
 | 3. Elevation, support, and gravity | Objects stack, retain support, fall, and land deterministically |
 | 4. Object-world Save v1 | The complete object world round-trips byte-identically |
 | 5. Direct manipulation | Mouse selection and drag/drop use the same transfer and placement contract |

@@ -329,6 +329,18 @@ public sealed class InvalidObjectIdException : InvalidOperationException
     public ObjectId ObjectId { get; }
 }
 
+public enum ObjectStoreChangeKind
+{
+    Created,
+    Updated,
+    Transferred,
+    Destroyed,
+}
+
+public sealed record ObjectStoreCommit(
+    ObjectStoreChangeKind Kind,
+    IReadOnlyList<ObjectId> ObjectIds);
+
 /// <summary>
 /// Authoritative object storage backed by parallel slot arrays and 32-bit
 /// generational handles.
@@ -354,6 +366,8 @@ public sealed class ObjectStore
     private readonly List<int> _containerCapacities = [];
     private readonly List<bool> _containerOpen = [];
     private readonly Stack<int> _freeSlots = [];
+
+    public event Action<ObjectStoreCommit>? Committed;
 
     public int Count { get; private set; }
 
@@ -384,6 +398,7 @@ public sealed class ObjectStore
         _containerOpen[index] = false;
         Count++;
         AssertInvariants();
+        Publish(ObjectStoreChangeKind.Created, id);
         return id;
     }
 
@@ -468,6 +483,7 @@ public sealed class ObjectStore
         }
 
         _health[index] = Math.Max(0, _health[index] - amount);
+        Publish(ObjectStoreChangeKind.Updated, id);
         return _health[index];
     }
 
@@ -510,6 +526,12 @@ public sealed class ObjectStore
             throw new ArgumentOutOfRangeException(nameof(height));
         }
 
+        if (height is not null &&
+            _locations[index].Kind == LocationKind.OnMap)
+        {
+            _ = checked(_locations[index].Position.Z + height.Value);
+        }
+
         _typeIds[index] = typeId;
         _names[index] = name;
         _shapeIds[index] = shapeId;
@@ -520,6 +542,7 @@ public sealed class ObjectStore
         }
 
         AssertInvariants();
+        Publish(ObjectStoreChangeKind.Updated, id);
     }
 
     public void SetContainerOpen(ObjectId id, bool isOpen)
@@ -528,6 +551,7 @@ public sealed class ObjectStore
         RequireFlag(index, ObjectFlags.Container);
         _containerOpen[index] = isOpen;
         AssertInvariants();
+        Publish(ObjectStoreChangeKind.Updated, id);
     }
 
     public void Destroy(ObjectId id)
@@ -551,6 +575,7 @@ public sealed class ObjectStore
         _freeSlots.Push(index);
         Count--;
         AssertInvariants();
+        Publish(ObjectStoreChangeKind.Destroyed, id);
     }
 
     public void ValidateInvariants()
@@ -689,6 +714,14 @@ public sealed class ObjectStore
         if (spawn.Height < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(spawn.Height));
+        }
+
+        if (spawn.Location.Kind == LocationKind.OnMap)
+        {
+            var position = spawn.Location.Position;
+            _ = checked(position.X - spawn.Footprint.Width);
+            _ = checked(position.Y - spawn.Footprint.Depth);
+            _ = checked(position.Z + spawn.Height);
         }
 
         if (spawn.Quantity <= 0)
@@ -865,6 +898,10 @@ public sealed class ObjectStore
         }
 
         AssertInvariants();
+        Committed?.Invoke(
+            new ObjectStoreCommit(
+                ObjectStoreChangeKind.Transferred,
+                requests.Select(request => request.ObjectId).ToArray()));
     }
 
     private WorldObject Snapshot(int index) =>
@@ -902,4 +939,7 @@ public sealed class ObjectStore
                 parameter);
         }
     }
+
+    private void Publish(ObjectStoreChangeKind kind, ObjectId id) =>
+        Committed?.Invoke(new ObjectStoreCommit(kind, [id]));
 }

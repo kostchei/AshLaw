@@ -32,12 +32,19 @@ public sealed class PlayableSliceWorld
         Objects = objects;
         Transfers = new ObjectTransferService(objects);
         PlayerId = playerId;
+        Map = new WorldMap(
+            objects,
+            DemoMapId,
+            MapWidth,
+            MapHeight);
         LastMessage = "Explore. Open a chest or fight a monster.";
     }
 
     public ObjectStore Objects { get; }
 
     public ObjectTransferService Transfers { get; }
+
+    public WorldMap Map { get; }
 
     public ObjectId PlayerId { get; }
 
@@ -54,20 +61,16 @@ public sealed class PlayableSliceWorld
     public string LastMessage { get; private set; }
 
     public IReadOnlyList<WorldObject> Chests =>
-        Objects.Enumerate()
+        Map.QueryAll(ObjectFlags.Container)
             .Where(candidate =>
                 candidate.Id != PlayerId &&
-                candidate.HasFlag(ObjectFlags.Container) &&
-                !candidate.HasFlag(ObjectFlags.Monster) &&
-                candidate.Location.Kind == LocationKind.OnMap)
+                !candidate.HasFlag(ObjectFlags.Monster))
             .ToArray();
 
     public IReadOnlyList<WorldObject> Monsters =>
-        Objects.Enumerate()
+        Map.QueryAll(ObjectFlags.Monster)
             .Where(candidate =>
-                candidate.HasFlag(ObjectFlags.Monster) &&
-                candidate.IsAlive &&
-                candidate.Location.Kind == LocationKind.OnMap)
+                candidate.IsAlive)
             .ToArray();
 
     public WorldObject? ActiveChest =>
@@ -89,12 +92,7 @@ public sealed class PlayableSliceWorld
             .ToArray();
 
     public IReadOnlyList<WorldObject> GroundItems =>
-        Objects.Enumerate()
-            .Where(candidate =>
-                candidate.HasFlag(ObjectFlags.Item) &&
-                candidate.Location.Kind == LocationKind.OnMap &&
-                candidate.Location.MapId == DemoMapId)
-            .ToArray();
+        Map.QueryAll(ObjectFlags.Item);
 
     public int BackpackCapacity => Player.ContainerCapacity;
 
@@ -196,6 +194,16 @@ public sealed class PlayableSliceWorld
     public GridPosition GetGridPosition(ObjectId id) =>
         GridPositionOf(Objects.Get(id));
 
+    public IReadOnlyList<WorldObject> VisibleObjects(int radiusTiles = 20)
+    {
+        if (radiusTiles <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(radiusTiles));
+        }
+
+        return QueryNearPlayer(radiusTiles, ObjectFlags.Visible);
+    }
+
     public SliceActionResult MovePlayer(int deltaX, int deltaY)
     {
         if (Math.Abs(deltaX) + Math.Abs(deltaY) != 1)
@@ -211,12 +219,11 @@ public sealed class PlayableSliceWorld
             return Finish(false, "The edge of the demo area blocks the way.");
         }
 
-        var blocker = Objects.Enumerate().FirstOrDefault(candidate =>
-            candidate.Id != PlayerId &&
-            candidate.HasFlag(ObjectFlags.Solid) &&
-            candidate.Location.Kind == LocationKind.OnMap &&
-            candidate.Location.MapId == DemoMapId &&
-            GridPositionOf(candidate) == destination);
+        var destinationLocation = MapLocation(destination);
+        var blocker = Map.QueryAnchor(
+                destinationLocation.Position,
+                ObjectFlags.Solid)
+            .FirstOrDefault(candidate => candidate.Id != PlayerId);
         if (!blocker.Id.IsNone)
         {
             return Finish(false, $"{blocker.Name} occupies that space.");
@@ -226,7 +233,7 @@ public sealed class PlayableSliceWorld
             new ObjectTransferRequest(
                 PlayerId,
                 Player.Location,
-                MapLocation(destination)));
+                destinationLocation));
         if (!move.Succeeded)
         {
             return Finish(false, move.Message);
@@ -257,7 +264,10 @@ public sealed class PlayableSliceWorld
     public SliceActionResult ToggleNearestChest()
     {
         var playerPosition = PlayerPosition;
-        var nearest = Chests
+        var nearest = QueryNearPlayer(1, ObjectFlags.Container)
+            .Where(candidate =>
+                candidate.Id != PlayerId &&
+                !candidate.HasFlag(ObjectFlags.Monster))
             .Where(chest =>
                 playerPosition.ManhattanDistance(GridPositionOf(chest)) <= 1)
             .OrderBy(chest =>
@@ -424,8 +434,9 @@ public sealed class PlayableSliceWorld
 
     public SliceActionResult PickUpAtPlayerFeet()
     {
-        var item = GroundItems
-            .Where(candidate => candidate.Location == Player.Location)
+        var item = Map.QueryAnchor(
+                Player.Location.Position,
+                ObjectFlags.Item)
             .OrderBy(candidate => candidate.Id)
             .Cast<WorldObject?>()
             .FirstOrDefault();
@@ -446,7 +457,8 @@ public sealed class PlayableSliceWorld
     public SliceActionResult AttackAdjacentMonster()
     {
         var playerPosition = PlayerPosition;
-        var target = Monsters
+        var target = QueryNearPlayer(1, ObjectFlags.Monster)
+            .Where(candidate => candidate.IsAlive)
             .Where(candidate =>
                 playerPosition.ManhattanDistance(
                     GridPositionOf(candidate)) <= 1)
@@ -617,6 +629,21 @@ public sealed class PlayableSliceWorld
         $"item.{string.Concat(
             name.ToLowerInvariant().Select(character =>
                 char.IsAsciiLetterOrDigit(character) ? character : '-'))}";
+
+    private IReadOnlyList<WorldObject> QueryNearPlayer(
+        int radiusTiles,
+        ObjectFlags requiredFlags)
+    {
+        var center = Player.Location.Position;
+        var radius = checked(radiusTiles * WorldUnitsPerTile);
+        return Map.Query(
+            new WorldRectangle(
+                checked(center.X - radius),
+                checked(center.X + radius + 1),
+                checked(center.Y - radius),
+                checked(center.Y + radius + 1)),
+            requiredFlags);
+    }
 
     private SliceActionResult Finish(bool succeeded, string message)
     {

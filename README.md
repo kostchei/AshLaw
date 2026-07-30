@@ -53,6 +53,11 @@ immutable snapshots. World, backpack, chest, and equipment moves use one
 two-phase transfer service: validate the projected final state, then commit the
 whole transaction or change nothing.
 
+Each map now has an authoritative `WorldMap` terrain container and deterministic
+uniform spatial index. Gameplay collision candidates, nearby interactions,
+melee targets, ground pickup, and the visible object set query that index. Store
+commits synchronously publish one complete new index revision.
+
 ## Layout
 
 ```text

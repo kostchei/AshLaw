@@ -844,10 +844,15 @@ the `uid://` on `Main.cs`, which the same rewrite had produced.
    full containers while stale sources, cycles, capacity failures, slot
    conflicts, and item restrictions reject without mutation. The playable build
    exposes main-hand equip/unequip plus world drop/pickup.
-7. **Next:** add the map container, region activation, and commit-rebuilt uniform
-   spatial index, then route collision and visibility through its queries.
-   Collision, physical placement, support/elevation, gravity, and a deterministic
-   object-world Save v1 follow in that order. The implementation contract and
-   exit proofs are in
+7. **Done — map container and spatial index:** `WorldMap` owns terrain cells and
+   a deterministic uniform footprint-bucket/anchor index. Store commits rebuild
+   one synchronous revision; rejected transactions publish nothing. Player
+   blocking, nearby containers, melee targeting, ground pickup, capability
+   filtering, and the renderer's visible set now use map queries. Headless proofs
+   cover 1,000 objects, multi-bucket footprints, map isolation, stale handle
+   reuse, failed transfers, and atomic batch swaps.
+8. **Next:** add collision volumes and transactional physical placement.
+   Support/elevation, gravity, and a deterministic object-world Save v1 follow
+   in that order. The implementation contract and exit proofs are in
    [object-world-next-checkpoints.md](object-world-next-checkpoints.md).
    Palette polish follows playable interaction.
