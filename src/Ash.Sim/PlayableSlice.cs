@@ -156,8 +156,8 @@ public sealed class MonsterState
 /// </summary>
 public sealed class PlayableSliceWorld
 {
-    public const int MapWidth = 19;
-    public const int MapHeight = 13;
+    public const int MapWidth = 41;
+    public const int MapHeight = 29;
     public const int PlayerAttackDamage = 2;
 
     private readonly List<ChestState> _chests;
@@ -200,33 +200,55 @@ public sealed class PlayableSliceWorld
 
     public static PlayableSliceWorld CreateDemo() =>
         new(
-            new GridPosition(2, 5),
+            new GridPosition(4, 14),
             new Inventory(12, ["Rusty Sword", "Apple"]),
             [
                 new ChestState(
                     "store-room",
                     "Store-room Chest",
-                    new GridPosition(5, 4),
+                    new GridPosition(8, 13),
                     new Inventory(10, ["Health Tonic", "Iron Key", "12 Gold"])),
                 new ChestState(
                     "old-coffer",
                     "Old Coffer",
-                    new GridPosition(13, 9),
+                    new GridPosition(21, 8),
                     new Inventory(10, ["Moonstone", "Bandage"])),
+                new ChestState(
+                    "pilgrims-cache",
+                    "Pilgrim's Cache",
+                    new GridPosition(31, 21),
+                    new Inventory(10, ["Silver Mirror", "Incense", "18 Gold"])),
+                new ChestState(
+                    "vault-box",
+                    "Vault Box",
+                    new GridPosition(37, 12),
+                    new Inventory(10, ["Star Sapphire", "Antidote"])),
             ],
             [
                 new MonsterState(
                     "cave-rat",
                     "Cave Rat",
-                    new GridPosition(9, 5),
+                    new GridPosition(13, 14),
                     maxHealth: 4,
                     loot: ["Rat Tail"]),
                 new MonsterState(
+                    "goblin-scout",
+                    "Goblin Scout",
+                    new GridPosition(24, 18),
+                    maxHealth: 6,
+                    loot: ["Copper Ring", "Throwing Knife"]),
+                new MonsterState(
                     "many-eyed-tyrant",
                     "Many-Eyed Tyrant",
-                    new GridPosition(16, 7),
+                    new GridPosition(35, 8),
                     maxHealth: 8,
                     loot: ["Glass Eye", "Nullstone Shard"]),
+                new MonsterState(
+                    "goblin-guard",
+                    "Goblin Guard",
+                    new GridPosition(30, 22),
+                    maxHealth: 8,
+                    loot: ["Iron Buckle", "Guard Token"]),
             ]);
 
     public SliceActionResult MovePlayer(int deltaX, int deltaY)

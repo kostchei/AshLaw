@@ -7,14 +7,24 @@ public sealed class PlayableSliceTests
     {
         var world = PlayableSliceWorld.CreateDemo();
 
-        Assert.Equal(new GridPosition(2, 5), world.PlayerPosition);
+        Assert.Equal(new GridPosition(4, 14), world.PlayerPosition);
         Assert.Contains("Rusty Sword", world.Backpack.Items);
-        Assert.Equal(2, world.Chests.Count);
-        Assert.Equal(2, world.Monsters.Count);
+        Assert.Equal(4, world.Chests.Count);
+        Assert.Equal(4, world.Monsters.Count);
+        Assert.True(PlayableSliceWorld.MapWidth > 19);
+        Assert.True(PlayableSliceWorld.MapHeight > 13);
         Assert.Contains(
             world.Monsters,
             monster => monster.Id == "many-eyed-tyrant");
         Assert.All(world.Monsters, monster => Assert.True(monster.IsAlive));
+        Assert.All(
+            world.Chests.Select(chest => chest.Position)
+                .Concat(world.Monsters.Select(monster => monster.Position)),
+            position =>
+            {
+                Assert.InRange(position.X, 0, PlayableSliceWorld.MapWidth - 1);
+                Assert.InRange(position.Y, 0, PlayableSliceWorld.MapHeight - 1);
+            });
     }
 
     [Fact]
@@ -75,19 +85,18 @@ public sealed class PlayableSliceTests
     public void LivingMonstersAndChestsBlockMovement()
     {
         var world = PlayableSliceWorld.CreateDemo();
-        MoveNextTo(world, new GridPosition(5, 4));
+        var firstChest = world.Chests[0];
+        MoveNextTo(world, firstChest.Position);
 
         var result = world.MovePlayer(1, 0);
 
         Assert.False(result.Succeeded);
-        Assert.NotEqual(new GridPosition(5, 4), world.PlayerPosition);
+        Assert.NotEqual(firstChest.Position, world.PlayerPosition);
     }
 
     private static void MoveToFirstChest(PlayableSliceWorld world)
     {
-        world.MovePlayer(1, 0);
-        world.MovePlayer(1, 0);
-        world.MovePlayer(0, -1);
+        MoveNextTo(world, world.Chests[0].Position);
     }
 
     private static void MoveNextTo(PlayableSliceWorld world, GridPosition target)

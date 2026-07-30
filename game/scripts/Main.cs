@@ -14,6 +14,10 @@ public partial class Main : Node2D
     private const int TileHalfHeight = 4;
     private const int InventoryRowHeight = 12;
     private const int WorldUnitsPerTile = 256;
+    private const int WorldViewportWidth = 240;
+    private const int WorldViewportHeight = 200;
+    private const int BackWallHeight = 22;
+    private const int CameraPixelsPerPhysicsTick = 2;
     private const string ShapePackRoot =
         "res://assets/shape-packs/flare-starter";
 
@@ -37,6 +41,7 @@ public partial class Main : Node2D
     private static readonly Color DebugSortOrder = new("ffe36a");
 
     private PlayableSliceWorld _world = PlayableSliceWorld.CreateDemo();
+    private readonly FollowCamera _camera = new(Vec2i.Zero);
     private ShapePackDefinition? _shapePack;
     private IReadOnlyDictionary<string, Texture2D> _shapeTextures =
         new Dictionary<string, Texture2D>();
@@ -52,12 +57,21 @@ public partial class Main : Node2D
             "--debug-overlay",
             StringComparer.Ordinal);
         LoadShapePack();
+        SnapCameraToPlayer();
         QueueRedraw();
     }
 
     public override void _Process(double delta)
     {
         _animationElapsedMilliseconds += delta * 1000;
+        QueueRedraw();
+    }
+
+    public override void _PhysicsProcess(double _delta)
+    {
+        _camera.StepToward(
+            CameraTargetForPlayer(),
+            CameraPixelsPerPhysicsTick);
         QueueRedraw();
     }
 
@@ -139,6 +153,7 @@ public partial class Main : Node2D
             case Key.R:
                 _world = PlayableSliceWorld.CreateDemo();
                 _playerDirection = 6;
+                SnapCameraToPlayer();
                 return true;
             case Key.F3:
                 _debugOverlayVisible = !_debugOverlayVisible;
@@ -365,7 +380,9 @@ public partial class Main : Node2D
 
     private void DrawWorld()
     {
-        DrawRect(new Rect2(0, 0, 240, 200), Void);
+        DrawRect(
+            new Rect2(0, 0, WorldViewportWidth, WorldViewportHeight),
+            Void);
         DrawOutsideRock();
         DrawBackWalls();
 
@@ -399,6 +416,12 @@ public partial class Main : Node2D
         IReadOnlyDictionary<int, WorldDrawItem> drawById,
         SortResult sortResult)
     {
+        DrawText(
+            new Vector2(4, 9),
+            $"CAM {_camera.Offset.X},{_camera.Offset.Y}",
+            size: 5,
+            DebugSortOrder);
+
         for (var sortIndex = 0;
              sortIndex < sortResult.DrawOrder.Count;
              sortIndex++)
@@ -442,7 +465,7 @@ public partial class Main : Node2D
         if (sortResult.Cycles.Count > 0)
         {
             DrawText(
-                new Vector2(4, 9),
+                new Vector2(4, 17),
                 $"SORT CYCLES {sortResult.Cycles.Count}",
                 size: 6,
                 DebugOrigin);
@@ -638,8 +661,6 @@ public partial class Main : Node2D
 
     private void DrawBackWalls()
     {
-        const int wallHeight = 22;
-
         for (var x = 0; x < PlayableSliceWorld.MapWidth; x++)
         {
             var at = Iso(new GridPosition(x, 0));
@@ -649,11 +670,11 @@ public partial class Main : Node2D
             [
                 left,
                 top,
-                top + new Vector2(0, -wallHeight),
-                left + new Vector2(0, -wallHeight),
+                top + new Vector2(0, -BackWallHeight),
+                left + new Vector2(0, -BackWallHeight),
             ],
                 x % 2 == 0 ? new Color("68504a") : new Color("5e4944"));
-            DrawWallCourses(left, top, wallHeight, x);
+            DrawWallCourses(left, top, BackWallHeight, x);
         }
 
         for (var y = 0; y < PlayableSliceWorld.MapHeight; y++)
@@ -665,17 +686,25 @@ public partial class Main : Node2D
             [
                 top,
                 right,
-                right + new Vector2(0, -wallHeight),
-                top + new Vector2(0, -wallHeight),
+                right + new Vector2(0, -BackWallHeight),
+                top + new Vector2(0, -BackWallHeight),
             ],
                 y % 2 == 0 ? new Color("5d4c47") : new Color("51433f"));
-            DrawWallCourses(top, right, wallHeight, y);
+            DrawWallCourses(top, right, BackWallHeight, y);
         }
 
         DrawWallPillar(Iso(new GridPosition(0, 0)) + new Vector2(0, -3));
-        DrawWallPillar(Iso(new GridPosition(7, 0)) + new Vector2(-5, -1));
-        DrawWallPillar(Iso(new GridPosition(14, 0)) + new Vector2(-5, -1));
-        DrawWallPillar(Iso(new GridPosition(0, 6)) + new Vector2(5, -1));
+        for (var x = 7; x < PlayableSliceWorld.MapWidth; x += 7)
+        {
+            DrawWallPillar(
+                Iso(new GridPosition(x, 0)) + new Vector2(-5, -1));
+        }
+
+        for (var y = 6; y < PlayableSliceWorld.MapHeight; y += 6)
+        {
+            DrawWallPillar(
+                Iso(new GridPosition(0, y)) + new Vector2(5, -1));
+        }
     }
 
     private void DrawWallCourses(
@@ -721,14 +750,14 @@ public partial class Main : Node2D
     {
         var at = Iso(position);
         Color colour;
-        if (position.X is >= 9 and <= 15 &&
-            position.Y is >= 7 and <= 10)
+        if (IsCarpetTile(position))
         {
             colour = (position.X + position.Y) % 2 == 0
                 ? CarpetA
                 : CarpetB;
         }
-        else if (position.X <= 7 && position.Y <= 6)
+        else if (position.X <= 13 &&
+                 position.Y is >= 7 and <= 21)
         {
             colour = (position.X + position.Y) % 2 == 0
                 ? TimberA
@@ -758,9 +787,7 @@ public partial class Main : Node2D
                 1);
         }
 
-        if (position.X is >= 9 and <= 15 &&
-            position.Y is >= 7 and <= 10 &&
-            (position.X is 9 or 15 || position.Y is 7 or 10))
+        if (IsCarpetBorder(position))
         {
             DrawLine(
                 at + new Vector2(-5, 0),
@@ -769,6 +796,20 @@ public partial class Main : Node2D
                 1);
         }
     }
+
+    private static bool IsCarpetTile(GridPosition position) =>
+        (position.X is >= 17 and <= 23 &&
+         position.Y is >= 5 and <= 10) ||
+        (position.X is >= 27 and <= 36 &&
+         position.Y is >= 18 and <= 24);
+
+    private static bool IsCarpetBorder(GridPosition position) =>
+        (position.X is >= 17 and <= 23 &&
+         position.Y is >= 5 and <= 10 &&
+         (position.X is 17 or 23 || position.Y is 5 or 10)) ||
+        (position.X is >= 27 and <= 36 &&
+         position.Y is >= 18 and <= 24 &&
+         (position.X is 27 or 36 || position.Y is 18 or 24));
 
     private List<WorldDrawItem> BuildWorldDrawItems()
     {
@@ -810,6 +851,51 @@ public partial class Main : Node2D
                 shapeNumber: 12,
                 () => DrawBrazier(
                     Iso(new GridPosition(15, 4)) + new Vector2(0, 3))),
+            CreateDrawItem(
+                id: 14,
+                new GridPosition(12, 20),
+                footprintWidth: 128,
+                footprintDepth: 128,
+                height: 96,
+                shapeNumber: 10,
+                () => DrawBarrel(
+                    Iso(new GridPosition(12, 20)) + new Vector2(0, 3))),
+            CreateDrawItem(
+                id: 15,
+                new GridPosition(29, 14),
+                footprintWidth: 128,
+                footprintDepth: 128,
+                height: 96,
+                shapeNumber: 10,
+                () => DrawBarrel(
+                    Iso(new GridPosition(29, 14)) + new Vector2(0, 3))),
+            CreateDrawItem(
+                id: 16,
+                new GridPosition(33, 23),
+                footprintWidth: 256,
+                footprintDepth: 192,
+                height: 160,
+                shapeNumber: 11,
+                () => DrawAltar(
+                    Iso(new GridPosition(33, 23)) + new Vector2(0, 3))),
+            CreateDrawItem(
+                id: 17,
+                new GridPosition(20, 25),
+                footprintWidth: 96,
+                footprintDepth: 96,
+                height: 160,
+                shapeNumber: 12,
+                () => DrawBrazier(
+                    Iso(new GridPosition(20, 25)) + new Vector2(0, 3))),
+            CreateDrawItem(
+                id: 18,
+                new GridPosition(38, 17),
+                footprintWidth: 96,
+                footprintDepth: 96,
+                height: 160,
+                shapeNumber: 12,
+                () => DrawBrazier(
+                    Iso(new GridPosition(38, 17)) + new Vector2(0, 3))),
         };
 
         for (var index = 0; index < _world.Chests.Count; index++)
@@ -1285,13 +1371,60 @@ public partial class Main : Node2D
     private static string Shorten(string value, int length) =>
         value.Length <= length ? value : $"{value[..(length - 1)]}…";
 
-    private static Vector2 Iso(GridPosition position) =>
+    private void SnapCameraToPlayer() =>
+        _camera.SnapTo(CameraTargetForPlayer());
+
+    private Vec2i CameraTargetForPlayer()
+    {
+        var playerOrigin =
+            IsoWithoutCamera(_world.PlayerPosition) + new Vector2(0, 3);
+        var desiredX = Mathf.RoundToInt(
+            (WorldViewportWidth / 2f) - playerOrigin.X);
+        var desiredY = Mathf.RoundToInt(
+            (WorldViewportHeight / 2f) - playerOrigin.Y);
+
+        var worldMinX =
+            IsoOriginX -
+            ((PlayableSliceWorld.MapHeight - 1) * TileHalfWidth) -
+            TileHalfWidth;
+        var worldMaxX =
+            IsoOriginX +
+            ((PlayableSliceWorld.MapWidth - 1) * TileHalfWidth) +
+            TileHalfWidth;
+        // Pillar caps extend six compact pixels above the wall courses.
+        var worldMinY = IsoOriginY - BackWallHeight - 6;
+        var worldMaxY =
+            IsoOriginY +
+            ((PlayableSliceWorld.MapWidth +
+              PlayableSliceWorld.MapHeight -
+              2) *
+             TileHalfHeight) +
+            TileHalfHeight;
+
+        return new Vec2i(
+            Math.Clamp(
+                desiredX,
+                WorldViewportWidth - worldMaxX,
+                -worldMinX),
+            Math.Clamp(
+                desiredY,
+                WorldViewportHeight - worldMaxY,
+                -worldMinY));
+    }
+
+    private Vector2 CameraOffset =>
+        new(_camera.Offset.X, _camera.Offset.Y);
+
+    private Vector2 Iso(GridPosition position) =>
+        IsoWithoutCamera(position) + CameraOffset;
+
+    private static Vector2 IsoWithoutCamera(GridPosition position) =>
         new(
             IsoOriginX + ((position.X - position.Y) * TileHalfWidth),
             IsoOriginY + ((position.X + position.Y) * TileHalfHeight));
 
-    private static Vector2 WorldToCompact(int x, int y, int z) =>
-        new(
+    private Vector2 WorldToCompact(int x, int y, int z) =>
+        new Vector2(
             IsoOriginX +
             ((x - y) /
              (float)(ObliqueProjection.UnitsPerHorizontalPixel * RenderScale)),
@@ -1302,7 +1435,8 @@ public partial class Main : Node2D
                  RenderScale *
                  2)) -
             (z /
-             (float)(ObliqueProjection.UnitsPerVerticalPixel * RenderScale)));
+             (float)(ObliqueProjection.UnitsPerVerticalPixel * RenderScale))) +
+        CameraOffset;
 
     private static Vector2[] Diamond(
         Vector2 centre,

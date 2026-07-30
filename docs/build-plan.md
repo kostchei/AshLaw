@@ -828,6 +828,10 @@ the `uid://` on `Main.cs`, which the same rewrite had produced.
    alpha masks, attribution, a reproducible Flare importer, and the first Godot
    sprite draw pass. The live room now feeds actors, chests, monsters, and props
    through `VolumeSorter` using authored footprints, heights, flags, and sort bias.
-4. **Next:** add the camera and object store, then move containers and transfers
-   onto generational object handles and transactional commits. Palette polish and
-   debug overlays follow playable interaction.
+4. **Done — camera follow:** the playable slice is now a 41×29 scrollable map.
+   An integer camera follows the Avatar on the fixed physics tick, clamps at the
+   projected map edges, leaves the HUD stationary, and exposes its offset in the
+   F3 diagnostic overlay. The headless follow model asserts deterministic motion.
+5. **Next:** add the object store, then move containers and transfers onto
+   generational object handles and transactional commits. Palette polish follows
+   playable interaction.

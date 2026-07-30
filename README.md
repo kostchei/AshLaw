@@ -40,6 +40,10 @@ open/closed chest. The pack is deliberately desaturated and its attribution is
 shipped beside it. The authoritative interaction state still lives in
 `Ash.Sim.PlayableSliceWorld`, not in Godot nodes.
 
+The playable map is 41×29 tiles and extends well beyond the visible world panel.
+An integer, fixed-physics-tick camera follows the character while keeping the HUD
+stationary and the nearest-filtered world on its pixel grid.
+
 ## Layout
 
 ```text
