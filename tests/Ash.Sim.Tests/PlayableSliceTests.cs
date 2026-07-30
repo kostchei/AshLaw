@@ -397,7 +397,7 @@ public sealed class PlayableSliceTests
                 PlayableSliceWorld.PlatformXMin,
                 PlayableSliceWorld.TerraceYMin);
 
-            world.Save(path);
+            Assert.True(world.RequestSave(path).Succeeded);
             var loaded = PlayableSliceWorld.Load(path);
 
             Assert.Equal(savedTick, loaded.Physics.Tick);

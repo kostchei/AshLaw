@@ -13,7 +13,7 @@ The objective is a persistent physical world in which objects collide, rest on
 terrain or other objects, fall when support disappears, and reload without
 changing identity or state.
 
-**Implementation status (2026-07-30):** checkpoints 1, 2 and 3 are complete.
+**Implementation status (2026-07-30):** checkpoints 1 to 4 are complete.
 `WorldMap` owns terrain and a deterministic footprint-bucket/anchor index; store
 commits rebuild one synchronous revision. `WorldMap.ValidatePlacement` is the one
 physical placement contract, `ObjectTransferService` runs it as a validation
@@ -26,7 +26,7 @@ and `PhysicsSystem` for support maintenance, gravity, landings, carried
 dependants and the physical invariants. `ObjectTransferService.Execute` now
 commits locations and physics fields in one transaction.
 
-Checkpoint 4, object-world Save v1, is in progress. Landed so far:
+Checkpoint 4, object-world Save v1, is complete:
 
 - the canonical format (`ASHW`, format and minimum-reader versions, content
   fingerprint, tick, current map, payload length and SHA-256) in
@@ -50,15 +50,17 @@ Checkpoint 4, object-world Save v1, is in progress. Landed so far:
   maps, then index and physics invariants — and **never re-settles**. A world
   resumes on the tick it was saved on with mid-fall objects still falling;
   settling belongs only to starting a world from nothing. `PlayableSliceWorld`
-  gains `Save`/`Load` on exactly those terms.
+  gains `RequestSave`/`Load` on exactly those terms;
+- the save boundary: `WorldSaveGate` writes only when no tick is advancing, no
+  transaction is committing and nothing is `InTransfer`, and holds any other
+  request until the next safe tick, which the status line reports. The world
+  invariants are checked before the snapshot, so an invalid world is never
+  written as if it were valid;
+- adoption: F5 saves and F9 loads. The replacement world is built beside the
+  running one and adopted only once the whole load succeeded; a save that cannot
+  be read leaves the session exactly as it was and says why.
 
-Still open in checkpoint 4:
-
-- the save boundary in 4.1: saving only at the end of a completed tick, with no
-  transfer in flight and a deferral when a drag is `InTransfer`;
-- adopting a loaded world into a running session: `ObjectWorldSave.Restore`
-  already builds the replacement without touching the live world, so what
-  remains is the swap itself and the in-game save/load commands.
+Checkpoint 5, direct manipulation, is next.
 
 Conventions settled while implementing checkpoints 2 and 3:
 
@@ -93,8 +95,8 @@ speed are already recorded on the landing event.
 | 1. Map container and spatial index — done | Authoritative map ownership and shared spatial queries |
 | 2. Collision and placement — done | Solid volumes block movement and invalid placement cannot commit |
 | 3. Elevation, support, and gravity — done | Objects stack, retain support, fall, and land deterministically |
-| 4. Object-world Save v1 — in progress | The complete object world round-trips byte-identically |
-| 5. Direct manipulation | Mouse selection and drag/drop use the same transfer and placement contract |
+| 4. Object-world Save v1 — done | The complete object world round-trips byte-identically |
+| 5. Direct manipulation — next | Mouse selection and drag/drop use the same transfer and placement contract |
 | 6. Quantities and inventory rules | Stack merge, split, partial transfer, weight, and content restrictions |
 
 Checkpoints 1–4 are the immediate object-world milestone. Direct manipulation

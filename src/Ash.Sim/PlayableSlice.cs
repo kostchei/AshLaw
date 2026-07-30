@@ -17,7 +17,7 @@ public sealed record SliceActionResult(bool Succeeded, string Message);
 /// The playable interaction slice as commands and read models over the
 /// authoritative <see cref="ObjectStore"/>.
 /// </summary>
-public sealed class PlayableSliceWorld
+public sealed class PlayableSliceWorld : IDisposable
 {
     public const ushort DemoMapId = 0;
     public const int MapWidth = 41;
@@ -70,6 +70,7 @@ public sealed class PlayableSliceWorld
         PlayerId = playerId;
         Map = map;
         Physics = new PhysicsSystem(objects, startTick: startTick);
+        SaveGate = new WorldSaveGate(objects, Physics, ContentFingerprint);
         LastMessage = "Explore. Open a chest or fight a monster.";
     }
 
@@ -80,6 +81,8 @@ public sealed class PlayableSliceWorld
     public MovementSolver Movement { get; }
 
     public PhysicsSystem Physics { get; }
+
+    public WorldSaveGate SaveGate { get; }
 
     public WorldMap Map { get; }
 
@@ -231,17 +234,16 @@ public sealed class PlayableSliceWorld
     }
 
     /// <summary>
-    /// Writes the whole object world — objects, physics state and terrain — to
-    /// <paramref name="path"/>.
+    /// Asks for the whole object world — objects, physics state and terrain —
+    /// to be written to <paramref name="path"/>. The save happens now if the
+    /// world is at a safe point, and otherwise at the next safe tick; either
+    /// way the status line says which.
     /// </summary>
-    public void Save(string path) =>
-        ObjectWorldSave.WriteFile(
-            path,
-            ObjectWorldSave.Capture(
-                Objects,
-                ContentFingerprint,
-                Physics.Tick,
-                DemoMapId));
+    public SliceActionResult RequestSave(string path)
+    {
+        var attempt = SaveGate.Request(path, DemoMapId);
+        return Finish(attempt.Saved, attempt.Message);
+    }
 
     /// <summary>
     /// Loads a world saved by <see cref="Save"/>. The loaded world is built
@@ -268,6 +270,25 @@ public sealed class PlayableSliceWorld
             map,
             avatars[0].Id,
             loaded.SimulationTick);
+    }
+
+    /// <summary>
+    /// Surfaces something that happened outside the world — a save adopted, a
+    /// file that could not be read — in the status line.
+    /// </summary>
+    public SliceActionResult Report(string message) => Finish(true, message);
+
+    public SliceActionResult ReportFailure(string message) =>
+        Finish(false, message);
+
+    /// <summary>
+    /// Releases this world's map from its object store. A replaced world must
+    /// be disposed so its map stops indexing a store nobody is using.
+    /// </summary>
+    public void Dispose()
+    {
+        SaveGate.Cancel();
+        Map.Dispose();
     }
 
     /// <summary>
@@ -345,6 +366,13 @@ public sealed class PlayableSliceWorld
     public IReadOnlyList<PhysicsEvent> AdvancePhysics()
     {
         var result = Physics.Advance();
+
+        // End of a completed tick: the one point a deferred save is safe.
+        if (SaveGate.Flush(DemoMapId) is { } attempt && attempt.Saved)
+        {
+            LastMessage = attempt.Message;
+        }
+
         foreach (var landing in result.Events)
         {
             if (landing.Kind == PhysicsEventKind.Landed &&

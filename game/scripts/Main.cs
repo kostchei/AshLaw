@@ -70,6 +70,13 @@ public partial class Main : Node2D
         /// <summary>Where to walk before reporting, when the run names a cell.</summary>
         public GridPosition? Destination { get; init; }
 
+        /// <summary>Exercise the save and load commands before reporting.</summary>
+        public bool SaveLoad { get; init; }
+
+        public string? SaveMessage { get; set; }
+
+        public string? LoadMessage { get; set; }
+
         public int Frame { get; set; }
 
         public int WalkStepsTaken { get; set; }
@@ -121,6 +128,9 @@ public partial class Main : Node2D
                     "--smoke-test requires --smoke-report=<absolute path>."),
             ScreenshotPath = Argument(arguments, "--screenshot"),
             Destination = ParseCell(Argument(arguments, "--smoke-goto")),
+            SaveLoad = arguments.Contains(
+                "--smoke-save-load",
+                StringComparer.Ordinal),
         };
     }
 
@@ -192,6 +202,19 @@ public partial class Main : Node2D
             }
         }
 
+        // Save, then load it back into the running app, through exactly the
+        // commands F5 and F9 use.
+        if (smoke.SaveLoad && smoke.Frame == Math.Max(1, smoke.Frames - 8))
+        {
+            smoke.SaveMessage = _world.RequestSave(SavePath).Message;
+        }
+
+        if (smoke.SaveLoad && smoke.Frame == Math.Max(2, smoke.Frames - 4))
+        {
+            LoadSavedWorld();
+            smoke.LoadMessage = _world.LastMessage;
+        }
+
         if (smoke.Frame < smoke.Frames)
         {
             return;
@@ -251,7 +274,14 @@ public partial class Main : Node2D
             $"sort_cycles={sortResult.Cycles.Count}",
             $"falling_objects={falling}",
             $"last_message={_world.LastMessage}",
+            $"save_pending={_world.SaveGate.IsSavePending}",
         };
+
+        if (smoke.SaveLoad)
+        {
+            lines.Add($"save={smoke.SaveMessage}");
+            lines.Add($"load={smoke.LoadMessage}");
+        }
 
         if (smoke.ScreenshotPath is { } screenshotPath)
         {
@@ -376,9 +406,13 @@ public partial class Main : Node2D
                 _world.ClosePanels();
                 return true;
             case Key.R:
-                _world = PlayableSliceWorld.CreateDemo();
-                _playerDirection = 6;
-                SnapCameraToPlayer();
+                Adopt(PlayableSliceWorld.CreateDemo());
+                return true;
+            case Key.F5:
+                _world.RequestSave(SavePath);
+                return true;
+            case Key.F9:
+                LoadSavedWorld();
                 return true;
             case Key.F3:
                 _debugOverlayVisible = !_debugOverlayVisible;
@@ -389,6 +423,53 @@ public partial class Main : Node2D
             default:
                 return false;
         }
+    }
+
+    private static string SavePath =>
+        ProjectSettings.GlobalizePath("user://object-world.ashw");
+
+    /// <summary>
+    /// Replaces the live world with <paramref name="world"/>. The old one is
+    /// disposed so its map stops indexing a store nothing else uses.
+    /// </summary>
+    private void Adopt(PlayableSliceWorld world)
+    {
+        _world.Dispose();
+        _world = world;
+        _playerDirection = 6;
+        SnapCameraToPlayer();
+    }
+
+    /// <summary>
+    /// Loads the save into a world built beside this one and adopts it only if
+    /// the whole load succeeded. A save that cannot be read leaves the running
+    /// world exactly as it was and says so.
+    /// </summary>
+    private void LoadSavedWorld()
+    {
+        if (!File.Exists(SavePath))
+        {
+            _world.ReportFailure("There is no save to load.");
+            return;
+        }
+
+        PlayableSliceWorld loaded;
+        try
+        {
+            loaded = PlayableSliceWorld.Load(SavePath);
+        }
+        catch (Exception exception) when (
+            exception is ObjectWorldSaveException or
+                InvalidOperationException or
+                ArgumentException or
+                IOException)
+        {
+            _world.ReportFailure($"The save could not be loaded: {exception.Message}");
+            return;
+        }
+
+        Adopt(loaded);
+        _world.Report($"Loaded the world at tick {loaded.Physics.Tick}.");
     }
 
     private bool HandleClick(Vector2 mouse)
@@ -1686,6 +1767,11 @@ public partial class Main : Node2D
         DrawText(new Vector2(246, 105), "R RESET", 7, MutedText);
         DrawText(
             new Vector2(246, 115),
+            "F5 SAVE  F9 LOAD",
+            7,
+            _world.SaveGate.IsSavePending ? Highlight : MutedText);
+        DrawText(
+            new Vector2(246, 125),
             _debugOverlayVisible ? "F3 DEBUG ON" : "F3 DEBUG",
             7,
             _debugOverlayVisible ? DebugSortOrder : MutedText);

@@ -47,6 +47,9 @@ param(
     # Turn on the F3 overlay (collision volumes, elevation, motion, support).
     [switch]$DebugOverlay,
 
+    # Exercise the in-game save and load commands during the run.
+    [switch]$SaveLoad,
+
     # Hand the game to a human: no smoke run, no timeout, no reaping.
     [switch]$Interactive,
 
@@ -162,6 +165,7 @@ $godotArgs += @(
 if ($Screenshot) { $godotArgs += "--screenshot=$screenshotPath" }
 if ($Goto) { $godotArgs += "--smoke-goto=$Goto" }
 if ($DebugOverlay) { $godotArgs += "--debug-overlay" }
+if ($SaveLoad) { $godotArgs += "--smoke-save-load" }
 
 Write-Host "=== Running $(if ($Windowed) { 'windowed' } else { 'headless' }) smoke run ($Frames frames)"
 $process = Start-Process -FilePath $godot -ArgumentList $godotArgs -PassThru -NoNewWindow `
@@ -224,6 +228,13 @@ if (-not (Test-Path $reportPath)) {
     $cycles = ($report | Where-Object { $_ -like "sort_cycles=*" }) -replace ".*=", ""
     if ($cycles -and $cycles -ne "0") {
         $failures += "the volume sorter reported $cycles cycles"
+    }
+
+    if ($SaveLoad) {
+        $loadLine = ($report | Where-Object { $_ -like "load=*" }) -replace "^load=", ""
+        if ($loadLine -notlike "Loaded the world*") {
+            $failures += "the in-game load did not adopt the save: '$loadLine'"
+        }
     }
 
     if ($Screenshot) {

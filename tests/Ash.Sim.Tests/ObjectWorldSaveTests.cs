@@ -343,6 +343,92 @@ public sealed class ObjectWorldSaveTests
     }
 
     [Fact]
+    public void ASaveNamingADeadParentIsRejected()
+    {
+        var store = BuildWorld(out var destroyed, out _);
+        var snapshot = Capture(store);
+        var orphan = snapshot.Objects.Slots
+            .Select((slot, index) => (slot, index))
+            .First(pair =>
+                pair.slot.IsAlive &&
+                pair.slot.Value!.Value.Location.Kind == LocationKind.InContainer);
+        var slots = snapshot.Objects.Slots.ToArray();
+
+        // Point the child at a container that was destroyed before the save.
+        slots[orphan.index] = orphan.slot with
+        {
+            Value = orphan.slot.Value!.Value with
+            {
+                Location = ObjectLocation.InContainer(destroyed[0]),
+            },
+        };
+
+        var corrupt = ObjectWorldSave.Write(
+            snapshot with
+            {
+                Objects = new ObjectStoreSnapshot(
+                    slots,
+                    snapshot.Objects.FreeSlots),
+            });
+
+        Assert.ThrowsAny<InvalidOperationException>(
+            () => ObjectWorldSave.Restore(
+                ObjectWorldSave.Read(corrupt, Fingerprint)));
+    }
+
+    [Fact]
+    public void ASaveWithAnImpossibleSupportIsRejected()
+    {
+        var store = new ObjectStore();
+        using var map = new WorldMap(store, 0, width: 4, depth: 4);
+        var crate = store.Create(new ObjectSpawn
+        {
+            TypeId = "prop.crate",
+            Name = "Crate",
+            ShapeId = "prop",
+            Location = ObjectLocation.OnMap(0, new Vec3i(512, 512, 0)),
+            Footprint = new ObjectFootprint(128, 128),
+            Height = 32,
+            Flags =
+                ObjectFlags.Solid |
+                ObjectFlags.Movable |
+                ObjectFlags.AffectedByGravity |
+                ObjectFlags.Visible,
+        });
+        new PhysicsSystem(store).Advance();
+        var snapshot = ObjectWorldSave.Capture(store, Fingerprint, 1, 0);
+        var slots = snapshot.Objects.Slots.ToArray();
+        var index = crate.Index;
+
+        // Claim the crate rests on a surface that is nowhere near its base.
+        slots[index] = slots[index] with
+        {
+            Value = slots[index].Value!.Value with
+            {
+                Support = SupportRef.Terrain(0, 1, 1, topZ: 96),
+            },
+        };
+
+        var corrupt = ObjectWorldSave.Write(
+            snapshot with
+            {
+                Objects = new ObjectStoreSnapshot(
+                    slots,
+                    snapshot.Objects.FreeSlots),
+            });
+
+        var rejected = Assert.ThrowsAny<InvalidOperationException>(
+            () => ObjectWorldSave.Restore(
+                ObjectWorldSave.Read(corrupt, Fingerprint)));
+        Assert.Contains("support", rejected.Message);
+
+        // The live world is untouched by the failed load.
+        Assert.Equal(0, store.Get(crate).Location.Position.Z);
+        Assert.Equal(SupportKind.Terrain, store.Get(crate).Support.Kind);
+        map.ValidateIndex();
+    }
+
+    [Fact]
     public void ARestoredStoreRejectsAFreeListThatDisagreesWithItsDeadSlots()
     {
         var store = BuildWorld(out _, out _);

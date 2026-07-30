@@ -424,6 +424,12 @@ public sealed class ObjectStore
     public int Count { get; private set; }
 
     /// <summary>
+    /// Whether a commit is in flight, including the change notifications it
+    /// publishes. The save boundary refuses to snapshot a world in this state.
+    /// </summary>
+    public bool IsCommitting { get; private set; }
+
+    /// <summary>
     /// Every slot of this store, live and dead, in slot order, plus the
     /// free-slot stack in pop order. Dead slots and their generations are part
     /// of the authoritative state: they are what keeps a stale handle stale and
@@ -1084,6 +1090,21 @@ public sealed class ObjectStore
         IReadOnlyList<ObjectTransferRequest> requests,
         IReadOnlyList<ObjectPhysicsUpdate> physics)
     {
+        IsCommitting = true;
+        try
+        {
+            CommitLocked(requests, physics);
+        }
+        finally
+        {
+            IsCommitting = false;
+        }
+    }
+
+    private void CommitLocked(
+        IReadOnlyList<ObjectTransferRequest> requests,
+        IReadOnlyList<ObjectPhysicsUpdate> physics)
+    {
         foreach (var request in requests)
         {
             var index = ResolveSlot(request.ObjectId);
@@ -1191,6 +1212,16 @@ public sealed class ObjectStore
         }
     }
 
-    private void Publish(ObjectStoreChangeKind kind, ObjectId id) =>
-        Committed?.Invoke(new ObjectStoreCommit(kind, [id]));
+    private void Publish(ObjectStoreChangeKind kind, ObjectId id)
+    {
+        IsCommitting = true;
+        try
+        {
+            Committed?.Invoke(new ObjectStoreCommit(kind, [id]));
+        }
+        finally
+        {
+            IsCommitting = false;
+        }
+    }
 }

@@ -96,12 +96,31 @@ public sealed class PhysicsSystem
     public long Tick { get; private set; }
 
     /// <summary>
+    /// Whether a tick is mid-flight. The save boundary waits for this to clear
+    /// so a snapshot never lands between two commits of the same tick.
+    /// </summary>
+    public bool IsAdvancing { get; private set; }
+
+    /// <summary>
     /// Advances one fixed simulation tick: revalidate supports, then move every
     /// falling object. Objects are processed in <see cref="ObjectId"/> order and
     /// each change is one transaction, so repeating a tick sequence reproduces
     /// identical positions, supports and events.
     /// </summary>
     public PhysicsTickResult Advance()
+    {
+        IsAdvancing = true;
+        try
+        {
+            return AdvanceTick();
+        }
+        finally
+        {
+            IsAdvancing = false;
+        }
+    }
+
+    private PhysicsTickResult AdvanceTick()
     {
         var events = new List<PhysicsEvent>();
         foreach (var id in GravityObjects())
