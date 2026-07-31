@@ -1,0 +1,64 @@
+using Ash.Rules;
+
+namespace Ash.Sim;
+
+/// <summary>
+/// Finds the vendored rules data on disk.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The rules are data, not code: attack tables, critical tables and class
+/// progressions all load from <c>vendor/ash-v1-rules/data</c>, and changing a
+/// value there must change resolution without touching the engine.
+/// </para>
+/// <para>
+/// <b>This locates them by walking up from the running assembly to the
+/// repository root, which works while running from source and will not work in
+/// an exported game</b>, where files live inside a Godot pack rather than on
+/// disk. Packaging the rules data alongside the shape packs, and giving the
+/// loader a text-based entry point the engine can feed, is outstanding work.
+/// Until then an export fails here loudly rather than running with invented
+/// numbers.
+/// </para>
+/// </remarks>
+public static class RulesRepository
+{
+    private static readonly Lazy<RulesData> Loaded = new(Load);
+
+    public static RulesData Rules => Loaded.Value;
+
+    public static ClassProgressionTable ClassProgression =>
+        Loaded.Value.ClassProgression;
+
+    private static RulesData Load()
+    {
+        var directory = FindDataDirectory();
+        return RulesDataLoader.LoadFromDirectory(directory);
+    }
+
+    private static string FindDataDirectory()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(
+                directory.FullName,
+                "vendor",
+                "ash-v1-rules",
+                "data");
+            if (Directory.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new RulesResolutionException(
+            "The rules data was not found by walking up from " +
+            $"'{AppContext.BaseDirectory}' to a directory containing " +
+            "vendor/ash-v1-rules/data. Running from source finds it; an " +
+            "exported build will not until the rules data is packaged with " +
+            "the game.");
+    }
+}

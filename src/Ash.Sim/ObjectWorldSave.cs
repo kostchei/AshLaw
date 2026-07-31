@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 using Ash.Core;
+using Ash.Rules;
 
 namespace Ash.Sim;
 
@@ -48,12 +49,13 @@ public static class ObjectWorldSave
     public static readonly byte[] Magic = "ASHW"u8.ToArray();
 
     /// <summary>
-    /// Version 2 added the terrain section, version 3 stack limits, and
-    /// version 4 gear slots.
+    /// Version 2 added the terrain section, version 3 stack limits, version 4
+    /// gear slots, and version 5 the actor sheet: ability scores, class, level
+    /// and armour.
     /// Version 1 was never written outside this repository's tests, so it has
     /// no migration and is simply refused.
     /// </summary>
-    public const int FormatVersion = 4;
+    public const int FormatVersion = 5;
 
     /// <summary>
     /// The oldest format this build still reads. Version 2 migrates forward
@@ -66,7 +68,7 @@ public static class ObjectWorldSave
     /// The oldest reader that can still make sense of a file this build writes.
     /// A reader below this refuses the file instead of guessing at it.
     /// </summary>
-    public const int MinimumReaderVersion = 4;
+    public const int MinimumReaderVersion = 5;
 
     /// <summary>A sanity bound so a corrupt length cannot ask for a huge buffer.</summary>
     public const int MaximumPayloadBytes = 256 * 1024 * 1024;
@@ -468,6 +470,15 @@ public static class ObjectWorldSave
         WriteInt32(buffer, value.QuantityPerSlot);
         WriteText(buffer, value.SlotGroup);
         WriteInt32(buffer, value.Strength);
+        WriteInt32(buffer, value.Dexterity);
+        WriteInt32(buffer, value.Constitution);
+        WriteInt32(buffer, value.Intelligence);
+        WriteInt32(buffer, value.Wisdom);
+        WriteInt32(buffer, value.Charisma);
+        WriteInt32(buffer, (int)value.Class);
+        WriteInt32(buffer, value.Level);
+        WriteInt32(buffer, (int)value.ArmorType);
+        WriteInt32(buffer, value.DefenseBonus);
         WriteInt32(buffer, value.GearSlotBonus);
         buffer.WriteByte(value.IsContainerOpen ? (byte)1 : (byte)0);
     }
@@ -527,6 +538,19 @@ public static class ObjectWorldSave
         var slotCost = GearSlots.StandardCost;
         var strength = 0;
         var gearSlotBonus = 0;
+
+        // Version 4 and earlier had no actor sheet: an unrolled character reads
+        // as one that never had scores, a class or armour, which is exactly
+        // what those worlds meant.
+        var dexterity = 0;
+        var constitution = 0;
+        var intelligence = 0;
+        var wisdom = 0;
+        var charisma = 0;
+        var characterClass = CharacterClass.Fighter;
+        var level = 0;
+        var armorType = ArmorType.None;
+        var defenseBonus = 0;
         if (formatVersion >= 4)
         {
             slotCost = reader.ReadInt32();
@@ -540,6 +564,25 @@ public static class ObjectWorldSave
             quantityPerSlot = reader.ReadInt32();
             slotGroup = reader.ReadText();
             strength = reader.ReadInt32();
+            if (formatVersion >= 5)
+            {
+                dexterity = reader.ReadInt32();
+                constitution = reader.ReadInt32();
+                intelligence = reader.ReadInt32();
+                wisdom = reader.ReadInt32();
+                charisma = reader.ReadInt32();
+                characterClass = ReadEnum<CharacterClass>(
+                    ref reader,
+                    index,
+                    nameof(CharacterClass));
+                level = reader.ReadInt32();
+                armorType = ReadEnum<ArmorType>(
+                    ref reader,
+                    index,
+                    nameof(ArmorType));
+                defenseBonus = reader.ReadInt32();
+            }
+
             gearSlotBonus = reader.ReadInt32();
         }
 
@@ -579,6 +622,15 @@ public static class ObjectWorldSave
             quantityPerSlot,
             slotGroup,
             strength,
+            dexterity,
+            constitution,
+            intelligence,
+            wisdom,
+            charisma,
+            characterClass,
+            level,
+            armorType,
+            defenseBonus,
             gearSlotBonus,
             containerOpen);
     }
@@ -680,6 +732,26 @@ public static class ObjectWorldSave
     /// had and could not grow, so its limit is exactly that quantity.
     /// </summary>
     private static int MigrateStackLimit(int quantity) => Math.Max(1, quantity);
+
+    /// <summary>
+    /// Reads an enum the save must already know: an unknown value is a corrupt
+    /// or future file, not something to coerce into a default.
+    /// </summary>
+    private static TEnum ReadEnum<TEnum>(
+        ref SpanReader reader,
+        int index,
+        string name)
+        where TEnum : struct, Enum
+    {
+        var value = reader.ReadInt32();
+        if (!Enum.IsDefined(typeof(TEnum), value))
+        {
+            throw new ObjectWorldSaveException(
+                $"Slot {index} holds {value}, which is not a known {name}.");
+        }
+
+        return (TEnum)Enum.ToObject(typeof(TEnum), value);
+    }
 
     private static ObjectId ObjectIdFromValue(uint value)
     {

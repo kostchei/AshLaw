@@ -1,4 +1,5 @@
 using Ash.Core;
+using Ash.Rules;
 using System.Diagnostics;
 
 namespace Ash.Sim;
@@ -224,6 +225,12 @@ public enum ObjectFlags
     /// quantity, rather than sitting beside each other as separate objects.
     /// </summary>
     Stackable = 1 << 14,
+
+    /// <summary>
+    /// A weapon light enough to be driven by dexterity — a rapier, a dagger, a
+    /// whip — when that serves the wielder better than strength.
+    /// </summary>
+    Finesse = 1 << 15,
 }
 
 /// <summary>
@@ -571,6 +578,37 @@ public sealed record ObjectSpawn
     /// <summary>The actor stat carrying capacity is derived from.</summary>
     public int Strength { get; init; }
 
+    public int Dexterity { get; init; }
+
+    public int Constitution { get; init; }
+
+    public int Intelligence { get; init; }
+
+    public int Wisdom { get; init; }
+
+    public int Charisma { get; init; }
+
+    /// <summary>
+    /// The class whose attack progression this actor advances on. Only
+    /// meaningful at <see cref="Level"/> one or above.
+    /// </summary>
+    public CharacterClass Class { get; init; } = CharacterClass.Fighter;
+
+    /// <summary>
+    /// Character level. Zero means the object has no class progression at all,
+    /// which is every prop, item and unlevelled creature.
+    /// </summary>
+    public int Level { get; init; }
+
+    /// <summary>The armour category this object counts as when worn.</summary>
+    public ArmorType ArmorType { get; init; } = ArmorType.None;
+
+    /// <summary>
+    /// What wearing or carrying this adds to its owner's Defense Modifier:
+    /// armour's own protection, or a shield's.
+    /// </summary>
+    public int DefenseBonus { get; init; }
+
     /// <summary>
     /// Extra gear slots from a class ability or similar, added on top of the
     /// strength-derived capacity.
@@ -612,6 +650,15 @@ public sealed record ObjectSpawn
             QuantityPerSlot,
             SlotGroup,
             Strength,
+            Dexterity,
+            Constitution,
+            Intelligence,
+            Wisdom,
+            Charisma,
+            Class,
+            Level,
+            ArmorType,
+            DefenseBonus,
             GearSlotBonus,
             false);
 }
@@ -642,6 +689,15 @@ public readonly record struct WorldObject(
     int QuantityPerSlot,
     string SlotGroup,
     int Strength,
+    int Dexterity,
+    int Constitution,
+    int Intelligence,
+    int Wisdom,
+    int Charisma,
+    CharacterClass Class,
+    int Level,
+    ArmorType ArmorType,
+    int DefenseBonus,
     int GearSlotBonus,
     bool IsContainerOpen)
 {
@@ -662,6 +718,19 @@ public readonly record struct WorldObject(
     /// from its strength — <c>max(Strength, 10)</c> — and everything else uses
     /// the slots it was authored with.
     /// </summary>
+    /// <summary>
+    /// The six scores as the rules see them. Anything unrolled reads as the
+    /// minimum, which is what a prop or an unlevelled creature has.
+    /// </summary>
+    public AbilityScores Abilities =>
+        new(
+            Math.Max(Strength, AbilityScores.MinimumScore),
+            Math.Max(Dexterity, AbilityScores.MinimumScore),
+            Math.Max(Constitution, AbilityScores.MinimumScore),
+            Math.Max(Intelligence, AbilityScores.MinimumScore),
+            Math.Max(Wisdom, AbilityScores.MinimumScore),
+            Math.Max(Charisma, AbilityScores.MinimumScore));
+
     public int CarryCapacity =>
         !HasFlag(ObjectFlags.Container)
             ? 0
@@ -744,6 +813,15 @@ public sealed class ObjectStore
     private readonly List<int> _quantitiesPerSlot = [];
     private readonly List<string> _slotGroups = [];
     private readonly List<int> _strengths = [];
+    private readonly List<int> _dexterities = [];
+    private readonly List<int> _constitutions = [];
+    private readonly List<int> _intelligences = [];
+    private readonly List<int> _wisdoms = [];
+    private readonly List<int> _charismas = [];
+    private readonly List<CharacterClass> _classes = [];
+    private readonly List<int> _levels = [];
+    private readonly List<ArmorType> _armorTypes = [];
+    private readonly List<int> _defenseBonuses = [];
     private readonly List<int> _gearSlotBonuses = [];
     private readonly List<bool> _containerOpen = [];
     private readonly Stack<int> _freeSlots = [];
@@ -903,6 +981,15 @@ public sealed class ObjectStore
         _quantitiesPerSlot[index] = spawn.QuantityPerSlot;
         _slotGroups[index] = spawn.SlotGroup;
         _strengths[index] = spawn.Strength;
+        _dexterities[index] = spawn.Dexterity;
+        _constitutions[index] = spawn.Constitution;
+        _intelligences[index] = spawn.Intelligence;
+        _wisdoms[index] = spawn.Wisdom;
+        _charismas[index] = spawn.Charisma;
+        _classes[index] = spawn.Class;
+        _levels[index] = spawn.Level;
+        _armorTypes[index] = spawn.ArmorType;
+        _defenseBonuses[index] = spawn.DefenseBonus;
         _gearSlotBonuses[index] = spawn.GearSlotBonus;
         _containerOpen[index] = false;
         Count++;
@@ -1259,6 +1346,15 @@ public sealed class ObjectStore
         _quantitiesPerSlot.Add(0);
         _slotGroups.Add(string.Empty);
         _strengths.Add(0);
+        _dexterities.Add(0);
+        _constitutions.Add(0);
+        _intelligences.Add(0);
+        _wisdoms.Add(0);
+        _charismas.Add(0);
+        _classes.Add(CharacterClass.Fighter);
+        _levels.Add(0);
+        _armorTypes.Add(ArmorType.None);
+        _defenseBonuses.Add(0);
         _gearSlotBonuses.Add(0);
         _containerOpen.Add(false);
         return index;
@@ -1309,6 +1405,22 @@ public sealed class ObjectStore
             spawn.GearSlotBonus < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(spawn.SlotCapacity));
+        }
+
+        if (spawn.Level < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(spawn.Level));
+        }
+
+        if (spawn.Level > 0 && !spawn.Flags.HasFlag(ObjectFlags.Actor))
+        {
+            throw new ArgumentException(
+                "Only an actor advances on a class progression.");
+        }
+
+        if (spawn.DefenseBonus < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(spawn.DefenseBonus));
         }
 
         if (!spawn.Flags.HasFlag(ObjectFlags.Actor) && spawn.GearSlotBonus != 0)
@@ -1685,6 +1797,15 @@ public sealed class ObjectStore
         _quantitiesPerSlot[index] = value.QuantityPerSlot;
         _slotGroups[index] = value.SlotGroup;
         _strengths[index] = value.Strength;
+        _dexterities[index] = value.Dexterity;
+        _constitutions[index] = value.Constitution;
+        _intelligences[index] = value.Intelligence;
+        _wisdoms[index] = value.Wisdom;
+        _charismas[index] = value.Charisma;
+        _classes[index] = value.Class;
+        _levels[index] = value.Level;
+        _armorTypes[index] = value.ArmorType;
+        _defenseBonuses[index] = value.DefenseBonus;
         _gearSlotBonuses[index] = value.GearSlotBonus;
         _containerOpen[index] = value.IsContainerOpen;
     }
@@ -1716,6 +1837,15 @@ public sealed class ObjectStore
             _quantitiesPerSlot[index],
             _slotGroups[index],
             _strengths[index],
+            _dexterities[index],
+            _constitutions[index],
+            _intelligences[index],
+            _wisdoms[index],
+            _charismas[index],
+            _classes[index],
+            _levels[index],
+            _armorTypes[index],
+            _defenseBonuses[index],
             _gearSlotBonuses[index],
             _containerOpen[index]);
 

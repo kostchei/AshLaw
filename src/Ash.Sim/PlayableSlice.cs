@@ -1,4 +1,5 @@
 using Ash.Core;
+using Ash.Rules;
 
 namespace Ash.Sim;
 
@@ -52,6 +53,7 @@ public sealed class PlayableSliceWorld : IDisposable
     public const string ContentFingerprint = "ash.playable-slice.v1";
 
     private const string AvatarTypeId = "actor.avatar";
+    private const string DaggerTypeId = "item.bronze-dagger";
     private const string GoldTypeId = "item.gold";
 
     /// <summary>The Avatar's strength, and so a 12-slot pack.</summary>
@@ -79,6 +81,7 @@ public sealed class PlayableSliceWorld : IDisposable
         SaveGate = new WorldSaveGate(objects, Physics, ContentFingerprint);
         Drag = new DragService(objects);
         Stacks = new StackService(objects);
+        Sheets = new ActorSheets(objects, RulesRepository.ClassProgression);
         LastMessage = "Explore. Open a chest or fight a monster.";
     }
 
@@ -95,6 +98,11 @@ public sealed class PlayableSliceWorld : IDisposable
     public DragService Drag { get; }
 
     public StackService Stacks { get; }
+
+    /// <summary>Attack and defence derived from scores, class and worn gear.</summary>
+    public ActorSheets Sheets { get; }
+
+    public ActorSheet PlayerSheet => Sheets.For(PlayerId);
 
     /// <summary>The object currently held by the cursor, if any.</summary>
     public WorldObject? HeldObject =>
@@ -184,6 +192,13 @@ public sealed class PlayableSliceWorld : IDisposable
                 ObjectFlags.AffectedByGravity |
                 ObjectFlags.Visible,
             Strength = AvatarStrength,
+            Dexterity = 12,
+            Constitution = 14,
+            Intelligence = 10,
+            Wisdom = 10,
+            Charisma = 12,
+            Class = CharacterClass.Fighter,
+            Level = 1,
             Health = 12,
             MaxHealth = 12,
         });
@@ -223,6 +238,7 @@ public sealed class PlayableSliceWorld : IDisposable
             new GridPosition(37, 12),
             ["Star Sapphire", "Antidote"]);
         SpawnCountedGoods(objects);
+        SpawnFinesseWeapon(objects);
 
         SpawnMonster(
             objects,
@@ -356,6 +372,32 @@ public sealed class PlayableSliceWorld : IDisposable
     /// bridge deck over a lower floor, and a trestle whose support the player
     /// can remove with <see cref="RemoveTrestleSupport"/>.
     /// </summary>
+    /// <summary>
+    /// A light blade: finesse weapons are swung with dexterity when that serves
+    /// the wielder better than strength.
+    /// </summary>
+    private static void SpawnFinesseWeapon(ObjectStore objects)
+    {
+        var chest = objects.Enumerate()
+            .First(value => value.TypeId == "container.old-coffer");
+        objects.Create(new ObjectSpawn
+        {
+            TypeId = DaggerTypeId,
+            Name = "Bronze Dagger",
+            ShapeId = "loot.shortsword",
+            Location = ObjectLocation.InContainer(chest.Id),
+            Footprint = new ObjectFootprint(32, 32),
+            Height = 8,
+            Flags =
+                ObjectFlags.Item |
+                ObjectFlags.Movable |
+                ObjectFlags.Finesse |
+                ObjectFlags.Visible,
+            EquipmentSlots =
+                EquipmentSlotMask.EitherHand | EquipmentSlotMask.Scabbard,
+        });
+    }
+
     /// <summary>
     /// Goods measured by the slotful, in the chests that hold them.
     /// </summary>
@@ -986,6 +1028,13 @@ public sealed class PlayableSliceWorld : IDisposable
                 ObjectFlags.Solid |
                 ObjectFlags.Visible,
             Strength = 10,
+            Dexterity = 11,
+            Constitution = 10,
+            Intelligence = 8,
+            Wisdom = 8,
+            Charisma = 6,
+            Class = CharacterClass.Fighter,
+            Level = 1,
             Health = maxHealth,
             MaxHealth = maxHealth,
         });
