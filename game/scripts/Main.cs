@@ -149,6 +149,13 @@ public partial class Main : Node2D
 
         public string? SaveMessage { get; set; }
 
+        /// <summary>
+        /// Whether the save this run asked for actually reached the disk. A
+        /// deferred save that never came back has written nothing, and the
+        /// file at the save path is then some earlier run's.
+        /// </summary>
+        public bool SaveLanded { get; set; }
+
         public string? LoadMessage { get; set; }
 
         public int Frame { get; set; }
@@ -350,8 +357,25 @@ public partial class Main : Node2D
 
         if (smoke.SaveLoad && smoke.Frame == Math.Max(2, smoke.Frames - 4))
         {
-            LoadSavedWorld();
-            smoke.LoadMessage = _world.LastMessage;
+            // Only load what this run wrote. A save is deferred while anything
+            // is still in transfer — which is exactly what --smoke-hold leaves
+            // behind — and a deferral that never comes back has written
+            // nothing. Loading anyway would adopt whatever file an earlier run
+            // left at the save path, and the report would then describe, and
+            // confirm the invariants of, a world this run never built.
+            smoke.SaveLanded = !_world.SaveGate.IsSavePending;
+            if (smoke.SaveLanded)
+            {
+                LoadSavedWorld();
+                smoke.LoadMessage = _world.LastMessage;
+            }
+            else
+            {
+                smoke.LoadMessage =
+                    "skipped: the save is still deferred, so this run has " +
+                    "written nothing to load.";
+                _world.Report(smoke.LoadMessage);
+            }
         }
 
         if (smoke.Frame < smoke.Frames)
@@ -431,6 +455,7 @@ public partial class Main : Node2D
         if (smoke.SaveLoad)
         {
             lines.Add($"save={smoke.SaveMessage}");
+            lines.Add($"save_landed={smoke.SaveLanded}");
             lines.Add($"load={smoke.LoadMessage}");
         }
 

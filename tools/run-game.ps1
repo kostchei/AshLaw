@@ -264,9 +264,27 @@ if (-not (Test-Path $reportPath)) {
     }
 
     if ($SaveLoad) {
+        $saveLine = ($report | Where-Object { $_ -like "save=*" }) -replace "^save=", ""
+        $landed = ($report | Where-Object { $_ -like "save_landed=*" }) -replace "^save_landed=", ""
         $loadLine = ($report | Where-Object { $_ -like "load=*" }) -replace "^load=", ""
-        if ($loadLine -notlike "Loaded the world*") {
-            $failures += "the in-game load did not adopt the save: '$loadLine'"
+
+        if ($landed -eq "True") {
+            if ($loadLine -notlike "Loaded the world*") {
+                $failures += "the in-game load did not adopt the save: '$loadLine'"
+            }
+        } elseif ($loadLine -notlike "skipped:*") {
+            # The trap this guards: a save that never landed leaves an earlier
+            # run's file at the save path, so loading it would swap in a world
+            # this run never wrote and then confirm *its* invariants — a pass
+            # that measured the wrong thing.
+            $failures += "the save never landed but the run loaded anyway: '$loadLine'"
+        }
+
+        # -Hold keeps an object in transfer for the whole run, so the save
+        # boundary is meant to defer and the load is meant to be skipped. Any
+        # other save/load run must actually write something.
+        if (-not $Hold -and $landed -ne "True") {
+            $failures += "the save never reached the disk: '$saveLine'"
         }
     }
 
