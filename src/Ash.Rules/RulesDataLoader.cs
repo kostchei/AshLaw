@@ -589,11 +589,11 @@ public static class RulesDataLoader
         }
     }
 
-    private static IDictionary<(CriticalTableId, CriticalTier, int), CriticalOutcome>
+    private static IDictionary<(CriticalTableId, int), CriticalOutcome>
         LoadCriticalTables(string directory)
     {
         var outcomes =
-            new Dictionary<(CriticalTableId, CriticalTier, int), CriticalOutcome>();
+            new Dictionary<(CriticalTableId, int), CriticalOutcome>();
         foreach (var definition in CriticalTableDefinitions)
         {
             var path = Path.Combine(directory, definition.FileName);
@@ -606,17 +606,13 @@ public static class RulesDataLoader
             var expectedHeader = new[]
             {
                 "Index",
-                "Tier_A_Minor",
-                "Tier_B_Moderate",
-                "Tier_C_Severe",
-                "Tier_D_Lethal",
-                "Tier_E_Catastrophic",
+                "Outcome",
             };
             RequireCsvHeader(rows[0], expectedHeader, path);
-            if (rows.Count != 11)
+            if (rows.Count != 19)
             {
                 throw new RulesDataException(
-                    $"{path}: expected one header and 10 trauma rows; found {rows.Count} rows.");
+                    $"{path}: expected one header and 18 trauma rows; found {rows.Count} rows.");
             }
 
             var seenIndices = new HashSet<int>();
@@ -626,33 +622,29 @@ public static class RulesDataLoader
                 var rowNumber = rowIndex + 1;
                 RequireCsvColumnCount(row, expectedHeader.Length, path, rowNumber);
                 var traumaIndex = ParseCsvInt(row[0], path, rowNumber, "Index");
-                if (traumaIndex is < 1 or > 10 || !seenIndices.Add(traumaIndex))
+                if (traumaIndex is < 1 or > 18 || !seenIndices.Add(traumaIndex))
                 {
                     throw new RulesDataException(
-                        $"{path}:{rowNumber}: trauma index must be unique and between 1 and 10; found {traumaIndex}.");
+                        $"{path}:{rowNumber}: trauma index must be unique and between 1 and 18; found {traumaIndex}.");
                 }
 
-                foreach (var tier in Enum.GetValues<CriticalTier>())
+                var text = row[1].Trim();
+                if (text.Length == 0)
                 {
-                    var text = row[(int)tier + 1].Trim();
-                    if (text.Length == 0)
-                    {
-                        throw new RulesDataException(
-                            $"{path}:{rowNumber}: Tier {tier} trauma text is empty.");
-                    }
-
-                    var key = (definition.Id, tier, traumaIndex);
-                    outcomes.Add(
-                        key,
-                        new CriticalOutcome(
-                            definition.Id,
-                            tier,
-                            traumaIndex,
-                            text,
-                            TraumaEffectParser.Parse(
-                                text,
-                                $"{path}:{rowNumber}: {definition.Id} Tier {tier} index {traumaIndex}")));
+                    throw new RulesDataException(
+                        $"{path}:{rowNumber}: index {traumaIndex} trauma text is empty.");
                 }
+
+                var key = (definition.Id, traumaIndex);
+                outcomes.Add(
+                    key,
+                    new CriticalOutcome(
+                        definition.Id,
+                        traumaIndex,
+                        text,
+                        TraumaEffectParser.Parse(
+                            text,
+                            $"{path}:{rowNumber}: {definition.Id} index {traumaIndex}")));
             }
         }
 

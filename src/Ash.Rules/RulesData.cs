@@ -74,21 +74,17 @@ public sealed class CriticalOutcome
 {
     internal CriticalOutcome(
         CriticalTableId table,
-        CriticalTier tier,
         int index,
         string text,
         IEnumerable<TraumaEffect> effects)
     {
         Table = table;
-        Tier = tier;
         Index = index;
         Text = text;
         Effects = Array.AsReadOnly(effects.ToArray());
     }
 
     public CriticalTableId Table { get; }
-
-    public CriticalTier Tier { get; }
 
     public int Index { get; }
 
@@ -188,12 +184,12 @@ public sealed class SpellcastingRules
 public sealed class RulesData
 {
     private readonly IReadOnlyDictionary<AttackCategoryId, AttackTable> _attackTables;
-    private readonly IReadOnlyDictionary<(CriticalTableId Table, CriticalTier Tier, int Index), CriticalOutcome>
+    private readonly IReadOnlyDictionary<(CriticalTableId Table, int Index), CriticalOutcome>
         _criticalOutcomes;
 
     internal RulesData(
         IDictionary<AttackCategoryId, AttackTable> attackTables,
-        IDictionary<(CriticalTableId Table, CriticalTier Tier, int Index), CriticalOutcome>
+        IDictionary<(CriticalTableId Table, int Index), CriticalOutcome>
             criticalOutcomes,
         SpellcastingRules spellcasting,
         ClassProgressionTable classProgression)
@@ -201,8 +197,8 @@ public sealed class RulesData
         _attackTables = new ReadOnlyDictionary<AttackCategoryId, AttackTable>(
             new Dictionary<AttackCategoryId, AttackTable>(attackTables));
         _criticalOutcomes =
-            new ReadOnlyDictionary<(CriticalTableId Table, CriticalTier Tier, int Index), CriticalOutcome>(
-                new Dictionary<(CriticalTableId Table, CriticalTier Tier, int Index), CriticalOutcome>(
+            new ReadOnlyDictionary<(CriticalTableId Table, int Index), CriticalOutcome>(
+                new Dictionary<(CriticalTableId Table, int Index), CriticalOutcome>(
                     criticalOutcomes));
         Spellcasting = spellcasting;
         ClassProgression = classProgression;
@@ -219,19 +215,35 @@ public sealed class RulesData
             ? table
             : throw new RulesResolutionException($"Unknown attack category '{category}'.");
 
+    public CriticalOutcome GetCriticalOutcome(CriticalTableId table, int index)
+    {
+        if (index is < 1 or > 18)
+        {
+            throw new ArgumentOutOfRangeException(nameof(index), index, "Critical lookup index must be 1 through 18.");
+        }
+
+        return _criticalOutcomes.TryGetValue((table, index), out var outcome)
+            ? outcome
+            : throw new RulesResolutionException(
+                $"No critical outcome exists for {table}, index {index}.");
+    }
+
     public CriticalOutcome GetCriticalOutcome(
         CriticalTableId table,
         CriticalTier tier,
         int index)
     {
-        if (index is < 1 or > 10)
+        var offset = tier switch
         {
-            throw new ArgumentOutOfRangeException(nameof(index), index, "Trauma index must be 1 through 10.");
-        }
+            CriticalTier.A => 0,
+            CriticalTier.B => 2,
+            CriticalTier.C => 4,
+            CriticalTier.D => 6,
+            CriticalTier.E => 8,
+            _ => throw new ArgumentOutOfRangeException(nameof(tier)),
+        };
 
-        return _criticalOutcomes.TryGetValue((table, tier, index), out var outcome)
-            ? outcome
-            : throw new RulesResolutionException(
-                $"No critical outcome exists for {table}, Tier {tier}, index {index}.");
+        var d20Index = index is >= 1 and <= 10 ? index : ((index - 1) % 10 + 1);
+        return GetCriticalOutcome(table, d20Index + offset);
     }
 }

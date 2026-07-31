@@ -300,7 +300,7 @@ internal static partial class TraumaEffectParser
     private static partial Regex UnconsciousRegex();
 
     [GeneratedRegex(
-        @"\b(?:knocked down|prone position|fall prone|down and unconscious)\b",
+        @"\b(?:knocked down|prone position|falls?\s+prone|down and unconscious)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ProneRegex();
 
@@ -310,12 +310,12 @@ internal static partial class TraumaEffectParser
     private static partial Regex DeathRegex();
 
     [GeneratedRegex(
-        @"(?<direction>knocked(?:\s+back)?|sideways)\s+(?<distance>\d+)\s*(?:feet|foot|ft|')(?:\s+(?<trailing>sideways|backwards?|forwards?))?",
+        @"(?:(?<direction>knocked(?:\s+back)?|sideways)\s+(?<distance>\d+)\s*(?:feet|foot|ft|')(?:\s+(?<trailing>sideways|backwards?|forwards?))?|(?:reduces?\s+(?:target's\s+)?speed\s+by|speed\s+is\s+reduced\s+by)\s+(?<distance>\d+)\s*(?:feet|foot|ft|'))",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ForcedMovementRegex();
 
     [GeneratedRegex(
-        @"\b(?:drop|drops?)\s+(?<item>weapon|shield|anything carried in hands|all items)\b|(?<item>shield)\s+torn away",
+        @"\b(?:drop|drops?)\s+(?<item>weapon|shield|held item|item|anything carried in hands|all items)\b|(?<item>shield)\s+torn away",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DropItemRegex();
 

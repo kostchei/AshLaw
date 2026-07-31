@@ -2,7 +2,7 @@
 # Regenerate only when the rules data or resolver changes deliberately:
 #   ASH_REGENERATE_GOLDEN=1 dotnet test tests/Ash.Rules.Tests
 # See GoldenResolutionTests for the corpus definition.
-sha256 5a81ac3ab9719f44d13079f5d7a511084cd82648e021f15e9e889cc83ad73f54
+sha256 52820246f0760c0b55753e237a87de61a48c692146bb90ad56b8f07d5a7ca0c9
 sample 2 0|d1|OneHandedSlashing|atk-5|def-3|Plate|-|spell1|unval0 => hit0|net-1|margin-11|hits0|tier-|ct-|ti-|mishap1|total0|fx[]|msg2
 sample 402 400|d1|TwoHandedWeapons|atk4|def6|Chain|Cold|spell0|unval0 => hit0|net-1|margin-15|hits0|tier-|ct-|ti-|mishap0|total0|fx[]|msg3
 sample 802 800|d1|ToothAndClaw|atk13|def-2|Leather|Puncture|spell0|unval0 => hit1|net16|margin4|hits5|tier-|ct-|ti-|mishap0|total5|fx[]|msg3

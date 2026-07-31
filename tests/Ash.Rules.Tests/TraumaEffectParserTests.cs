@@ -17,18 +17,15 @@ public sealed class TraumaEffectParserTests
 
         foreach (var table in Enum.GetValues<CriticalTableId>())
         {
-            foreach (var tier in Enum.GetValues<CriticalTier>())
+            for (var index = 1; index <= 18; index++)
             {
-                for (var index = 1; index <= 10; index++)
-                {
-                    var outcome = rules.GetCriticalOutcome(table, tier, index);
-                    Assert.False(string.IsNullOrWhiteSpace(outcome.Text));
-                    lines++;
-                }
+                var outcome = rules.GetCriticalOutcome(table, index);
+                Assert.False(string.IsNullOrWhiteSpace(outcome.Text));
+                lines++;
             }
         }
 
-        Assert.Equal(400, lines);
+        Assert.Equal(144, lines);
     }
 
     [Theory]
