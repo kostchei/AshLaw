@@ -57,6 +57,46 @@ public enum TraumaEffectKind
     BreakBone,
     DisableLimb,
     DestroyEye,
+    Paralyzed,
+
+    /// <summary>The official 5.5e Restrained condition.</summary>
+    Restrained,
+
+    /// <summary>
+    /// The official 5.5e Incapacitated condition.
+    /// </summary>
+    Incapacitated,
+
+    /// <summary>
+    /// The zero-hit-point state that starts death saving throws.
+    /// </summary>
+    Dying,
+
+    /// <summary>The 5.5e suffocation hazard has begun.</summary>
+    Suffocating,
+
+    // 5.5e weapon masteries. These are mechanical markers for the combat-state
+    // consumer, not presentation tags; each uses the standard mastery rule.
+    /// <summary>Graze: damage equal to the attack's STR or DEX modifier.</summary>
+    Graze,
+
+    /// <summary>Vex: Advantage on the next attack against this target.</summary>
+    Vex,
+
+    /// <summary>Sap: Disadvantage on the target's next attack.</summary>
+    Sap,
+
+    /// <summary>Topple: the mastery save can apply Prone.</summary>
+    Topple,
+
+    /// <summary>Cleave: the mastery follow-up attack against a nearby target.</summary>
+    Cleave,
+
+    /// <summary>Slow: reduce Speed by 10 feet for the mastery window.</summary>
+    Slow,
+
+    /// <summary>Push: move a qualifying target up to 10 feet straight away.</summary>
+    Push,
 }
 
 public enum TraumaEffectCondition

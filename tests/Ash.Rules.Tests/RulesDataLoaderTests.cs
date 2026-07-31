@@ -62,7 +62,7 @@ public sealed class RulesDataLoaderTests
         using var copy = TemporaryRulesData.Create();
         copy.Replace(
             "ct_1_crush_critical_table.csv",
-            "\"Glancing Strike. +0 hits. (Graze: +Ability Mod damage).\"",
+            "\"Minor fracture of ribs. Graze.\"",
             "\"\"");
 
         var exception = Assert.Throws<RulesDataException>(

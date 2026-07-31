@@ -62,12 +62,19 @@ public sealed class AttackFixtureTests
                 0,
                 ArmorType.Leather));
 
+        // The hits are unconditional; Sap is gated on the armour the defender is
+        // wearing.
         Assert.Contains(
-            new TraumaEffect(TraumaEffectKind.AdditionalHits, Magnitude: 8),
+            new TraumaEffect(TraumaEffectKind.AdditionalHits, Magnitude: 4),
             result.TraumaEffects);
         Assert.Contains(
-            new TraumaEffect(TraumaEffectKind.Prone),
+            new TraumaEffect(
+                TraumaEffectKind.Sap,
+                AppliesWhen: TraumaEffectCondition.NoLegArmor),
             result.TraumaEffects);
+        Assert.DoesNotContain(
+            result.TraumaEffects,
+            effect => effect.Kind is TraumaEffectKind.Slow or TraumaEffectKind.Incapacitated);
     }
 
     private static AttackFixture LoadFixture(string fileName)

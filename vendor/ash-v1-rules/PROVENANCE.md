@@ -50,6 +50,61 @@ itself. Subsequent deliberate corrections are recorded below.
 
 ## Post-vendoring corrections
 
+### 2026-08-01 — physical critical mechanics translated source-first
+
+CT-1 through CT-4 retain the MERP injury and only add a 5.5e mastery or
+condition when it directly represents an original mechanical effect. Index 5
+(MERP 01–05) now has no result for all four physical tables. Small flat damage
+awards use Graze only where selected by the conversion; explicit extra hits and
+bleeding otherwise remain numeric. Conditional armor and shield clauses remain
+conditional.
+
+MERP **stunned** results now map to the 5.5e **Restrained** condition rather
+than Incapacitated or Stunned. Prone is used only for an original knockdown;
+Incapacitated is reserved for results that actually prevent action; Dying starts
+death saves; and the crushed-throat result uses the 5.5e suffocation hazard.
+Invented Push, Vex, Slow, Topple, Cleave, and Sap effects were removed where the
+source result did not contain an equivalent.
+
+5.5e terminology was checked against the official 2024 D&D Beyond references:
+[Mastery Properties](https://www.dndbeyond.com/sources/dnd/br-2024/equipment#MasteryProperties)
+and the [Rules Glossary](https://www.dndbeyond.com/sources/dnd/br-2024/rules-glossary).
+
+Regression coverage records the user-specified conversions for indices 5–9 and
+16 verbatim, checks the remaining physical upper bands, and verifies that the
+new Restrained, Dying, Suffocating, and Push effects are structured data rather
+than presentation-only words.
+
+### 2026-07-31 — physical critical tables restored to MERP bands
+
+The earlier 1–18 refactor used the right lookup shape but populated it with an
+authored severity progression that shifted or replaced the published MERP
+outcomes. CT-1 through CT-4 now use one shared mapping: indices 1–4 are empty
+padding, index 5 begins band 01–05, and indices 11–18 map to 81–86, 87–89,
+91–96, 97–99, 101–106, 107–109, 111–116, and 117–119. Exact spectacular
+results 80, 90, 100, 110, and 120 remain intentionally omitted from the d20
+adaptation.
+
+The injury narratives retain their MERP meaning. Mechanical wording uses 5.5e
+weapon masteries and conditions where they are direct equivalents: Graze, Vex,
+Sap, Slow, Push, Topple, Cleave, Prone, Incapacitated, Stunned, Unconscious,
+Paralyzed, and delayed or instant death. Sap uses its normal next-attack window;
+it is not extended for an authored number of rounds.
+
+Changed:
+
+| File | Change |
+|---|---|
+| `data/ct_1_crush_critical_table.csv` | Restored the MERP band order, including the corrected 81–119 outcomes |
+| `data/ct_2_slash_critical_table.csv` | Restored the MERP band order and high-band limb, head, and spine outcomes |
+| `data/ct_3_puncture_critical_table.csv` | Restored the MERP band order and high-band lung, head, artery, and kidney outcomes |
+| `data/ct_4_unbalancing_critical_table.csv` | Removed grappling results that had leaked into bands 97–99 and 117–119; restored the unbalancing outcomes |
+| `rules/critical_hits_system.md` | Documented the shared lookup-to-band mapping and synchronized CT-1 through CT-4 with the runtime CSVs |
+
+Regression coverage asserts all 32 physical outcomes in bands 81–119 and the
+empty padding at indices 1–4. A future edit that shifts these rows now fails the
+rules test suite.
+
 ### 2026-07-27 — AT-3 and AT-4 corrected against published MERP tables
 
 **This package now diverges from its source in `D:\Code\ash_v1`.** A refresh that

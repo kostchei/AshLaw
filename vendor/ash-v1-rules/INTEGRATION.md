@@ -123,15 +123,19 @@ stable category IDs rather than copying its values into each item definition.
 
 ### 5.2 Physical critical tables
 
-The physical CSV tables provide ten indexed outcomes for each severity tier:
+Each physical CSV provides one shared 1–18 outcome vector:
 
 - `ct_1_crush_critical_table.csv`;
 - `ct_2_slash_critical_table.csv`;
 - `ct_3_puncture_critical_table.csv`;
 - `ct_4_unbalancing_critical_table.csv`.
 
-The trauma index is derived from the raw d20 roll according to the rulebook. The
-critical tier is derived from the net-roll margin.
+The runtime converts the raw d20 to a 1–10 sub-index and adds the critical
+tier's modifier (`A +0`, `B +2`, `C +4`, `D +6`, or `E +8`). Indices 1–4 are
+padding, and index 5 (MERP band 01–05) is also a no-effect result. Structured
+effects begin at index 6. MERP stunned results are represented by Restrained;
+Prone, Incapacitated, Dying, and mastery effects appear only when the source
+outcome supplies an equivalent mechanic.
 
 ### 5.3 Spellcasting rules
 

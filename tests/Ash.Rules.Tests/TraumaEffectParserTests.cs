@@ -9,6 +9,50 @@ public sealed class TraumaEffectParserTests
     private static RulesData Rules =>
         RulesDataLoader.LoadFromDirectory(RulesTestRepository.DataDirectory);
 
+    public static TheoryData<CriticalTableId, int, string> UserSpecifiedExamples =>
+        new()
+        {
+            { CriticalTableId.Crush, 5, "No critical effect." },
+            { CriticalTableId.Slash, 5, "No critical effect." },
+            { CriticalTableId.Puncture, 5, "No critical effect." },
+            { CriticalTableId.Unbalancing, 5, "No critical effect." },
+
+            { CriticalTableId.Crush, 6, "Minor fracture of ribs. Graze." },
+            { CriticalTableId.Slash, 6, "Minor calf wound. 1 hit per round." },
+            { CriticalTableId.Puncture, 6, "Glancing blow to side. +3 hits." },
+            { CriticalTableId.Unbalancing, 6, "Arm strike. +2 hits." },
+
+            { CriticalTableId.Crush, 7, "Blow to side. +4 hits. Sap." },
+            { CriticalTableId.Slash, 7, "Blow to upper leg. Graze." },
+            { CriticalTableId.Puncture, 7, "Thigh strike. +3 hits. If no leg armor: 3 hits per round." },
+            { CriticalTableId.Unbalancing, 7, "Leg strike. +4 hits. If no leg armor: Sap." },
+
+            { CriticalTableId.Crush, 8, "Blow to forearm. +5 hits. If no arm armor: Restrained 1 round." },
+            { CriticalTableId.Slash, 8, "Minor chest wound. Graze. 1 hit per round." },
+            { CriticalTableId.Puncture, 8, "Minor forearm wound. +2 hits. If no arm armor: Restrained 1 round." },
+            { CriticalTableId.Unbalancing, 8, "Chest strike. Graze and Push." },
+
+            { CriticalTableId.Crush, 9, "Blow to shield shoulder breaks shield. If no shield: shoulder broken, arm useless." },
+            { CriticalTableId.Slash, 9, "Minor forearm wound. Graze. 2 hits per round. Restrained 1 round." },
+            { CriticalTableId.Puncture, 9, "Strike along side of chest. 1 hit per round. Restrained 1 round." },
+            { CriticalTableId.Unbalancing, 9, "Blow to shield arm. Graze. Shield torn away. If no shield: Restrained 2 rounds." },
+
+            { CriticalTableId.Crush, 16, "Neck strike crushes throat. Cannot breathe. Restrained and Suffocating." },
+            { CriticalTableId.Slash, 16, "Sever weapon arm. 15 hits per round. Arm useless. Prone and Incapacitated." },
+            { CriticalTableId.Puncture, 16, "Nailed in lower back. Prone and Dying." },
+            { CriticalTableId.Unbalancing, 16, "Head slammed into stone. Prone and Dying." },
+        };
+
+    [Theory]
+    [MemberData(nameof(UserSpecifiedExamples))]
+    public void UserSpecifiedConversionsAreExact(
+        CriticalTableId table,
+        int index,
+        string expected)
+    {
+        Assert.Equal(expected, Rules.GetCriticalOutcome(table, index).Text);
+    }
+
     [Fact]
     public void EveryVendoredTraumaLineParsesWithoutUnaccountedMechanics()
     {
@@ -28,13 +72,142 @@ public sealed class TraumaEffectParserTests
         Assert.Equal(144, lines);
     }
 
+    public static TheoryData<CriticalTableId, int, string, string> PhysicalUpperBands =>
+        new()
+        {
+            { CriticalTableId.Crush, 11, "81-86", "Blow to weapon arm. +8 hits. Restrained 2 rounds. If no arm armor: tendon damaged, arm broken & useless." },
+            { CriticalTableId.Crush, 12, "87-89", "Shatter knee. +9 hits. Prone and Restrained 3 rounds." },
+            { CriticalTableId.Crush, 13, "91-96", "Blow to side of head. +20 hits. Unconscious for 4 hours. If no helm: skull crushed." },
+            { CriticalTableId.Crush, 14, "97-99", "Blast to chest sends ribcage through lungs. Prone and Dying." },
+            { CriticalTableId.Crush, 15, "101-106", "Blow breaks hip. +15 hits. Prone and Restrained 3 rounds." },
+            { CriticalTableId.Crush, 16, "107-109", "Neck strike crushes throat. Cannot breathe. Restrained and Suffocating." },
+            { CriticalTableId.Crush, 17, "111-116", "Shatter elbow in weapon arm. Arm useless. Restrained 5 rounds." },
+            { CriticalTableId.Crush, 18, "117-119", "Blow to side crushes chest cavity. Prone and Dying." },
+
+            { CriticalTableId.Slash, 11, "81-86", "Slash weapon arm. +10 hits. 1 hit per round. If no arm armor: muscle & tendon damage, arm useless." },
+            { CriticalTableId.Slash, 12, "87-89", "Destroys one eye. +10 hits. Restrained 30 rounds." },
+            { CriticalTableId.Slash, 13, "91-96", "Strike to side of head. +15 hits. Knocked out for 6 hours. If no helm: dies instantly." },
+            { CriticalTableId.Slash, 14, "97-99", "Sever lower leg. 20 hits per round. Prone and Incapacitated." },
+            { CriticalTableId.Slash, 15, "101-106", "Major abdominal wound. +10 hits. 8 hits per round. Restrained 4 rounds." },
+            { CriticalTableId.Slash, 16, "107-109", "Sever weapon arm. 15 hits per round. Arm useless. Prone and Incapacitated." },
+            { CriticalTableId.Slash, 17, "111-116", "Sever hand. 12 hits per round. Prone and Restrained 6 rounds." },
+            { CriticalTableId.Slash, 18, "117-119", "Sever spine. +20 hits. Prone and Paralyzed from the neck down permanently." },
+
+            { CriticalTableId.Puncture, 11, "81-86", "Strike to weapon arm. +10 hits. If no arm armor: bone broken and Restrained 3 rounds." },
+            { CriticalTableId.Puncture, 12, "87-89", "Strike through lower leg. Sever muscle. Restrained 3 rounds." },
+            { CriticalTableId.Puncture, 13, "91-96", "Strike through both lungs. Prone and Dying." },
+            { CriticalTableId.Puncture, 14, "97-99", "Strike to side of head. +10 hits. Knocked out for 6 hours. If no helm: dies instantly." },
+            { CriticalTableId.Puncture, 15, "101-106", "Major abdominal wound. +10 hits. 6 hits per round. Restrained 4 rounds." },
+            { CriticalTableId.Puncture, 16, "107-109", "Nailed in lower back. Prone and Dying." },
+            { CriticalTableId.Puncture, 17, "111-116", "Strike through leg. Artery severed. 12 hits per round. Prone and Dying." },
+            { CriticalTableId.Puncture, 18, "117-119", "Strike through kidneys. +9 hits. Prone and Dying." },
+
+            { CriticalTableId.Unbalancing, 11, "81-86", "Shot to side. Sideways 5 feet. Drop anything carried in hands. Restrained 3 rounds." },
+            { CriticalTableId.Unbalancing, 12, "87-89", "Side strike. Prone and Restrained 6 rounds." },
+            { CriticalTableId.Unbalancing, 13, "91-96", "Hard head strike. Push and Restrained 6 rounds. If no helm: Unconscious for 24 hours." },
+            { CriticalTableId.Unbalancing, 14, "97-99", "Brutal strike to belly. Prone. Drop anything carried in hands. Restrained 15 rounds." },
+            { CriticalTableId.Unbalancing, 15, "101-106", "Blow breaks leg. +12 hits. Restrained 1 round." },
+            { CriticalTableId.Unbalancing, 16, "107-109", "Head slammed into stone. Prone and Dying." },
+            { CriticalTableId.Unbalancing, 17, "111-116", "Great side shot. Sideways 5 feet. Prone. Lower leg broken. Restrained 7 rounds." },
+            { CriticalTableId.Unbalancing, 18, "117-119", "Shield shoulder struck. Restrained 9 rounds. If no shield: Prone and Incapacitated; arm broken & useless." },
+        };
+
+    [Theory]
+    [MemberData(nameof(PhysicalUpperBands))]
+    public void PhysicalUpperBandsKeepTheirMerpOutcome(
+        CriticalTableId table,
+        int index,
+        string merpBand,
+        string expected)
+    {
+        var outcome = Rules.GetCriticalOutcome(table, index);
+
+        Assert.Equal(expected, outcome.Text);
+        Assert.Matches(@"^\d{2,3}-\d{2,3}$", merpBand);
+    }
+
+    [Theory]
+    [InlineData(CriticalTableId.Crush)]
+    [InlineData(CriticalTableId.Slash)]
+    [InlineData(CriticalTableId.Puncture)]
+    [InlineData(CriticalTableId.Unbalancing)]
+    public void PhysicalPaddingIndicesHaveNoCriticalEffect(CriticalTableId table)
+    {
+        for (var index = 1; index <= 5; index++)
+        {
+            var outcome = Rules.GetCriticalOutcome(table, index);
+            Assert.Equal("No critical effect.", outcome.Text);
+            Assert.Empty(outcome.Effects);
+        }
+    }
+
+    [Theory]
+    [InlineData(CriticalTableId.Crush)]
+    [InlineData(CriticalTableId.Slash)]
+    [InlineData(CriticalTableId.Puncture)]
+    [InlineData(CriticalTableId.Unbalancing)]
+    public void EveryPublishedPhysicalBandProducesStructuredMechanics(
+        CriticalTableId table)
+    {
+        for (var index = 6; index <= 18; index++)
+        {
+            var outcome = Rules.GetCriticalOutcome(table, index);
+            Assert.NotEmpty(outcome.Effects);
+        }
+    }
+
+    [Fact]
+    public void MasteriesAndConditionsAreEffectsRatherThanNarrativeOnly()
+    {
+        var crush = Rules.GetCriticalOutcome(CriticalTableId.Crush, 7);
+        Assert.Contains(
+            new TraumaEffect(TraumaEffectKind.AdditionalHits, Magnitude: 4),
+            crush.Effects);
+        Assert.Contains(new TraumaEffect(TraumaEffectKind.Sap), crush.Effects);
+        Assert.DoesNotContain(
+            crush.Effects,
+            effect => effect.Kind is TraumaEffectKind.ForcedMovement or TraumaEffectKind.Push);
+
+        var unbalancing = Rules.GetCriticalOutcome(CriticalTableId.Unbalancing, 12);
+        Assert.Contains(new TraumaEffect(TraumaEffectKind.Prone), unbalancing.Effects);
+        Assert.Contains(
+            new TraumaEffect(
+                TraumaEffectKind.Restrained,
+                Duration: 6,
+                DurationUnit: TraumaDurationUnit.Rounds),
+            unbalancing.Effects);
+
+        var pushed = Rules.GetCriticalOutcome(CriticalTableId.Unbalancing, 8);
+        Assert.Contains(new TraumaEffect(TraumaEffectKind.Graze), pushed.Effects);
+        Assert.Contains(new TraumaEffect(TraumaEffectKind.Push), pushed.Effects);
+    }
+
+    [Fact]
+    public void SapUsesTheStandardNextAttackWindowRatherThanARoundCount()
+    {
+        var outcomes = new[]
+        {
+            Rules.GetCriticalOutcome(CriticalTableId.Crush, 7),
+            Rules.GetCriticalOutcome(CriticalTableId.Unbalancing, 7),
+            Rules.GetCriticalOutcome(CriticalTableId.Unbalancing, 10),
+        };
+
+        Assert.All(outcomes, outcome => Assert.Contains(
+            outcome.Effects,
+            effect => effect.Kind == TraumaEffectKind.Sap));
+        Assert.All(
+            outcomes.SelectMany(outcome => outcome.Effects)
+                .Where(effect => effect.Kind == TraumaEffectKind.Sap),
+            effect => Assert.Equal(TraumaDurationUnit.None, effect.DurationUnit));
+    }
+
     [Theory]
     // A signed modifier the parser has no rule for.
-    [InlineData("Chest blow. +5 hits. Knocked back 10 feet.", "Chest blow. -7 to morale. +5 hits.", "-7")]
+    [InlineData("Blow to side. +4 hits. Sap.", "Blow to side. -7 to morale. +4 hits.", "-7")]
     // A number bound to a mechanical unit.
-    [InlineData("Chest blow. +5 hits. Knocked back 10 feet.", "Chest blow. Slowed 3 rounds. Knocked back 10 feet.", "3 rounds")]
+    [InlineData("Blow to side. +4 hits. Sap.", "Blow to side. Slowed 3 rounds. +4 hits.", "3 rounds")]
     // A state-change verb with no supporting numbers.
-    [InlineData("Chest blow. +5 hits. Knocked back 10 feet.", "Chest blow. Target frozen 3 rounds. Knocked back 10 feet.", "frozen")]
+    [InlineData("Blow to side. +4 hits. Sap.", "Blow to side. Target frozen 3 rounds. +4 hits.", "frozen")]
     public void UnhandledMechanicalPhraseFailsTheLoad(
         string original,
         string replacement,
@@ -60,8 +233,8 @@ public sealed class TraumaEffectParserTests
         using var copy = TemporaryRulesData.Create();
         copy.Replace(
             "ct_1_crush_critical_table.csv",
-            "Chest blow. +5 hits. Knocked back 10 feet.",
-            "Ghastly flank laceration. Chest blow. +5 hits. Knocked back 10 feet.");
+            "Blow to side. +4 hits. Sap.",
+            "Ghastly flank laceration. Blow to side. +4 hits. Sap.");
 
         var rules = RulesDataLoader.LoadFromDirectory(copy.DirectoryPath);
 
@@ -120,8 +293,8 @@ public sealed class TraumaEffectParserTests
     [Fact]
     public void BleedIsNotAlsoCountedAsAdditionalHits()
     {
-        // Slash Tier B index 2: "Minor chest wound. +2 hits. 1 hit per round. Target has Disadvantage on next attack roll before start of your next turn."
-        var outcome = Rules.GetCriticalOutcome(CriticalTableId.Slash, CriticalTier.B, 2);
+        // Slash lookup 11: immediate trauma damage plus ongoing bleeding.
+        var outcome = Rules.GetCriticalOutcome(CriticalTableId.Slash, 11);
         Assert.Contains("1 hit per round", outcome.Text, StringComparison.Ordinal);
 
         var additional = outcome.Effects
@@ -131,8 +304,58 @@ public sealed class TraumaEffectParserTests
             .Where(effect => effect.Kind == TraumaEffectKind.Bleeding)
             .ToArray();
 
-        Assert.Equal(2, Assert.Single(additional).Magnitude);
+        Assert.Equal(10, Assert.Single(additional).Magnitude);
         Assert.Equal(1, Assert.Single(bleeds).Magnitude);
+    }
+
+    /// <summary>
+    /// Catastrophic but survivable results enter the Dying state, while an
+    /// explicitly instant death remains a Death effect.
+    /// </summary>
+    [Fact]
+    public void DyingAndInstantDeathRemainDistinct()
+    {
+        // Crush Tier E index 6 -> lookup 14 (MERP band 97-99).
+        var outcome = Rules.GetCriticalOutcome(CriticalTableId.Crush, CriticalTier.E, 6);
+        Assert.Contains(new TraumaEffect(TraumaEffectKind.Prone), outcome.Effects);
+        Assert.Contains(new TraumaEffect(TraumaEffectKind.Dying), outcome.Effects);
+        Assert.DoesNotContain(outcome.Effects, effect => effect.Kind == TraumaEffectKind.Death);
+
+        // Slash lookup 13 has a conditional instant death. It must not pick up a
+        // spurious duration, and the NoHelm condition must survive parsing.
+        var instant = Rules.GetCriticalOutcome(CriticalTableId.Slash, 13);
+        Assert.Contains("dies instantly", instant.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            new TraumaEffect(
+                TraumaEffectKind.Death,
+                AppliesWhen: TraumaEffectCondition.NoHelm),
+            instant.Effects);
+    }
+
+    [Fact]
+    public void CrushedThroatUsesRestrainedAndSuffocation()
+    {
+        var outcome = Rules.GetCriticalOutcome(CriticalTableId.Crush, 16);
+
+        Assert.Contains(new TraumaEffect(TraumaEffectKind.Restrained), outcome.Effects);
+        Assert.Contains(new TraumaEffect(TraumaEffectKind.Suffocating), outcome.Effects);
+        Assert.DoesNotContain(
+            outcome.Effects,
+            effect => effect.Kind is TraumaEffectKind.Stun or TraumaEffectKind.Death);
+    }
+
+    [Fact]
+    public void SeveredSpineIsCapturedAsPermanentParalysis()
+    {
+        // Slash Tier E index 10 -> lookup 18 (MERP band 117-119).
+        var outcome = Rules.GetCriticalOutcome(CriticalTableId.Slash, CriticalTier.E, 10);
+
+        Assert.Contains(
+            new TraumaEffect(
+                TraumaEffectKind.Paralyzed,
+                DurationUnit: TraumaDurationUnit.Permanent,
+                Detail: "from the neck down"),
+            outcome.Effects);
     }
 
     [Fact]

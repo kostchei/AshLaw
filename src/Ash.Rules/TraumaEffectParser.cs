@@ -103,6 +103,77 @@ internal static partial class TraumaEffectParser
                 AppliesWhen: condition));
         }
 
+        foreach (var match in MatchAll(RestrainedRegex(), clause, covered))
+        {
+            effects.Add(new TraumaEffect(
+                TraumaEffectKind.Restrained,
+                Duration: ParseOptionalInt(match, "duration"),
+                DurationUnit: match.Groups["duration"].Success
+                    ? TraumaDurationUnit.Rounds
+                    : TraumaDurationUnit.None,
+                AppliesWhen: condition));
+        }
+
+        foreach (var match in MatchAll(IncapacitatedRegex(), clause, covered))
+        {
+            effects.Add(new TraumaEffect(
+                TraumaEffectKind.Incapacitated,
+                Duration: ParseOptionalInt(match, "duration"),
+                DurationUnit: match.Groups["duration"].Success
+                    ? TraumaDurationUnit.Rounds
+                    : TraumaDurationUnit.None,
+                AppliesWhen: condition));
+        }
+
+        foreach (var _ in MatchAll(DyingRegex(), clause, covered))
+        {
+            effects.Add(new TraumaEffect(TraumaEffectKind.Dying, AppliesWhen: condition));
+        }
+
+        foreach (var _ in MatchAll(SuffocatingRegex(), clause, covered))
+        {
+            effects.Add(new TraumaEffect(
+                TraumaEffectKind.Suffocating,
+                AppliesWhen: condition));
+        }
+
+        foreach (var _ in MatchAll(SapRegex(), clause, covered))
+        {
+            effects.Add(new TraumaEffect(
+                TraumaEffectKind.Sap,
+                AppliesWhen: condition));
+        }
+
+        foreach (var _ in MatchAll(VexRegex(), clause, covered))
+        {
+            effects.Add(new TraumaEffect(TraumaEffectKind.Vex, AppliesWhen: condition));
+        }
+
+        foreach (var _ in MatchAll(ToppleRegex(), clause, covered))
+        {
+            effects.Add(new TraumaEffect(TraumaEffectKind.Topple, AppliesWhen: condition));
+        }
+
+        foreach (var _ in MatchAll(GrazeRegex(), clause, covered))
+        {
+            effects.Add(new TraumaEffect(TraumaEffectKind.Graze, AppliesWhen: condition));
+        }
+
+        foreach (var _ in MatchAll(CleaveRegex(), clause, covered))
+        {
+            effects.Add(new TraumaEffect(TraumaEffectKind.Cleave, AppliesWhen: condition));
+        }
+
+        foreach (var _ in MatchAll(SlowRegex(), clause, covered))
+        {
+            effects.Add(new TraumaEffect(TraumaEffectKind.Slow, AppliesWhen: condition));
+        }
+
+        foreach (var _ in MatchAll(PushRegex(), clause, covered))
+        {
+            effects.Add(new TraumaEffect(TraumaEffectKind.Push, AppliesWhen: condition));
+        }
+
         foreach (var match in MatchAll(UnconsciousRegex(), clause, covered))
         {
             effects.Add(new TraumaEffect(
@@ -119,9 +190,29 @@ internal static partial class TraumaEffectParser
             effects.Add(new TraumaEffect(TraumaEffectKind.Prone, AppliesWhen: condition));
         }
 
-        foreach (var _ in MatchAll(DeathRegex(), clause, covered))
+        foreach (var match in MatchAll(DeathRegex(), clause, covered))
         {
-            effects.Add(new TraumaEffect(TraumaEffectKind.Death, AppliesWhen: condition));
+            // MERP's delayed-death bands ("dies in 6 rounds") carry a countdown;
+            // the instant-death bands do not. Both are the same effect kind, told
+            // apart by whether a duration was captured.
+            effects.Add(new TraumaEffect(
+                TraumaEffectKind.Death,
+                Duration: ParseOptionalInt(match, "duration"),
+                DurationUnit: match.Groups["duration"].Success
+                    ? TraumaDurationUnit.Rounds
+                    : TraumaDurationUnit.None,
+                AppliesWhen: condition));
+        }
+
+        foreach (var match in MatchAll(ParalysisRegex(), clause, covered))
+        {
+            effects.Add(new TraumaEffect(
+                TraumaEffectKind.Paralyzed,
+                AppliesWhen: condition,
+                DurationUnit: TraumaDurationUnit.Permanent,
+                Detail: match.Groups["detail"].Success
+                    ? Normalize(match.Groups["detail"].Value)
+                    : "body"));
         }
 
         foreach (var match in MatchAll(ForcedMovementRegex(), clause, covered))
@@ -294,23 +385,77 @@ internal static partial class TraumaEffectParser
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex StunRegex();
 
+    /// <summary>
+    /// A physical injury can impose the official 5.5e Restrained condition for
+    /// a fixed number of rounds or until another rule ends it.
+    /// </summary>
+    [GeneratedRegex(
+        @"\brestrained(?:\s+for)?(?:\s+(?<duration>\d+)\s+(?:rounds?|rds?))?\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex RestrainedRegex();
+
+    /// <summary>
+    /// Incapacitated can be durationless when another state, such as a lasting
+    /// catastrophic injury, controls when it ends.
+    /// </summary>
+    [GeneratedRegex(
+        @"\bincapacitated(?:\s+for)?(?:\s+(?<duration>\d+)\s+(?:rounds?|rds?))?\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex IncapacitatedRegex();
+
+    [GeneratedRegex(@"\bdying\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex DyingRegex();
+
+    [GeneratedRegex(@"\bsuffocating\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SuffocatingRegex();
+
+    [GeneratedRegex(@"\bsap\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SapRegex();
+
+    [GeneratedRegex(@"\bvex\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex VexRegex();
+
+    [GeneratedRegex(@"\btopple\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ToppleRegex();
+
+    [GeneratedRegex(@"\bgraze\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex GrazeRegex();
+
+    [GeneratedRegex(@"\bcleave\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex CleaveRegex();
+
+    [GeneratedRegex(@"\bslow\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SlowRegex();
+
+    [GeneratedRegex(@"\bpush\b(?!\s+\d)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex PushRegex();
+
     [GeneratedRegex(
         @"\b(?:unconscious|knocked out)(?:\s+for\s+(?<duration>\d+)\s+hours?)?",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex UnconsciousRegex();
 
     [GeneratedRegex(
-        @"\b(?:knocked down|prone position|falls?\s+prone|down and unconscious)\b",
+        @"\b(?:knocked down|prone position|falls?\s+prone|down and unconscious|prone)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ProneRegex();
 
     [GeneratedRegex(
-        @"\b(?:dies instantly|instant death|(?:skull|chest|head|body|heart|throat)?\s*crushed)\b",
+        @"\b(?:dies instantly|instant death|dies?\s+in\s+(?<duration>\d+)\s+(?:rounds?|rds?)|(?:skull|chest|head|body|heart|throat)?\s*crushed)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DeathRegex();
 
+    /// <summary>
+    /// Permanent paralysis, as distinct from the temporary loss of a single limb
+    /// that <see cref="DisableLimbRegex"/> models.
+    /// </summary>
     [GeneratedRegex(
-        @"(?:(?<direction>knocked(?:\s+back)?|sideways)\s+(?<distance>\d+)\s*(?:feet|foot|ft|')(?:\s+(?<trailing>sideways|backwards?|forwards?))?|(?:reduces?\s+(?:target's\s+)?speed\s+by|speed\s+is\s+reduced\s+by)\s+(?<distance>\d+)\s*(?:feet|foot|ft|'))",
+        @"\bparaly(?:z|s)ed(?:\s+(?<detail>from\s+the\s+(?:neck|waist)\s+down))?(?:\s+permanently)?",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ParalysisRegex();
+
+    [GeneratedRegex(
+        @"(?:(?<direction>knocked(?:\s+back)?|push(?:ed)?(?:\s+back)?|sideways)\s+(?<distance>\d+)\s*(?:feet|foot|ft|')(?:\s+(?<trailing>sideways|backwards?|forwards?))?|(?:reduces?\s+(?:target's\s+)?speed\s+by|speed\s+is\s+reduced\s+by)\s+(?<distance>\d+)\s*(?:feet|foot|ft|'))",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ForcedMovementRegex();
 
@@ -335,7 +480,7 @@ internal static partial class TraumaEffectParser
     private static partial Regex BreakBoneRegex();
 
     [GeneratedRegex(
-        @"\b(?:(?<limb>arm|leg)\s+(?:broken(?:\s*[&]\s*|\s+and\s+))?useless|sever\s+(?<limb>hand)|shatter\s+(?<limb>elbow|knee))\b",
+        @"\b(?:(?<limb>arm|leg)\s+(?:broken(?:\s*[&]\s*|\s+and\s+))?useless|sever\s+(?<limb>hand|foot|spine|(?:lower\s+|upper\s+)?(?:leg|arm)|weapon\s+arm)|shatter\s+(?<limb>elbow|knee))\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DisableLimbRegex();
 
@@ -358,7 +503,7 @@ internal static partial class TraumaEffectParser
     /// would apply unconditionally instead of being gated.
     /// </remarks>
     [GeneratedRegex(
-        @"[+-]\s*\d+|\b\d+\s*(?:hits?|rounds?|rnds?|rds?|hours?|feet|foot|ft|')|\bif\s+no\b|\b(?:broken|useless|crushed|stunned|unconscious|prone|dies|death|killed|paralyz(?:ed|es)|blinded|deafened|bleeds?|bleeding|drops?)\b",
+        @"[+-]\s*\d+|\b\d+\s*(?:hits?|rounds?|rnds?|rds?|hours?|feet|foot|ft|')|\bif\s+no\b|\b(?:broken|useless|crushed|stunned|restrained|incapacitated|unconscious|prone|dying|suffocating|dies|death|killed|paralyz(?:ed|es)|blinded|deafened|bleeds?|bleeding|drops?|graze|vex|sap|topple|cleave|slow|push(?:ed)?)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex UnaccountedMechanicRegex();
 }

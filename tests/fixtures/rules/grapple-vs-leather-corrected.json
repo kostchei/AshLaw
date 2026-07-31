@@ -18,6 +18,6 @@
     "critical_tier": "A",
     "trauma_index": 7,
     "mishap": false,
-    "trauma_text": "Leg entangled. +8 hits. Target automatically fall prone."
+    "trauma_text": "Leg strike. +4 hits. If no leg armor: Sap."
   }
 }
