@@ -6,6 +6,13 @@ namespace Ash.Rules.Tests;
 /// </summary>
 public sealed class DefenseDerivationTests
 {
+    private static AbilityBonusTable Bonuses { get; } =
+        CharacterCreationLoader.LoadFromFile(
+            Path.Combine(
+                RulesTestRepository.Root,
+                "data",
+                CharacterCreationLoader.FileName)).AbilityBonuses;
+
     [Theory]
     [InlineData(ArmorType.None, 0)]
     [InlineData(ArmorType.Leather, 0)]
@@ -62,13 +69,13 @@ public sealed class DefenseDerivationTests
     public void ChainUnlocksFullAgilityAtStrengthEighteen()
     {
         // Chain's -4 is exactly offset by a +4 bonus, which is Strength 18.
-        Assert.Equal(4, AbilityScores.BonusFor(18));
+        Assert.Equal(4, Bonuses.BonusFor(18));
         Assert.Equal(
             2,
             DefenseDerivation.DexterityContribution(
                 ArmorType.Chain,
                 dexterityBonus: 2,
-                strengthBonus: AbilityScores.BonusFor(18)));
+                strengthBonus: Bonuses.BonusFor(18)));
 
         // A point short and the suit eats one point of it.
         Assert.Equal(
@@ -76,13 +83,13 @@ public sealed class DefenseDerivationTests
             DefenseDerivation.DexterityContribution(
                 ArmorType.Chain,
                 dexterityBonus: 2,
-                strengthBonus: AbilityScores.BonusFor(16)));
+                strengthBonus: Bonuses.BonusFor(16)));
     }
 
     [Fact]
     public void NoMortalStrengthFullyOffsetsPlate()
     {
-        var strongest = AbilityScores.BonusFor(AbilityScores.MaximumScore);
+        var strongest = Bonuses.BonusFor(AbilityScores.MaximumScore);
 
         Assert.Equal(5, strongest);
         Assert.Equal(

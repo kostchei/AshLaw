@@ -15,8 +15,11 @@ public enum Ability
 /// </summary>
 /// <remarks>
 /// <para>
-/// <c>bonus = floor((score - 10) / 2)</c>, with scores from 3 to 20, so a
-/// mortal tops out at +5 before magic.
+/// A score is just a number here. What it is worth comes from
+/// <see cref="AbilityBonusTable"/>, which is loaded from data so the curve can
+/// be retuned without touching code. The shipped curve is
+/// <c>floor((score - 10) / 2)</c> over scores of 3 to 20, so a mortal tops out
+/// at +5 before magic.
 /// </para>
 /// <para>
 /// This matters beyond attack rolls: armour offsets its dexterity penalty with
@@ -84,18 +87,6 @@ public sealed record AbilityScores
         Wisdom,
         Charisma,
     ];
-
-    /// <summary>The bonus a score grants: <c>floor((score - 10) / 2)</c>.</summary>
-    public static int BonusFor(int score)
-    {
-        var offset = score - 10;
-
-        // Integer division truncates toward zero, which would make -1 out of
-        // -3; the curve floors, so a score of 9 is -1 and a score of 3 is -4.
-        return offset >= 0 ? offset / 2 : (offset - 1) / 2;
-    }
-
-    public int BonusOf(Ability ability) => BonusFor(this[ability]);
 
     public static AbilityScores FromOrder(IReadOnlyList<int> scores)
     {

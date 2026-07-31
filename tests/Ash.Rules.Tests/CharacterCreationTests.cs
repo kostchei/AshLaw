@@ -2,6 +2,15 @@ namespace Ash.Rules.Tests;
 
 public sealed class CharacterCreationTests
 {
+    private static CharacterCreationData Data { get; } =
+        CharacterCreationLoader.LoadFromFile(
+            Path.Combine(
+                RulesTestRepository.Root,
+                "data",
+                CharacterCreationLoader.FileName));
+
+    private static AbilityBonusTable Bonuses => Data.AbilityBonuses;
+
     [Theory]
     [InlineData(3, -4)]
     [InlineData(6, -2)]
@@ -14,7 +23,7 @@ public sealed class CharacterCreationTests
     [InlineData(20, 5)]
     public void TheBonusCurveFloorsOddScores(int score, int expected)
     {
-        Assert.Equal(expected, AbilityScores.BonusFor(score));
+        Assert.Equal(expected, Bonuses.BonusFor(score));
     }
 
     [Fact]
@@ -29,19 +38,23 @@ public sealed class CharacterCreationTests
     [Fact]
     public void TheSameSeedRollsTheSameCharacter()
     {
-        var first = CharacterCreation.RollIronman(
-            new Dice(20260731),
+        var first = CharacterCreation.Choose(
+            Data,
+            CharacterCreation.RollIronman(Data, new Dice(20260731)),
             CharacterClass.Fighter);
-        var second = CharacterCreation.RollIronman(
-            new Dice(20260731),
+        var second = CharacterCreation.Choose(
+            Data,
+            CharacterCreation.RollIronman(Data, new Dice(20260731)),
             CharacterClass.Fighter);
 
         Assert.Equal(first, second);
         Assert.Equal(
             CharacterCreation.RollUnearthedArcana(
+                Data,
                 new Dice(99),
                 CharacterClass.Wizard),
             CharacterCreation.RollUnearthedArcana(
+                Data,
                 new Dice(99),
                 CharacterClass.Wizard));
     }
@@ -62,9 +75,7 @@ public sealed class CharacterCreationTests
         var dice = new Dice(4242);
         for (var character = 0; character < 200; character++)
         {
-            var rolled = CharacterCreation.RollIronman(
-                dice,
-                CharacterClass.Fighter);
+            var rolled = CharacterCreation.RollIronman(Data, dice);
             var scores = rolled.Scores.InOrder;
 
             Assert.True(
@@ -84,14 +95,14 @@ public sealed class CharacterCreationTests
         // Two scores of 15 are rare, so most sets are discarded: the attempt
         // count is the evidence that rerolling happens at all.
         var dice = new Dice(11);
-        var rolled = CharacterCreation.RollIronman(dice, CharacterClass.Rogue);
+        var rolled = CharacterCreation.RollIronman(Data, dice);
 
         Assert.True(
             rolled.Attempts > 1,
             "This seed was chosen because it takes more than one attempt.");
-        Assert.False(CharacterCreation.IsPlayable([14, 14, 14, 14, 14, 14]));
-        Assert.False(CharacterCreation.IsPlayable([18, 18, 5, 5, 10, 10]));
-        Assert.True(CharacterCreation.IsPlayable([18, 15, 5, 10, 10, 10]));
+        Assert.False(Data.Ironman.IsPlayable([14, 14, 14, 14, 14, 14]));
+        Assert.False(Data.Ironman.IsPlayable([18, 18, 5, 5, 10, 10]));
+        Assert.True(Data.Ironman.IsPlayable([18, 15, 5, 10, 10, 10]));
     }
 
     [Theory]
@@ -104,7 +115,7 @@ public sealed class CharacterCreationTests
         Ability first,
         Ability last)
     {
-        var priority = CharacterCreation.PriorityFor(characterClass);
+        var priority = Data.UnearthedArcana.PriorityFor(characterClass);
 
         Assert.Equal(first, priority[0]);
         Assert.Equal(last, priority[^1]);
@@ -122,6 +133,7 @@ public sealed class CharacterCreationTests
         for (var character = 0; character < Characters; character++)
         {
             var rolled = CharacterCreation.RollUnearthedArcana(
+                Data,
                 dice,
                 CharacterClass.Fighter);
             primary += rolled.Scores.Strength;
@@ -136,18 +148,47 @@ public sealed class CharacterCreationTests
             $"dump {dump / (double)Characters:F1}.");
         Assert.Equal(
             [8, 7, 6, 5, 4, 3],
-            CharacterCreation.UnearthedArcanaPools);
+            Data.UnearthedArcana.Pools);
+    }
+
+    [Fact]
+    public void IronmanRollsFirstAndChoosesSecond()
+    {
+        var rolled = CharacterCreation.RollIronman(Data, new Dice(2026));
+
+        // The scores exist before any class does: what you can be is decided
+        // by looking at them.
+        Assert.True(Data.Ironman.IsPlayable(rolled.Scores.InOrder));
+
+        var fighter = CharacterCreation.Choose(
+            Data,
+            rolled,
+            CharacterClass.Fighter);
+        var wizard = CharacterCreation.Choose(
+            Data,
+            rolled,
+            CharacterClass.Wizard);
+
+        // Choosing does not re-roll: the same dice, two different lives.
+        Assert.Equal(rolled.Scores, fighter.Scores);
+        Assert.Equal(rolled.Scores, wizard.Scores);
+        Assert.Equal(rolled.Attempts, fighter.Attempts);
+        Assert.Equal(CharacterClass.Fighter, fighter.Class);
+        Assert.Equal(CharacterClass.Wizard, wizard.Class);
+        Assert.Equal(CharacterCreationMethod.Ironman, fighter.Method);
+        Assert.Equal(2, fighter.TalentRolls);
     }
 
     [Fact]
     public void AHumanTakesTwoTalentRolls()
     {
         var rolled = CharacterCreation.RollUnearthedArcana(
+            Data,
             new Dice(1),
             CharacterClass.Cleric);
 
         Assert.Equal(Ancestry.Human, rolled.Ancestry);
         Assert.Equal(2, rolled.TalentRolls);
-        Assert.Equal(CharacterCreation.HumanTalentRolls, rolled.TalentRolls);
+        Assert.Equal(Data.AncestryOf(Ancestry.Human).TalentRolls, rolled.TalentRolls);
     }
 }

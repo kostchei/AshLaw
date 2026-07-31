@@ -13,18 +13,26 @@ namespace Ash.Rules;
 public static class AttackDerivation
 {
     /// <summary>The ability a weapon is swung with.</summary>
-    public static Ability GoverningAbility(AbilityScores scores, bool finesse)
+    public static Ability GoverningAbility(
+        AbilityBonusTable bonuses,
+        AbilityScores scores,
+        bool finesse)
     {
+        ArgumentNullException.ThrowIfNull(bonuses);
         ArgumentNullException.ThrowIfNull(scores);
         return finesse &&
-            scores.BonusOf(Ability.Dexterity) > scores.BonusOf(Ability.Strength)
+            bonuses.BonusOf(scores, Ability.Dexterity) >
+                bonuses.BonusOf(scores, Ability.Strength)
             ? Ability.Dexterity
             : Ability.Strength;
     }
 
     /// <summary>What the wielder's body adds to the attack.</summary>
-    public static int WeaponAbilityBonus(AbilityScores scores, bool finesse) =>
-        scores.BonusOf(GoverningAbility(scores, finesse));
+    public static int WeaponAbilityBonus(
+        AbilityBonusTable bonuses,
+        AbilityScores scores,
+        bool finesse) =>
+        bonuses.BonusOf(scores, GoverningAbility(bonuses, scores, finesse));
 
     /// <summary>
     /// The Attack Modifier: what the class has learned, what the body brings,
@@ -42,6 +50,7 @@ public static class AttackDerivation
     /// </summary>
     public static int AttackModifierFor(
         ClassProgressionTable progression,
+        AbilityBonusTable bonuses,
         CharacterClass characterClass,
         int level,
         AbilityScores scores,
@@ -51,7 +60,7 @@ public static class AttackDerivation
         ArgumentNullException.ThrowIfNull(progression);
         return AttackModifier(
             progression.GetAttackModifier(characterClass, level),
-            WeaponAbilityBonus(scores, finesse),
+            WeaponAbilityBonus(bonuses, scores, finesse),
             situational);
     }
 }

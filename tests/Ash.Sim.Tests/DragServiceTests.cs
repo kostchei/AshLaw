@@ -287,7 +287,11 @@ public sealed class DragServiceTests
     {
         var world = Build(out _, out var actor, out var apple, out _);
         var physics = new PhysicsSystem(world);
-        var gate = new WorldSaveGate(world, physics, "ash.test-content.v1");
+        var gate = new WorldSaveGate(
+            world,
+            physics,
+            new Ash.Rules.Dice(1),
+            "ash.test-content.v1");
         var drag = new DragService(world);
         var directory = Path.Combine(
             Path.GetTempPath(),

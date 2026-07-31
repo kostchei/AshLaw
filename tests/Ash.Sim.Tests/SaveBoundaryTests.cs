@@ -18,7 +18,7 @@ public sealed class SaveBoundaryTests : IDisposable
     public void ASafeWorldSavesImmediately()
     {
         var world = BuildWorld(out var physics, out _);
-        var gate = new WorldSaveGate(world, physics, Fingerprint);
+        var gate = new WorldSaveGate(world, physics, new Ash.Rules.Dice(1), Fingerprint);
         var path = Path.Combine(_directory, "immediate.ashw");
 
         var attempt = gate.Request(path, currentMapId: 0);
@@ -36,7 +36,7 @@ public sealed class SaveBoundaryTests : IDisposable
     {
         var world = BuildWorld(out var physics, out var crate);
         var transfers = new ObjectTransferService(world);
-        var gate = new WorldSaveGate(world, physics, Fingerprint);
+        var gate = new WorldSaveGate(world, physics, new Ash.Rules.Dice(1), Fingerprint);
         var path = Path.Combine(_directory, "deferred.ashw");
         Assert.True(
             transfers.Execute(
@@ -90,7 +90,7 @@ public sealed class SaveBoundaryTests : IDisposable
     {
         var world = BuildWorld(out var physics, out var crate);
         var transfers = new ObjectTransferService(world);
-        var gate = new WorldSaveGate(world, physics, Fingerprint);
+        var gate = new WorldSaveGate(world, physics, new Ash.Rules.Dice(1), Fingerprint);
         var path = Path.Combine(_directory, "mid-commit.ashw");
         SaveAttempt? fromInsideCommit = null;
         world.Committed += _ =>
@@ -118,7 +118,7 @@ public sealed class SaveBoundaryTests : IDisposable
     public void ARequestFromInsideATickWaitsForTheTickToFinish()
     {
         var world = BuildWorld(out var physics, out _);
-        var gate = new WorldSaveGate(world, physics, Fingerprint);
+        var gate = new WorldSaveGate(world, physics, new Ash.Rules.Dice(1), Fingerprint);
         var path = Path.Combine(_directory, "mid-tick.ashw");
         SaveAttempt? fromInsideTick = null;
 
@@ -159,7 +159,7 @@ public sealed class SaveBoundaryTests : IDisposable
     public void RepeatedSaveLoadCyclesNeitherDuplicateNorOrphanObjects()
     {
         var world = BuildWorld(out var physics, out _);
-        var gate = new WorldSaveGate(world, physics, Fingerprint);
+        var gate = new WorldSaveGate(world, physics, new Ash.Rules.Dice(1), Fingerprint);
         var path = Path.Combine(_directory, "cycle.ashw");
         Assert.True(gate.Request(path, currentMapId: 0).Saved);
 
@@ -195,6 +195,7 @@ public sealed class SaveBoundaryTests : IDisposable
             var cycled = new WorldSaveGate(
                 loaded.Objects,
                 new PhysicsSystem(loaded.Objects, startTick: loaded.SimulationTick),
+                Ash.Rules.Dice.FromState(loaded.DiceState),
                 Fingerprint);
             Assert.True(cycled.Request(path, currentMapId: 0).Saved);
             Assert.Equal(firstBytes, File.ReadAllBytes(path));
@@ -244,7 +245,7 @@ public sealed class SaveBoundaryTests : IDisposable
     public void AnInvalidWorldIsNeverWrittenAsIfItWereValid()
     {
         var world = BuildWorld(out var physics, out var crate);
-        var gate = new WorldSaveGate(world, physics, Fingerprint);
+        var gate = new WorldSaveGate(world, physics, new Ash.Rules.Dice(1), Fingerprint);
         var path = Path.Combine(_directory, "invalid.ashw");
 
         // A second solid volume in the same space: spawning does not validate

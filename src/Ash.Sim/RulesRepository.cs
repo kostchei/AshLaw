@@ -24,11 +24,19 @@ namespace Ash.Sim;
 public static class RulesRepository
 {
     private static readonly Lazy<RulesData> Loaded = new(Load);
+    private static readonly Lazy<CharacterCreationData> LoadedCreation =
+        new(LoadCreation);
 
     public static RulesData Rules => Loaded.Value;
 
     public static ClassProgressionTable ClassProgression =>
         Loaded.Value.ClassProgression;
+
+    /// <summary>This game's own creation rules, not the vendored package's.</summary>
+    public static CharacterCreationData CharacterCreation => LoadedCreation.Value;
+
+    public static AbilityBonusTable AbilityBonuses =>
+        LoadedCreation.Value.AbilityBonuses;
 
     private static RulesData Load()
     {
@@ -36,16 +44,22 @@ public static class RulesRepository
         return RulesDataLoader.LoadFromDirectory(directory);
     }
 
-    private static string FindDataDirectory()
+    private static CharacterCreationData LoadCreation()
+    {
+        var directory = FindRepositoryDirectory("data");
+        return CharacterCreationLoader.LoadFromFile(
+            Path.Combine(directory, CharacterCreationLoader.FileName));
+    }
+
+    private static string FindDataDirectory() =>
+        FindRepositoryDirectory(Path.Combine("vendor", "ash-v1-rules", "data"));
+
+    private static string FindRepositoryDirectory(string relativePath)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            var candidate = Path.Combine(
-                directory.FullName,
-                "vendor",
-                "ash-v1-rules",
-                "data");
+            var candidate = Path.Combine(directory.FullName, relativePath);
             if (Directory.Exists(candidate))
             {
                 return candidate;
@@ -55,9 +69,8 @@ public static class RulesRepository
         }
 
         throw new RulesResolutionException(
-            "The rules data was not found by walking up from " +
-            $"'{AppContext.BaseDirectory}' to a directory containing " +
-            "vendor/ash-v1-rules/data. Running from source finds it; an " +
+            $"'{relativePath}' was not found by walking up from " +
+            $"'{AppContext.BaseDirectory}'. Running from source finds it; an " +
             "exported build will not until the rules data is packaged with " +
             "the game.");
     }

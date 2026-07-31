@@ -15,6 +15,7 @@ public sealed record ObjectWorldSnapshot(
     string ContentFingerprint,
     long SimulationTick,
     ushort CurrentMapId,
+    ulong DiceState,
     ObjectStoreSnapshot Objects,
     IReadOnlyList<WorldMapSnapshot> Maps);
 
@@ -26,7 +27,8 @@ public sealed record LoadedObjectWorld(
     ObjectStore Objects,
     IReadOnlyList<WorldMap> Maps,
     long SimulationTick,
-    ushort CurrentMapId);
+    ushort CurrentMapId,
+    ulong DiceState);
 
 public sealed class ObjectWorldSaveException : InvalidOperationException
 {
@@ -85,6 +87,10 @@ public static class ObjectWorldSave
         WriteText(buffer, snapshot.ContentFingerprint);
         WriteInt64(buffer, snapshot.SimulationTick);
         WriteUInt16(buffer, snapshot.CurrentMapId);
+
+        // The dice are world sequence state: a loaded world must roll what it
+        // would have rolled, not start a fresh sequence.
+        WriteUInt64(buffer, snapshot.DiceState);
         WriteInt32(buffer, payload.Length);
         buffer.Write(checksum);
         buffer.Write(payload);
@@ -132,6 +138,7 @@ public static class ObjectWorldSave
 
         var tick = reader.ReadInt64();
         var currentMapId = reader.ReadUInt16();
+        var diceState = formatVersion >= 5 ? reader.ReadUInt64() : 0UL;
         var payloadLength = reader.ReadInt32();
         if (payloadLength < 0 || payloadLength > MaximumPayloadBytes)
         {
@@ -159,6 +166,7 @@ public static class ObjectWorldSave
             fingerprint,
             tick,
             currentMapId,
+            diceState,
             objects,
             maps);
     }
@@ -171,7 +179,8 @@ public static class ObjectWorldSave
         ObjectStore objects,
         string contentFingerprint,
         long simulationTick,
-        ushort currentMapId)
+        ushort currentMapId,
+        ulong diceState = 0)
     {
         ArgumentNullException.ThrowIfNull(objects);
         ArgumentException.ThrowIfNullOrWhiteSpace(contentFingerprint);
@@ -179,6 +188,7 @@ public static class ObjectWorldSave
             contentFingerprint,
             simulationTick,
             currentMapId,
+            diceState,
             objects.Capture(),
             objects.Maps.All.Select(map => map.Capture()).ToArray());
     }
@@ -222,7 +232,8 @@ public static class ObjectWorldSave
             objects,
             maps,
             snapshot.SimulationTick,
-            snapshot.CurrentMapId);
+            snapshot.CurrentMapId,
+            snapshot.DiceState);
     }
 
     public static LoadedObjectWorld RestoreFile(
@@ -791,6 +802,13 @@ public static class ObjectWorldSave
         buffer.Write(bytes);
     }
 
+    private static void WriteUInt64(Stream buffer, ulong value)
+    {
+        Span<byte> bytes = stackalloc byte[sizeof(ulong)];
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes, value);
+        buffer.Write(bytes);
+    }
+
     private static void WriteUInt16(Stream buffer, ushort value)
     {
         Span<byte> bytes = stackalloc byte[sizeof(ushort)];
@@ -840,6 +858,9 @@ public static class ObjectWorldSave
 
         public long ReadInt64() =>
             BinaryPrimitives.ReadInt64LittleEndian(ReadBytes(sizeof(long)));
+
+        public ulong ReadUInt64() =>
+            BinaryPrimitives.ReadUInt64LittleEndian(ReadBytes(sizeof(ulong)));
 
         public ushort ReadUInt16() =>
             BinaryPrimitives.ReadUInt16LittleEndian(ReadBytes(sizeof(ushort)));

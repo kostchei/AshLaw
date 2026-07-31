@@ -16,13 +16,18 @@ public sealed class ActorSheetTests
         using var map = new WorldMap(store, 0, width: 8, depth: 8);
         var fighter = store.Create(Actor("Fighter", strength: 16, dexterity: 12));
         var sword = store.Create(Weapon("Longsword", fighter, finesse: false));
-        var sheets = new ActorSheets(store, RulesRepository.ClassProgression);
+        var sheets = new ActorSheets(
+            store,
+            RulesRepository.ClassProgression,
+            RulesRepository.AbilityBonuses);
 
         var sheet = sheets.For(fighter);
 
         // Fighter 1 is +1; Strength 16 is +3.
         Assert.Equal(1, sheet.ClassAttackModifier);
-        Assert.Equal(3, store.Get(fighter).Abilities.BonusOf(Ability.Strength));
+        Assert.Equal(3, RulesRepository.AbilityBonuses.BonusOf(
+                store.Get(fighter).Abilities,
+                Ability.Strength));
         Assert.Equal(4, sheet.AttackModifier);
         Assert.Equal(Ability.Strength, sheet.GoverningAbility);
         Assert.Equal(sword, sheet.Weapon);
@@ -41,7 +46,10 @@ public sealed class ActorSheetTests
                 Level = 4,
             });
         var dagger = store.Create(Weapon("Dagger", rogue, finesse: true));
-        var sheets = new ActorSheets(store, RulesRepository.ClassProgression);
+        var sheets = new ActorSheets(
+            store,
+            RulesRepository.ClassProgression,
+            RulesRepository.AbilityBonuses);
 
         var sheet = sheets.For(rogue);
 
@@ -73,7 +81,10 @@ public sealed class ActorSheetTests
         using var map = new WorldMap(store, 0, width: 8, depth: 8);
         var actor = store.Create(Actor("Even", strength: 14, dexterity: 14));
         store.Create(Weapon("Rapier", actor, finesse: true));
-        var sheets = new ActorSheets(store, RulesRepository.ClassProgression);
+        var sheets = new ActorSheets(
+            store,
+            RulesRepository.ClassProgression,
+            RulesRepository.AbilityBonuses);
 
         Assert.Equal(Ability.Strength, sheets.For(actor).GoverningAbility);
     }
@@ -84,7 +95,10 @@ public sealed class ActorSheetTests
         var store = new ObjectStore();
         using var map = new WorldMap(store, 0, width: 8, depth: 8);
         var actor = store.Create(Actor("Brawler", strength: 14, dexterity: 10));
-        var sheets = new ActorSheets(store, RulesRepository.ClassProgression);
+        var sheets = new ActorSheets(
+            store,
+            RulesRepository.ClassProgression,
+            RulesRepository.AbilityBonuses);
 
         var sheet = sheets.For(actor);
 
@@ -99,7 +113,10 @@ public sealed class ActorSheetTests
         var store = new ObjectStore();
         using var map = new WorldMap(store, 0, width: 8, depth: 8);
         var actor = store.Create(Actor("Guard", strength: 14, dexterity: 16));
-        var sheets = new ActorSheets(store, RulesRepository.ClassProgression);
+        var sheets = new ActorSheets(
+            store,
+            RulesRepository.ClassProgression,
+            RulesRepository.AbilityBonuses);
 
         // Unarmoured: agility is all of it.
         Assert.Equal(3, sheets.For(actor).DefenseModifier);
@@ -146,7 +163,10 @@ public sealed class ActorSheetTests
             {
                 Level = 0,
             });
-        var sheets = new ActorSheets(store, RulesRepository.ClassProgression);
+        var sheets = new ActorSheets(
+            store,
+            RulesRepository.ClassProgression,
+            RulesRepository.AbilityBonuses);
 
         var sheet = sheets.For(beast);
 
@@ -197,6 +217,35 @@ public sealed class ActorSheetTests
             Assert.Equal(
                 before.Abilities,
                 loaded.Objects.Get(loaded.PlayerId).Abilities);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TheWorldsDiceResumeWhereTheSaveLeftThem()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            $"ash-dice-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "world.ashw");
+            using var world = PlayableSliceWorld.CreateDemo();
+
+            // Roll a few times so the state is no longer the seed.
+            _ = world.Dice.Pool(7, 20);
+            var state = world.Dice.State;
+            var expected = Ash.Rules.Dice.FromState(state).Pool(5, 20);
+            Assert.True(world.RequestSave(path).Succeeded);
+
+            using var loaded = PlayableSliceWorld.Load(path);
+
+            Assert.Equal(state, loaded.Dice.State);
+            Assert.Equal(expected, loaded.Dice.Pool(5, 20));
         }
         finally
         {

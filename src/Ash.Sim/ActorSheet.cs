@@ -36,14 +36,17 @@ public sealed class ActorSheets
 {
     private readonly ObjectStore _objects;
     private readonly ClassProgressionTable _progression;
+    private readonly AbilityBonusTable _bonuses;
 
     public ActorSheets(
         ObjectStore objects,
-        ClassProgressionTable progression)
+        ClassProgressionTable progression,
+        AbilityBonusTable bonuses)
     {
         _objects = objects ?? throw new ArgumentNullException(nameof(objects));
         _progression = progression ??
             throw new ArgumentNullException(nameof(progression));
+        _bonuses = bonuses ?? throw new ArgumentNullException(nameof(bonuses));
     }
 
     public ActorSheet For(ObjectId actorId)
@@ -79,16 +82,19 @@ public sealed class ActorSheets
             classAttack,
             AttackDerivation.AttackModifier(
                 classAttack,
-                AttackDerivation.WeaponAbilityBonus(abilities, finesse)),
-            AttackDerivation.GoverningAbility(abilities, finesse),
+                AttackDerivation.WeaponAbilityBonus(
+                    _bonuses,
+                    abilities,
+                    finesse)),
+            AttackDerivation.GoverningAbility(_bonuses, abilities, finesse),
             weapon.Id,
             finesse,
             ArmorWorn(worn),
             DefenseDerivation.DefenseModifier(
                 ArmorWorn(worn),
                 baseDefense,
-                abilities.BonusOf(Ability.Dexterity),
-                abilities.BonusOf(Ability.Strength),
+                _bonuses.BonusOf(abilities, Ability.Dexterity),
+                _bonuses.BonusOf(abilities, Ability.Strength),
                 shieldModifier),
             shieldModifier);
     }

@@ -54,6 +54,9 @@ public sealed class PlayableSliceWorld : IDisposable
 
     private const string AvatarTypeId = "actor.avatar";
     private const string DaggerTypeId = "item.bronze-dagger";
+
+    /// <summary>The demo's dice seed, so a fresh demo always plays the same.</summary>
+    private const ulong DefaultSeed = 20260731;
     private const string GoldTypeId = "item.gold";
 
     /// <summary>The Avatar's strength, and so a 12-slot pack.</summary>
@@ -70,18 +73,23 @@ public sealed class PlayableSliceWorld : IDisposable
         ObjectStore objects,
         WorldMap map,
         ObjectId playerId,
-        long startTick)
+        long startTick,
+        ulong diceState)
     {
+        Dice = Dice.FromState(diceState);
         Objects = objects;
         Transfers = new ObjectTransferService(objects);
         Movement = new MovementSolver(objects);
         PlayerId = playerId;
         Map = map;
         Physics = new PhysicsSystem(objects, startTick: startTick);
-        SaveGate = new WorldSaveGate(objects, Physics, ContentFingerprint);
+        SaveGate = new WorldSaveGate(objects, Physics, Dice, ContentFingerprint);
         Drag = new DragService(objects);
         Stacks = new StackService(objects);
-        Sheets = new ActorSheets(objects, RulesRepository.ClassProgression);
+        Sheets = new ActorSheets(
+            objects,
+            RulesRepository.ClassProgression,
+            RulesRepository.AbilityBonuses);
         LastMessage = "Explore. Open a chest or fight a monster.";
     }
 
@@ -98,6 +106,12 @@ public sealed class PlayableSliceWorld : IDisposable
     public DragService Drag { get; }
 
     public StackService Stacks { get; }
+
+    /// <summary>
+    /// The world's dice. Seeded, saved and resumed, so a loaded world rolls
+    /// what it would have rolled.
+    /// </summary>
+    public Dice Dice { get; }
 
     /// <summary>Attack and defence derived from scores, class and worn gear.</summary>
     public ActorSheets Sheets { get; }
@@ -277,7 +291,12 @@ public sealed class PlayableSliceWorld : IDisposable
         SpawnPhysicsArea(objects);
         var map = new WorldMap(objects, DemoMapId, MapWidth, MapHeight);
         BuildTerrain(map);
-        var world = new PlayableSliceWorld(objects, map, player, startTick: 0);
+        var world = new PlayableSliceWorld(
+            objects,
+            map,
+            player,
+            startTick: 0,
+            DefaultSeed);
         world.Settle();
         return world;
     }
@@ -318,7 +337,8 @@ public sealed class PlayableSliceWorld : IDisposable
             loaded.Objects,
             map,
             avatars[0].Id,
-            loaded.SimulationTick);
+            loaded.SimulationTick,
+            loaded.DiceState);
     }
 
     /// <summary>
