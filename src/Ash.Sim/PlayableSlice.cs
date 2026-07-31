@@ -62,7 +62,6 @@ public sealed class PlayableSliceWorld : IDisposable
     /// <summary>The Avatar's strength, and so a 12-slot pack.</summary>
     private const int AvatarStrength = 12;
 
-
     private const int TableHeight = 40;
     private const int CrateHeight = 32;
     private const int BridgeDeckHeight = 4;
@@ -83,6 +82,11 @@ public sealed class PlayableSliceWorld : IDisposable
         PlayerId = playerId;
         Map = map;
         Physics = new PhysicsSystem(objects, startTick: startTick);
+
+        // The combat beat is read off the physics tick, so a loaded world
+        // resumes the fight's pacing on the same beat it was saved on.
+        Clock = new CombatClock(startPhysicsTick: startTick);
+        Combat = new CombatDirector(objects, map, Clock, Dice, playerId);
         SaveGate = new WorldSaveGate(objects, Physics, Dice, ContentFingerprint);
         Drag = new DragService(objects);
         Stacks = new StackService(objects);
@@ -102,6 +106,19 @@ public sealed class PlayableSliceWorld : IDisposable
     public PhysicsSystem Physics { get; }
 
     public WorldSaveGate SaveGate { get; }
+
+    /// <summary>The 200 ms beat combat is scheduled on.</summary>
+    public CombatClock Clock { get; }
+
+    /// <summary>Who has noticed whom, and when anyone may next swing.</summary>
+    public CombatDirector Combat { get; }
+
+    /// <summary>
+    /// What the last advanced beat produced — alerts to sound, blows to draw.
+    /// Empty on every tick that did not complete a beat.
+    /// </summary>
+    public IReadOnlyList<CombatEvent> LastCombatEvents { get; private set; } =
+        [];
 
     public DragService Drag { get; }
 
@@ -187,7 +204,12 @@ public sealed class PlayableSliceWorld : IDisposable
     public IReadOnlyList<GearSlots.GearSlotEntry> BackpackSlots =>
         GearSlots.LayOut(BackpackItems);
 
-    public static PlayableSliceWorld CreateDemo()
+    /// <summary>
+    /// A fresh demo world. The seed is the whole of its chance: the same seed
+    /// always plays the same, which is what lets a test pin a 1d6 recognition
+    /// delay to a number instead of a range it hopes for.
+    /// </summary>
+    public static PlayableSliceWorld CreateDemo(ulong seed = DefaultSeed)
     {
         var objects = new ObjectStore();
         var player = objects.Create(new ObjectSpawn
@@ -296,7 +318,7 @@ public sealed class PlayableSliceWorld : IDisposable
             map,
             player,
             startTick: 0,
-            DefaultSeed);
+            seed);
         world.Settle();
         return world;
     }
@@ -388,11 +410,6 @@ public sealed class PlayableSliceWorld : IDisposable
     }
 
     /// <summary>
-    /// The physical acceptance area: a table holding loot, a stack of crates, a
-    /// bridge deck over a lower floor, and a trestle whose support the player
-    /// can remove with <see cref="RemoveTrestleSupport"/>.
-    /// </summary>
-    /// <summary>
     /// A light blade: finesse weapons are swung with dexterity when that serves
     /// the wielder better than strength.
     /// </summary>
@@ -460,6 +477,11 @@ public sealed class PlayableSliceWorld : IDisposable
             GearSlots.GemGroup);
     }
 
+    /// <summary>
+    /// The physical acceptance area: a table holding loot, a stack of crates, a
+    /// bridge deck over a lower floor, and a trestle whose support the player
+    /// can remove with <see cref="RemoveTrestleSupport"/>.
+    /// </summary>
     private static void SpawnPhysicsArea(ObjectStore objects)
     {
         SpawnProp(
@@ -531,6 +553,17 @@ public sealed class PlayableSliceWorld : IDisposable
     {
         var result = Physics.Advance();
 
+        // Combat is scheduled on the coarser 200 ms beat: recognition, alerts
+        // and swings all land on one, so a fight paces the same on any machine
+        // whatever the frame rate happens to be.
+        LastCombatEvents = Clock.Advance(Physics.Tick)
+            ? Combat.Advance()
+            : [];
+        foreach (var combat in LastCombatEvents)
+        {
+            LastMessage = combat.Message;
+        }
+
         // End of a completed tick: the one point a deferred save is safe.
         if (SaveGate.Flush(DemoMapId) is { } attempt && attempt.Saved)
         {
@@ -601,21 +634,52 @@ public sealed class PlayableSliceWorld : IDisposable
                 "Movement must be exactly one cardinal grid step.");
         }
 
+        // The round holds a maximum move as well as a maximum number of
+        // attacks. The budget is checked before the solve and only spent on a
+        // step that actually happens, so walking into a wall costs nothing.
+        if (!Combat.PlayerCanStep)
+        {
+            return Finish(
+                false,
+                "You have covered as much ground as the round allows.");
+        }
+
         // One swept solve decides the move; the transaction below revalidates
         // the same placement contract before anything commits.
+        var displacement = new Vec3i(
+            deltaX * WorldUnitsPerTile,
+            deltaY * WorldUnitsPerTile,
+            0);
+
+        // Walk first, at the height anything clears without trying. Only a
+        // move actually stopped by something worth getting over is a vault, so
+        // a stroll across flat floor never touches the dice.
         var sweep = Movement.Resolve(
             PlayerId,
-            new Vec3i(
-                deltaX * WorldUnitsPerTile,
-                deltaY * WorldUnitsPerTile,
-                0));
+            displacement,
+            VaultCheck.MinimumStepHeight);
+        var vault = (VaultCheckResult?)null;
+        if (!sweep.ReachedTarget && IsVaultable(sweep.Blocker))
+        {
+            var rolled = VaultCheck.Roll(
+                Dice,
+                PlayerSheet.Abilities,
+                Player.Class,
+                RulesRepository.AbilityBonuses);
+            vault = rolled;
+            sweep = Movement.Resolve(PlayerId, displacement, rolled.StepHeight);
+        }
+
         if (!sweep.ReachedTarget)
         {
             return Finish(
                 false,
                 sweep.Blocker.Kind == PlacementBlockerKind.MapEdge
                     ? "The edge of the demo area blocks the way."
-                    : sweep.Message);
+                    : vault is { } failed
+                        ? $"You try to get over it and fall short " +
+                          $"({DescribeVault(failed)})."
+                        : sweep.Message);
         }
 
         var move = Transfers.Execute(
@@ -631,13 +695,25 @@ public sealed class PlayableSliceWorld : IDisposable
             return Finish(false, move.Message);
         }
 
+        var step = Combat.TryPlayerStep();
+        if (!step.Stepped)
+        {
+            throw new InvalidOperationException(
+                "The move committed after the step budget was checked but " +
+                "before it could be spent.");
+        }
+
         if (ActiveChest is { } active &&
             PlayerPosition.ManhattanDistance(GridPositionOf(active)) > 1)
         {
             CloseActiveChest();
         }
 
-        return Finish(true, "Moved.");
+        return Finish(
+            true,
+            vault is { } cleared
+                ? $"You vault it ({DescribeVault(cleared)})."
+                : "Moved.");
     }
 
     public SliceActionResult ToggleBackpack()
@@ -889,6 +965,16 @@ public sealed class PlayableSliceWorld : IDisposable
             return Finish(false, "No living monster is in melee reach.");
         }
 
+        // The round gates the blow, not the keypress: a swing is only spent
+        // when it actually falls on something. Walking is free inside the round
+        // — MovePlayer is deliberately not gated — so the six seconds are a
+        // window to move and strike in, not a window of standing still.
+        var swing = Combat.TryPlayerSwing();
+        if (!swing.Swung)
+        {
+            return Finish(false, swing.Message);
+        }
+
         var monster = target.Value;
         var remaining = Objects.Damage(monster.Id, PlayerAttackDamage);
         if (remaining > 0)
@@ -916,6 +1002,10 @@ public sealed class PlayableSliceWorld : IDisposable
         {
             return Finish(false, corpse.Message);
         }
+
+        // A corpse has no awareness. Dropping the state also keeps the director
+        // from holding a handle whose slot will be reused.
+        Combat.Forget(monster.Id);
 
         return Finish(
             true,
@@ -1333,6 +1423,62 @@ public sealed class PlayableSliceWorld : IDisposable
         Finish(
             result.Succeeded,
             result.Succeeded ? successMessage : result.Message);
+
+    /// <summary>
+    /// Whether the thing in the way is worth trying to get over: something with
+    /// a top the Avatar's best roll could reach, and higher than what he clears
+    /// without trying.
+    /// </summary>
+    /// <remarks>
+    /// This is what keeps the dice out of ordinary walking. A wall, the map
+    /// edge and a stacked crate are all simply refused, because no roll changes
+    /// them; and a living body is not scenery, so you go round a goblin rather
+    /// than hurdling it.
+    /// </remarks>
+    private bool IsVaultable(PlacementBlocker blocker)
+    {
+        var top = TopOfBlocker(blocker);
+        if (top is not { } surface)
+        {
+            return false;
+        }
+
+        var climb = surface - Player.Location.Position.Z;
+        return climb > VaultCheck.MinimumStepHeight &&
+            climb <= VaultCheck.MaximumStepHeight;
+    }
+
+    private int? TopOfBlocker(PlacementBlocker blocker)
+    {
+        switch (blocker.Kind)
+        {
+            case PlacementBlockerKind.Object:
+                var obstacle = Objects.Get(blocker.ObjectId);
+                return obstacle.HasFlag(ObjectFlags.Actor)
+                    ? null
+                    : checked(obstacle.Location.Position.Z + obstacle.Height);
+
+            case PlacementBlockerKind.Terrain:
+                // A solid cell is a wall, not a ledge: it has no top to get
+                // onto however high you jump.
+                var cell = Map.GetTerrain(blocker.TerrainX, blocker.TerrainY);
+                return cell.Flags.HasFlag(TerrainFlags.Solid)
+                    ? null
+                    : cell.FloorZ;
+
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// A vault attempt in the status line: which ability carried it, what was
+    /// rolled, and how high that got you.
+    /// </summary>
+    private static string DescribeVault(VaultCheckResult vault) =>
+        $"{vault.Ability} {vault.Roll}{vault.Bonus:+#;-#;+0}" +
+        $"{(vault.HadAdvantage ? " adv" : string.Empty)} " +
+        $"= {vault.StepHeight} high";
 
     private static string Describe(WorldObject value) =>
         value.Quantity > 1 ? $"{value.Quantity} {value.Name}" : value.Name;

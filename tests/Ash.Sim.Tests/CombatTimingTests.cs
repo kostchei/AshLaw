@@ -1,0 +1,393 @@
+using Ash.Rules;
+
+namespace Ash.Sim.Tests;
+
+public sealed class CombatTimingTests
+{
+    /// <summary>Twelve 60 Hz physics ticks make one 200 ms combat beat.</summary>
+    private const int PhysicsTicksPerBeat = 12;
+
+    [Fact]
+    public void ACombatBeatIsTwelvePhysicsTicksAtSixtyHertz()
+    {
+        var clock = new CombatClock();
+
+        Assert.Equal(PhysicsTicksPerBeat, clock.PhysicsTicksPerBeat);
+        Assert.Equal(0L, clock.Tick);
+
+        for (var tick = 1; tick < PhysicsTicksPerBeat; tick++)
+        {
+            Assert.False(clock.Advance(tick));
+            Assert.Equal(0L, clock.Tick);
+        }
+
+        Assert.True(clock.Advance(PhysicsTicksPerBeat));
+        Assert.Equal(1L, clock.Tick);
+    }
+
+    [Fact]
+    public void AClockResumesOnTheBeatItsPhysicsTickNamesRatherThanFromZero()
+    {
+        // A world saved 100 beats in must not restart the fight's pacing: the
+        // physics tick is the authority, so the clock reads the beat off it.
+        var clock = new CombatClock(
+            startPhysicsTick: 100 * PhysicsTicksPerBeat);
+
+        Assert.Equal(100L, clock.Tick);
+        Assert.False(clock.Advance(100 * PhysicsTicksPerBeat + 1));
+        Assert.True(clock.Advance(101 * PhysicsTicksPerBeat));
+        Assert.Equal(101L, clock.Tick);
+    }
+
+    [Fact]
+    public void APhysicsRateThatCannotHoldWholeBeatsIsRefused()
+    {
+        // 144 Hz gives 28.8 physics ticks per 200 ms. Rounding it would drift
+        // every swing, so the rate is refused rather than approximated.
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new CombatClock(physicsTicksPerSecond: 144));
+    }
+
+    [Fact]
+    public void ADurationOffTheBeatIsRefused()
+    {
+        Assert.Equal(30, CombatClock.BeatsIn(6000));
+        Assert.Equal(1, CombatClock.BeatsIn(200));
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => CombatClock.BeatsIn(250));
+    }
+
+    [Fact]
+    public void RecognitionTakesBetweenOneAndSixSecondsThenTheNpcCriesOut()
+    {
+        // Every seed the dice can be started on must land inside 1d6 seconds:
+        // five beats at the fastest, thirty at the slowest.
+        for (ulong seed = 1; seed <= 24; seed++)
+        {
+            using var world = MeleeWorld(seed);
+            var noticed = world.Clock.Tick;
+            var alert = RunUntil(world, CombatEventKind.Alerted, maxBeats: 40);
+
+            // The rat spends its first advanced beat noticing something is
+            // there, then 1d6 seconds working out what.
+            Assert.InRange(
+                alert.Tick - noticed,
+                1L + CombatClock.BeatsIn(1000),
+                1L + CombatClock.BeatsIn(6000));
+            Assert.Equal(CreatureVoice.Eep, alert.Voice);
+            Assert.Contains("eep!", alert.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void TheNpcActsExactlyOneBeatAfterItCriesOut()
+    {
+        using var world = MeleeWorld(seed: 7);
+        var alert = RunUntil(world, CombatEventKind.Alerted, maxBeats: 40);
+        Assert.Equal(
+            Awareness.Alerted,
+            world.Combat.AwarenessOf(alert.ActorId));
+
+        var blow = RunUntil(world, CombatEventKind.Swing, maxBeats: 40);
+
+        // 200 ms, and not a frame less: the cue is a warning with time behind it.
+        Assert.Equal(alert.Tick + CombatClock.BeatsIn(200), blow.Tick);
+        Assert.Equal(
+            Awareness.Engaged,
+            world.Combat.AwarenessOf(alert.ActorId));
+        Assert.Equal(CombatDirector.NpcSwingDamage, blow.Damage);
+    }
+
+    [Fact]
+    public void AnNpcSwingsOnceEverySixSeconds()
+    {
+        using var world = MeleeWorld(seed: 7);
+        var first = RunUntil(world, CombatEventKind.Swing, maxBeats: 40);
+        var second = RunUntil(world, CombatEventKind.Swing, maxBeats: 40);
+
+        Assert.Equal(first.Tick + CombatClock.BeatsIn(6000), second.Tick);
+    }
+
+    [Fact]
+    public void AnNpcThatLosesTheThreadRollsRecognitionAgain()
+    {
+        using var world = MeleeWorld(seed: 3, playerDistanceTiles: 6);
+        var rat = Rat(world);
+
+        Assert.True(AdvanceBeats(world, 1));
+        Assert.Equal(Awareness.Recognizing, world.Combat.AwarenessOf(rat.Id));
+
+        // Step out of the awareness radius before the count finishes.
+        Assert.True(world.MovePlayer(-1, 0).Succeeded);
+        Assert.True(AdvanceBeats(world, 1));
+
+        Assert.Equal(Awareness.Unaware, world.Combat.AwarenessOf(rat.Id));
+    }
+
+    [Fact]
+    public void ThePlayerSwingsOnTheSameSixSecondRoundTheNpcsDo()
+    {
+        using var world = MeleeWorld(seed: 7);
+        var rat = Rat(world);
+
+        Assert.True(world.AttackAdjacentMonster().Succeeded);
+
+        // Winding: the attack is refused, and the status line says how long for.
+        var refused = world.AttackAdjacentMonster();
+        Assert.False(refused.Succeeded);
+        Assert.Contains("coming back round", refused.Message, StringComparison.Ordinal);
+        Assert.False(world.Combat.PlayerCanSwing);
+        Assert.Equal(6000, world.Combat.PlayerCooldownRemainingMilliseconds);
+
+        // One beat short of the round, still winding.
+        AdvanceBeats(world, CombatClock.BeatsIn(6000) - 1);
+        Assert.False(world.Combat.PlayerCanSwing);
+        Assert.Equal(200, world.Combat.PlayerCooldownRemainingMilliseconds);
+
+        AdvanceBeats(world, 1);
+        Assert.True(world.Combat.PlayerCanSwing);
+        Assert.Equal(0, world.Combat.PlayerCooldownRemainingMilliseconds);
+        Assert.True(world.AttackAdjacentMonster().Succeeded);
+        Assert.Equal(
+            rat.MaxHealth - (2 * PlayableSliceWorld.PlayerAttackDamage),
+            world.Objects.Get(rat.Id).Health);
+    }
+
+    [Fact]
+    public void MovingAndAttackingDrawOnSeparateAllowances()
+    {
+        // The round holds a maximum move and a maximum number of attacks. You
+        // may move and attack in the same six seconds, and neither spends the
+        // other's budget.
+        using var world = MeleeWorld(seed: 7);
+        Assert.True(world.AttackAdjacentMonster().Succeeded);
+        var swingRemaining = world.Combat.PlayerCooldownRemainingMilliseconds;
+        var stepsRemaining = world.Combat.PlayerStepsRemainingInRound;
+
+        Assert.True(world.MovePlayer(-1, 0).Succeeded);
+        Assert.True(world.MovePlayer(1, 0).Succeeded);
+
+        // Two steps spent, and the swing timer untouched by them.
+        Assert.Equal(
+            stepsRemaining - 2,
+            world.Combat.PlayerStepsRemainingInRound);
+        Assert.Equal(
+            swingRemaining,
+            world.Combat.PlayerCooldownRemainingMilliseconds);
+    }
+
+    [Fact]
+    public void TheRoundAllowsOnlySoManyTilesOfMovement()
+    {
+        using var world = MeleeWorld(seed: 7, playerDistanceTiles: 8);
+        Assert.Equal(
+            MovementAllowance.StepsPerRound,
+            world.Combat.PlayerStepsRemainingInRound);
+
+        for (var step = 0; step < MovementAllowance.StepsPerRound; step++)
+        {
+            Assert.True(world.MovePlayer(1, 0).Succeeded);
+        }
+
+        var spent = world.MovePlayer(1, 0);
+        Assert.False(spent.Succeeded);
+        Assert.Contains(
+            "as much ground as the round allows",
+            spent.Message,
+            StringComparison.Ordinal);
+        Assert.Equal(0, world.Combat.PlayerStepsRemainingInRound);
+    }
+
+    [Fact]
+    public void TheMoveRefillsAsStepsAgeOutRatherThanOnARoundBoundary()
+    {
+        // A bucket refilling on a boundary would let a player spend the last
+        // of one round and the first of the next back to back, and cross twice
+        // the ground the round allows. A rolling window cannot.
+        using var world = MeleeWorld(seed: 7, playerDistanceTiles: 8);
+        for (var step = 0; step < MovementAllowance.StepsPerRound; step++)
+        {
+            Assert.True(world.MovePlayer(1, 0).Succeeded);
+        }
+
+        Assert.False(world.MovePlayer(-1, 0).Succeeded);
+
+        // The oldest step ages out one round after it was taken, and only that
+        // one comes back.
+        AdvanceBeats(world, CombatClock.BeatsIn(AttackSpeed.RoundMilliseconds));
+        Assert.Equal(
+            MovementAllowance.StepsPerRound,
+            world.Combat.PlayerStepsRemainingInRound);
+    }
+
+    [Fact]
+    public void AMoveBlockedByTheWorldCostsNothingFromTheRoundsMove()
+    {
+        using var world = MeleeWorld(seed: 7);
+        var before = world.Combat.PlayerStepsRemainingInRound;
+
+        // The rat is solid and directly east: this step is refused by the
+        // world, not by the budget, so it must not be charged.
+        Assert.False(world.MovePlayer(1, 0).Succeeded);
+
+        Assert.Equal(before, world.Combat.PlayerStepsRemainingInRound);
+    }
+
+    [Fact]
+    public void ASwingOutOfReachIsNotSpent()
+    {
+        // Closing to melee must not also cost a fresh round: an engaged NPC
+        // that cannot reach you has not swung.
+        using var world = MeleeWorld(seed: 7, playerDistanceTiles: 3);
+        var rat = Rat(world);
+        RunUntil(world, CombatEventKind.Alerted, maxBeats: 40);
+        AdvanceBeats(world, CombatClock.BeatsIn(6000));
+        Assert.Equal(Awareness.Engaged, world.Combat.AwarenessOf(rat.Id));
+
+        // Step into reach; the blow lands on the next beat, not a round later.
+        Assert.True(world.MovePlayer(1, 0).Succeeded);
+        Assert.True(world.MovePlayer(1, 0).Succeeded);
+        var blow = RunUntil(world, CombatEventKind.Swing, maxBeats: 2);
+
+        Assert.Equal(rat.Id, blow.ActorId);
+    }
+
+    [Fact]
+    public void EveryCreatureThatCanRaiseAnAlarmHasAVoice()
+    {
+        using var world = PlayableSliceWorld.CreateDemo();
+
+        foreach (var monster in world.Monsters)
+        {
+            // Throws if a type id has no voice: a silent alert would give the
+            // player nothing to react to.
+            Assert.True(Enum.IsDefined(CreatureVoices.For(monster.TypeId)));
+        }
+
+        Assert.Equal(
+            CreatureVoice.Hail,
+            CreatureVoices.For(world.Player.TypeId));
+        Assert.Throws<InvalidOperationException>(
+            () => CreatureVoices.For("monster.unvoiced"));
+    }
+
+    [Fact]
+    public void TheRoundHoldsOneAttackUntilAFighterMastersAWeaponAtSeventh()
+    {
+        Assert.Equal(
+            1,
+            AttackSpeed.AttacksPerRound(
+                new AttackSpeedInputs(CharacterClass.Fighter, 1, true)));
+
+        // Seventh level alone is not the rule; mastery is the whole condition.
+        Assert.Equal(
+            1,
+            AttackSpeed.AttacksPerRound(
+                new AttackSpeedInputs(CharacterClass.Fighter, 7, false)));
+        Assert.Equal(
+            1,
+            AttackSpeed.AttacksPerRound(
+                new AttackSpeedInputs(CharacterClass.Rogue, 20, true)));
+
+        var master = new AttackSpeedInputs(CharacterClass.Fighter, 7, true);
+        Assert.Equal(2, AttackSpeed.AttacksPerRound(master));
+        Assert.Equal(3000, AttackSpeed.SwingIntervalMilliseconds(master));
+        Assert.Equal(
+            6000,
+            AttackSpeed.SwingIntervalMilliseconds(
+                new AttackSpeedInputs(CharacterClass.Fighter, 6, true)));
+    }
+
+    /// <summary>The cave rat, which is the only monster near the Avatar's start.</summary>
+    private static WorldObject Rat(PlayableSliceWorld world) =>
+        world.Monsters.Single(monster => monster.TypeId == "monster.cave-rat");
+
+    /// <summary>
+    /// The demo world with the Avatar placed a given number of tiles west of
+    /// the cave rat. The rest of the demo is left standing, so the test paces a
+    /// fight in the world the game actually runs — every other monster is well
+    /// outside the awareness radius and stays unaware throughout.
+    /// </summary>
+    /// <remarks>
+    /// The Avatar is placed rather than walked. Walking there would burn
+    /// rounds inside the awareness radius, and the rat would have started
+    /// recognising the player before the test had even begun measuring.
+    /// </remarks>
+    private static PlayableSliceWorld MeleeWorld(
+        ulong seed,
+        int playerDistanceTiles = 1)
+    {
+        var world = PlayableSliceWorld.CreateDemo(seed);
+        var rat = Rat(world);
+        var ratCell = world.GetGridPosition(rat.Id);
+        var target = rat.Location.Position with
+        {
+            X = rat.Location.Position.X -
+                (playerDistanceTiles * PlayableSliceWorld.WorldUnitsPerTile),
+        };
+        var placed = world.Transfers.Execute(
+            new ObjectTransferRequest(
+                world.PlayerId,
+                world.Player.Location,
+                ObjectLocation.OnMap(PlayableSliceWorld.DemoMapId, target)));
+        Assert.True(placed.Succeeded, placed.Message);
+        Assert.Equal(
+            playerDistanceTiles,
+            world.PlayerPosition.ManhattanDistance(ratCell));
+        return world;
+    }
+
+    /// <summary>
+    /// Advances one combat beat and returns what it produced. Physics ticks run
+    /// until the clock's beat actually changes, because a beat is twelve
+    /// physics ticks and the events belong to the tick that completed it — the
+    /// eleven ticks after it carry none.
+    /// </summary>
+    private static IReadOnlyList<CombatEvent> AdvanceBeat(
+        PlayableSliceWorld world)
+    {
+        var start = world.Clock.Tick;
+        for (var tick = 0; tick <= PhysicsTicksPerBeat; tick++)
+        {
+            world.AdvancePhysics();
+            if (world.Clock.Tick != start)
+            {
+                return world.LastCombatEvents;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"The combat beat did not advance within {PhysicsTicksPerBeat} " +
+            "physics ticks.");
+    }
+
+    private static bool AdvanceBeats(PlayableSliceWorld world, int beats)
+    {
+        for (var beat = 0; beat < beats; beat++)
+        {
+            AdvanceBeat(world);
+        }
+
+        return true;
+    }
+
+    private static CombatEvent RunUntil(
+        PlayableSliceWorld world,
+        CombatEventKind kind,
+        int maxBeats)
+    {
+        for (var beat = 0; beat < maxBeats; beat++)
+        {
+            foreach (var combat in AdvanceBeat(world))
+            {
+                if (combat.Kind == kind)
+                {
+                    return combat;
+                }
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"No {kind} event happened within {maxBeats} combat beats.");
+    }
+}

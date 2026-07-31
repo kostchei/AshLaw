@@ -206,6 +206,9 @@ public sealed class PlayableSliceTests
         MoveNextTo(world, world.GetGridPosition(rat.Id));
         Assert.True(world.AttackAdjacentMonster().Succeeded);
         Assert.True(world.Objects.Get(rat.Id).IsAlive);
+
+        // The second blow costs a second round.
+        CombatRound.WaitForPlayerSwing(world);
         Assert.True(world.AttackAdjacentMonster().Succeeded);
         var corpse = world.Objects.Get(rat.Id);
         Assert.False(corpse.IsAlive);
@@ -220,18 +223,52 @@ public sealed class PlayableSliceTests
     }
 
     [Fact]
-    public void LivingMonstersAndChestsBlockMovement()
+    public void ALivingMonsterIsGoneRoundRatherThanVaulted()
     {
+        // A body is not scenery. Whatever the dice say, you do not hurdle a
+        // goblin, so the move is refused without a roll.
         var world = PlayableSliceWorld.CreateDemo();
-        var firstChest = world.Chests[0];
-        MoveNextTo(world, world.GetGridPosition(firstChest.Id));
+        var rat = world.Monsters.Single(
+            monster => monster.TypeId == "monster.cave-rat");
+        MoveNextTo(world, world.GetGridPosition(rat.Id));
+        var before = world.Dice.State;
 
-        var result = world.MovePlayer(1, 0);
+        var result = CombatRound.Step(world, 1, 0);
 
         Assert.False(result.Succeeded);
-        Assert.NotEqual(
-            world.GetGridPosition(firstChest.Id),
-            world.PlayerPosition);
+        Assert.NotEqual(world.GetGridPosition(rat.Id), world.PlayerPosition);
+        Assert.Equal(before, world.Dice.State);
+    }
+
+    [Fact]
+    public void AChestIsWaistHighSoGettingOverItIsRolledFor()
+    {
+        // A chest stands 40 high, inside what a vault can reach, so it stopped
+        // being a wall the moment vaulting became a check. Either outcome is
+        // legitimate; what matters is that it was decided by a roll.
+        var world = PlayableSliceWorld.CreateDemo();
+        var firstChest = world.Chests[0];
+        var chestCell = world.GetGridPosition(firstChest.Id);
+        MoveNextTo(world, chestCell);
+        var before = world.Dice.State;
+
+        var result = CombatRound.Step(world, 1, 0);
+
+        Assert.NotEqual(before, world.Dice.State);
+        if (result.Succeeded)
+        {
+            Assert.Equal(chestCell, world.PlayerPosition);
+            Assert.Equal(
+                firstChest.Height,
+                world.Player.Location.Position.Z);
+        }
+        else
+        {
+            Assert.NotEqual(chestCell, world.PlayerPosition);
+        }
+
+        world.Objects.ValidateInvariants();
+        world.Physics.ValidateInvariants();
     }
 
     [Fact]
@@ -241,13 +278,13 @@ public sealed class PlayableSliceTests
 
         while (world.PlayerPosition.Y > 3)
         {
-            Assert.True(world.MovePlayer(0, -1).Succeeded);
+            Assert.True(CombatRound.Step(world, 0, -1).Succeeded);
         }
 
-        Assert.True(world.MovePlayer(-1, 0).Succeeded);
+        Assert.True(CombatRound.Step(world, -1, 0).Succeeded);
         Assert.Equal(new GridPosition(3, 3), world.PlayerPosition);
 
-        var result = world.MovePlayer(-1, 0);
+        var result = CombatRound.Step(world, -1, 0);
 
         Assert.False(result.Succeeded);
         Assert.Contains("(2, 3)", result.Message);
@@ -262,7 +299,7 @@ public sealed class PlayableSliceTests
 
         for (var step = 0; step < 40; step++)
         {
-            world.MovePlayer(step % 3 == 0 ? 0 : 1, step % 3 == 0 ? 1 : 0);
+            CombatRound.Step(world, step % 3 == 0 ? 0 : 1, step % 3 == 0 ? 1 : 0);
             var solids = world.Map.QueryAll(ObjectFlags.Solid);
             foreach (var first in solids)
             {
@@ -290,14 +327,14 @@ public sealed class PlayableSliceTests
 
         for (var step = 1; step <= 4; step++)
         {
-            var climb = world.MovePlayer(1, 0);
+            var climb = CombatRound.Step(world, 1, 0);
             Assert.True(climb.Succeeded, climb.Message);
             Assert.Equal(
                 step * PlayableSliceWorld.UnitsPerLevel,
                 world.Player.Location.Position.Z);
         }
 
-        Assert.True(world.MovePlayer(1, 0).Succeeded);
+        Assert.True(CombatRound.Step(world, 1, 0).Succeeded);
         Assert.Equal(
             PlayableSliceWorld.PlatformZ,
             world.Player.Location.Position.Z);
@@ -362,11 +399,11 @@ public sealed class PlayableSliceTests
                 PlayableSliceWorld.PitXMin - 1,
                 PlayableSliceWorld.BridgeY));
 
-        Assert.True(world.MovePlayer(1, 0).Succeeded);
+        Assert.True(CombatRound.Step(world, 1, 0).Succeeded);
         Assert.Equal(4, world.Player.Location.Position.Z);
         Assert.Equal(SupportKind.Object, world.Player.Support.Kind);
 
-        Assert.True(world.MovePlayer(0, 1).Succeeded);
+        Assert.True(CombatRound.Step(world, 0, 1).Succeeded);
         Assert.Equal(MotionState.Falling, world.Player.Motion);
 
         for (var tick = 0; tick < 100 &&
@@ -519,7 +556,7 @@ public sealed class PlayableSliceTests
             WalkTo(world, new GridPosition(25, 5));
             for (var step = 0; step < 3; step++)
             {
-                Assert.True(world.MovePlayer(1, 0).Succeeded);
+                Assert.True(CombatRound.Step(world, 1, 0).Succeeded);
             }
 
             // Step off the raised stairs so an object is mid-fall when saved.
@@ -577,14 +614,14 @@ public sealed class PlayableSliceTests
         while (world.PlayerPosition.Y != target.Y)
         {
             var step = world.PlayerPosition.Y < target.Y ? 1 : -1;
-            var move = world.MovePlayer(0, step);
+            var move = CombatRound.Step(world, 0, step);
             Assert.True(move.Succeeded, move.Message);
         }
 
         while (world.PlayerPosition.X != target.X)
         {
             var step = world.PlayerPosition.X < target.X ? 1 : -1;
-            var move = world.MovePlayer(step, 0);
+            var move = CombatRound.Step(world, step, 0);
             Assert.True(move.Succeeded, move.Message);
         }
     }
@@ -600,22 +637,22 @@ public sealed class PlayableSliceTests
     {
         while (world.PlayerPosition.X < target.X - 1)
         {
-            Assert.True(world.MovePlayer(1, 0).Succeeded);
+            Assert.True(CombatRound.Step(world, 1, 0).Succeeded);
         }
 
         while (world.PlayerPosition.X > target.X + 1)
         {
-            Assert.True(world.MovePlayer(-1, 0).Succeeded);
+            Assert.True(CombatRound.Step(world, -1, 0).Succeeded);
         }
 
         while (world.PlayerPosition.Y < target.Y)
         {
-            Assert.True(world.MovePlayer(0, 1).Succeeded);
+            Assert.True(CombatRound.Step(world, 0, 1).Succeeded);
         }
 
         while (world.PlayerPosition.Y > target.Y)
         {
-            Assert.True(world.MovePlayer(0, -1).Succeeded);
+            Assert.True(CombatRound.Step(world, 0, -1).Succeeded);
         }
     }
 }
