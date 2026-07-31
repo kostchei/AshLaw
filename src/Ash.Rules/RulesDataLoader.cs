@@ -99,6 +99,10 @@ public static class RulesDataLoader
         new(CriticalTableId.Slash, "ct_2_slash_critical_table.csv"),
         new(CriticalTableId.Puncture, "ct_3_puncture_critical_table.csv"),
         new(CriticalTableId.Unbalancing, "ct_4_unbalancing_critical_table.csv"),
+        new(CriticalTableId.Heat, "ct_6_heat_critical_table.csv"),
+        new(CriticalTableId.Cold, "ct_7_cold_critical_table.csv"),
+        new(CriticalTableId.Electricity, "ct_8_electricity_critical_table.csv"),
+        new(CriticalTableId.Impact, "ct_9_impact_critical_table.csv"),
     ];
 
     public static RulesData LoadFromDirectory(string dataDirectory)
@@ -784,6 +788,10 @@ public static class RulesDataLoader
             "slashing" => CriticalTableId.Slash,
             "puncturing" => CriticalTableId.Puncture,
             "grapple_unbalance" => CriticalTableId.Unbalancing,
+            "heat" => CriticalTableId.Heat,
+            "cold" => CriticalTableId.Cold,
+            "electricity" or "electrical" => CriticalTableId.Electricity,
+            "impact" => CriticalTableId.Impact,
             "slashing_or_puncturing_or_crush" => null,
             "tooth_and_claw" => null,
             "heat_cold_or_electrical" => null,

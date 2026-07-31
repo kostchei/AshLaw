@@ -65,6 +65,9 @@ public partial class Main : Node2D
     private static readonly Color DebugOrigin = new("ff5fa2");
     private static readonly Color DebugSortOrder = new("ffe36a");
 
+    /// <summary>What the wound layer and the death clock are drawn in.</summary>
+    private static readonly Color Wounded = new("d1553f");
+
     /// <summary>
     /// The world a run generates when it is not told otherwise. A fixed seed,
     /// so launching the game twice gives the same eighteen subzones and a
@@ -2313,6 +2316,37 @@ public partial class Main : Node2D
             new Color("120d0ba0"));
     }
 
+    /// <summary>
+    /// Concussion hits over the wound layer, on one line. A body on the death
+    /// clock says so instead: at that point the hit total is nought and the
+    /// only number that matters is how the saves are going.
+    /// </summary>
+    private void DrawVitality()
+    {
+        var injury = _world.PlayerInjury;
+        if (injury.IsOnTheDeathClock)
+        {
+            DrawText(
+                new Vector2(246, 27),
+                $"DYING {injury.DeathSaveSuccesses}↑" +
+                $"{injury.DeathSaveFailures}↓",
+                8,
+                Wounded);
+            return;
+        }
+
+        DrawText(
+            new Vector2(246, 27),
+            $"HP {injury.Concussion}/{injury.MaximumConcussion}",
+            8,
+            injury.Concussion > 0 ? Text : Wounded);
+        DrawText(
+            new Vector2(292, 27),
+            $"W {injury.Wounds}/{injury.MaximumWounds}",
+            8,
+            injury.WoundsMissing > 0 ? Wounded : MutedText);
+    }
+
     private void DrawHud()
     {
         DrawRect(new Rect2(240, 0, 80, 200), Panel);
@@ -2324,11 +2358,7 @@ public partial class Main : Node2D
             width: 1);
 
         DrawText(new Vector2(246, 13), "ASH", 12, Highlight);
-        DrawText(
-            new Vector2(246, 27),
-            $"HP {_world.PlayerHealth}/{_world.PlayerMaxHealth}",
-            8,
-            Text);
+        DrawVitality();
         var rightHand = _world.EquippedIn(EquipmentSlot.RightHand);
         DrawText(
             new Vector2(246, 39),

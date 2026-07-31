@@ -14,6 +14,10 @@ internal sealed class TemporaryRulesData : IDisposable
         "ct_2_slash_critical_table.csv",
         "ct_3_puncture_critical_table.csv",
         "ct_4_unbalancing_critical_table.csv",
+        "ct_6_heat_critical_table.csv",
+        "ct_7_cold_critical_table.csv",
+        "ct_8_electricity_critical_table.csv",
+        "ct_9_impact_critical_table.csv",
         "class_progression.csv",
     ];
 

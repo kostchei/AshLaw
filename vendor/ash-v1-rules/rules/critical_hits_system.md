@@ -106,70 +106,273 @@ MERP status descriptions map cleanly onto official d20 / 5e conditions in order 
 
 ### 3.1 CT-2: Slashing Critical Table (Swords, Axes, Bladed Weapons)
 
-| Index | Tier A (Minor) | Tier B (Moderate) | Tier C (Severe) | Tier D (Lethal) | Tier E (Catastrophic) |
-| :---: | :--- | :--- | :--- | :--- | :--- |
-| **1** | Weak strike yields no extra damage. +0 hits. | Weak strike yields no extra damage. +0 hits. | Weak strike yields no extra damage. +0 hits. | Minor calf wound. 1 hit per round. | Blow to upper leg. +5 hits. If no leg armor: +3 hits & 2 hits/rnd. |
-| **2** | Minor calf wound. 1 hit per round. | Minor calf wound. 1 hit per round. | Minor calf wound. 1 hit per round. | Blow to upper leg. +5 hits. If no leg armor: +3 hits & 2 hits/rnd. | Minor chest wound. +3 hits. 1 hit per round. -5 to activity. |
-| **3** | Minor calf wound. 1 hit per round. | Blow to upper leg. +5 hits. If no leg armor: +3 hits & 2 hits/rnd. | Blow to upper leg. +5 hits. If no leg armor: +3 hits & 2 hits/rnd. | Minor chest wound. +3 hits. 1 hit per round. -5 to activity. | Minor chest wound. +3 hits. 1 hit per round. -5 to activity. |
-| **4** | Blow to upper leg. +5 hits. If no leg armor: +3 hits & 2 hits/rnd. | Minor chest wound. +3 hits. 1 hit per round. -5 to activity. | Minor chest wound. +3 hits. 1 hit per round. -5 to activity. | Minor chest wound. +3 hits. 1 hit per round. -5 to activity. | Minor forearm wound. +4 hits. 2 hits per round. Stunned 1 round. |
-| **5** | Minor chest wound. +3 hits. 1 hit per round. -5 to activity. | Minor chest wound. +3 hits. 1 hit per round. -5 to activity. | Minor chest wound. +3 hits. 1 hit per round. -5 to activity. | Minor forearm wound. +4 hits. 2 hits per round. Stunned 1 round. | Medium thigh wound. +6 hits. 1 hit per round. -10 to activity. Stunned 2 rounds. |
-| **6** | Minor chest wound. +3 hits. 1 hit per round. -5 to activity. | Minor forearm wound. +4 hits. 2 hits per round. Stunned 1 round. | Minor forearm wound. +4 hits. 2 hits per round. Stunned 1 round. | Medium thigh wound. +6 hits. 1 hit per round. -10 to activity. Stunned 2 rounds. | Slash weapon arm. +10 hits. 1 hit per round. If no arm armor: muscle & tendon damage, arm useless. |
-| **7** | Minor forearm wound. +4 hits. 2 hits per round. Stunned 1 round. | Minor forearm wound. +4 hits. 2 hits per round. Stunned 1 round. | Medium thigh wound. +6 hits. 1 hit per round. -10 to activity. Stunned 2 rounds. | Slash weapon arm. +10 hits. 1 hit per round. If no arm armor: muscle & tendon damage, arm useless. | Destroys one eye. +10 hits. Stunned for 30 rounds. |
-| **8** | Minor forearm wound. +4 hits. 2 hits per round. Stunned 1 round. | Medium thigh wound. +6 hits. 1 hit per round. -10 to activity. Stunned 2 rounds. | Slash weapon arm. +10 hits. 1 hit per round. If no arm armor: muscle & tendon damage, arm useless. | Slash weapon arm. +10 hits. 1 hit per round. If no arm armor: muscle & tendon damage, arm useless. | Knocked out for 6 hours with a strike to side of head. +15 hits. If no helm: dies instantly. |
-| **9** | Medium thigh wound. +6 hits. 1 hit per round. -10 to activity. Stunned 2 rounds. | Medium thigh wound. +6 hits. 1 hit per round. -10 to activity. Stunned 2 rounds. | Slash weapon arm. +10 hits. 1 hit per round. If no arm armor: muscle & tendon damage, arm useless. | Knocked out for 6 hours with a strike to side of head. +15 hits. If no helm: dies instantly. | Major abdominal wound. +10 hits. 8 hits per round. -10 to activity. Stunned for 4 rounds. |
-| **10** | Medium thigh wound. +6 hits. 1 hit per round. -10 to activity. Stunned 2 rounds. | Slash weapon arm. +10 hits. 1 hit per round. If no arm armor: muscle & tendon damage, arm useless. | Knocked out for 6 hours with a strike to side of head. +15 hits. If no helm: dies instantly. | Major abdominal wound. +10 hits. 8 hits per round. -10 to activity. Stunned for 4 rounds. | Sever hand. 12 hits per round. Knocked down and stunned for 6 rounds. |
+The Slashing Critical Table uses a single-vector **1–18 lookup index** derived from the raw d20 roll's units digit plus a **Tier Modifier**:
+
+$$\text{Lookup Index} = (\text{raw d20} \bmod 10) + \text{Tier Modifier}$$
+
+* **Tier A (Minor)**: $+0$ (Indices 1–10)
+* **Tier B (Moderate)**: $+2$ (Indices 3–12)
+* **Tier C (Severe)**: $+4$ (Indices 5–14)
+* **Tier D (Lethal)**: $+6$ (Indices 7–16)
+* **Tier E (Catastrophic)**: $+8$ (Indices 9–18)
+
+| Index | Mastery | Concussion Damage & Bleed | Full Narrative & Mechanical Outcome |
+| :---: | :---: | :---: | :--- |
+| **1** | **Graze** | **+Ability Mod** | **Glancing Strike.** Deals extra damage equal to attacker's STR/DEX modifier. |
+| **2** | **Vex** | **+0 hits** (1 bleed/rd) | **Minor calf wound.** Attacker gains Advantage on next attack roll against target before end of next turn. |
+| **3** | **Topple** | **+3 hits** | **Blow to upper leg.** Target must make a CON save (DC = 8 + PB + Mod) or fall Prone. (If no leg armor: 1 bleed/rd). |
+| **4** | **Sap** | **+2 hits** (1 bleed/rd) | **Minor chest wound.** Target has Disadvantage on next attack roll before start of your next turn. |
+| **5** | **Vex** | **+3 hits** (1 bleed/rd) | **Forearm slash.** Attacker gains Advantage on next attack roll; target drops held item. |
+| **6** | **Topple** | **+4 hits** (1 bleed/rd) | **Medium thigh wound.** Target must make a CON save (DC = 8 + PB + Mod) or fall Prone, and is Stunned for 1 round. |
+| **7** | **Sap** | **+5 hits** (1 bleed/rd) | **Slash weapon arm.** Target has Disadvantage on all weapon attack rolls (arm muscle & tendon damaged). |
+| **8** | **Cleave** | **+6 hits** | **Sweeping arc strike.** Deals +6 hits to target, and attacker can make a secondary attack roll against an enemy within 5 ft (dealing weapon damage without ability mod on hit). |
+| **9** | **Sap (Heavy)** | **+8 hits** | **Head strike.** Stunned 2 rounds, target has Disadvantage on next attack roll. (If no helm: knocked out 1 hr). |
+| **10** | **Topple (Severe)** | **+10 hits** (5 bleed/rd) | **Sever lower leg.** Target automatically falls Prone and is Stunned for 2 rounds. |
+| **11** | — | **+8 hits** (4 bleed/rd) | **Major abdominal wound.** Target has Disadvantage on all physical checks & saves, Stunned 3 rounds. |
+| **12** | — | **+10 hits** (5 bleed/rd) | **Sever weapon arm.** Weapon arm useless/severed, target is knocked Prone and Stunned 4 rounds. |
+| **13** | — | **+10 hits** (6 bleed/rd) | **Sever hand.** Hand severed, target falls Prone and is Stunned 4 rounds. |
+| **14** | — | **+12 hits** (8 bleed/rd) | **Sever spine.** Collapses immediately, lower body paralyzed permanently. |
+| **15** | — | **Dying (0 HP)** | **Arterial throat gash.** Target immediately drops to 0 HP, falls Prone, and is Dying (begins rolling Death Saves on the Death Clock). |
+| **16** | — | **Dying (0 HP)** | **Sever shoulder & collarbone.** Arm destroyed. Target drops to 0 HP, is Unconscious and Dying (begins rolling Death Saves). |
+| **17** | — | **Instant Death** | **Decapitation.** Head severed from body. Target dies instantly. |
+| **18** | — | **Instant Death** | **Cleaved in two.** Torso severed from shoulder to hip. Target dies instantly. |
 
 ---
 
-### 3.2 CT-1: Crush Critical Table (Maces, Warhammers, Clubs)
+### 3.2 CT-1: Crush Critical Table (Maces, Warhammers, Clubs, Mauls)
 
-| Index | Tier A (Minor) | Tier B (Moderate) | Tier C (Severe) | Tier D (Lethal) | Tier E (Catastrophic) |
-| :---: | :--- | :--- | :--- | :--- | :--- |
-| **1** | Weak grip. No extra damage. +0 hits. | Weak grip. No extra damage. +0 hits. | Weak grip. No extra damage. +0 hits. | Minor fracture of ribs. +5 hits. -5 to activity. | Blow to side. +4 hits. -40 to activity for 1 round. |
-| **2** | Minor fracture of ribs. +5 hits. -5 to activity. | Minor fracture of ribs. +5 hits. -5 to activity. | Minor fracture of ribs. +5 hits. -5 to activity. | Blow to side. +4 hits. -40 to activity for 1 round. | Blow to forearm. +5 hits. If no arm armor, stunned 1 round. |
-| **3** | Minor fracture of ribs. +5 hits. -5 to activity. | Blow to side. +4 hits. -40 to activity for 1 round. | Blow to side. +4 hits. -40 to activity for 1 round. | Blow to forearm. +5 hits. If no arm armor, stunned 1 round. | Blow to forearm. +5 hits. If no arm armor, stunned 1 round. |
-| **4** | Blow to side. +4 hits. -40 to activity for 1 round. | Blow to forearm. +5 hits. If no arm armor, stunned 1 round. | Blow to forearm. +5 hits. If no arm armor, stunned 1 round. | Blow to forearm. +5 hits. If no arm armor, stunned 1 round. | Blow to shield shoulder breaks shield. If no shield: shoulder broken, arm useless. |
-| **5** | Blow to forearm. +5 hits. If no arm armor, stunned 1 round. | Blow to forearm. +5 hits. If no arm armor, stunned 1 round. | Blow to forearm. +5 hits. If no arm armor, stunned 1 round. | Blow to shield shoulder breaks shield. If no shield: shoulder broken, arm useless. | Blow breaks bone in leg. +12 hits. -40 to activity. Stunned 2 rounds. |
-| **6** | Blow to forearm. +5 hits. If no arm armor, stunned 1 round. | Blow to shield shoulder breaks shield. If no shield: shoulder broken, arm useless. | Blow to shield shoulder breaks shield. If no shield: shoulder broken, arm useless. | Blow breaks bone in leg. +12 hits. -40 to activity. Stunned 2 rounds. | Blow to weapon arm. +8 hits. Stunned 2 rounds. If no arm armor: tendon damaged, arm broken & useless. |
-| **7** | Blow to shield shoulder breaks shield. If no shield: shoulder broken, arm useless. | Blow to shield shoulder breaks shield. If no shield: shoulder broken, arm useless. | Blow breaks bone in leg. +12 hits. -40 to activity. Stunned 2 rounds. | Blow to weapon arm. +8 hits. Stunned 2 rounds. If no arm armor: tendon damaged, arm broken & useless. | Shatter knee. +9 hits. -60 to activity. Knocked down and stunned for 3 rounds. |
-| **8** | Blow to shield shoulder breaks shield. If no shield: shoulder broken, arm useless. | Blow breaks bone in leg. +12 hits. -40 to activity. Stunned 2 rounds. | Blow to weapon arm. +8 hits. Stunned 2 rounds. If no arm armor: tendon damaged, arm broken & useless. | Blow to weapon arm. +8 hits. Stunned 2 rounds. If no arm armor: tendon damaged, arm broken & useless. | Unconscious for 4 hours due to blow to side of head. If no helm: skull crushed. +20 hits. |
-| **9** | Blow breaks bone in leg. +12 hits. -40 to activity. Stunned 2 rounds. | Blow breaks bone in leg. +12 hits. -40 to activity. Stunned 2 rounds. | Blow to weapon arm. +8 hits. Stunned 2 rounds. If no arm armor: tendon damaged, arm broken & useless. | Unconscious for 4 hours due to blow to side of head. If no helm: skull crushed. +20 hits. | Blow breaks hip. +15 hits. -75 to activity. Knocked down and stunned 3 rounds. |
-| **10** | Blow breaks bone in leg. +12 hits. -40 to activity. Stunned 2 rounds. | Blow to weapon arm. +8 hits. Stunned 2 rounds. If no arm armor: tendon damaged, arm broken & useless. | Unconscious for 4 hours due to blow to side of head. If no helm: skull crushed. +20 hits. | Blow breaks hip. +15 hits. -75 to activity. Knocked down and stunned 3 rounds. | Shatter elbow in weapon arm. Arm useless. Stunned 5 rounds. |
+The Crush Critical Table uses a single-vector **1–18 lookup index** derived from the raw d20 roll's units digit plus a **Tier Modifier**:
+
+$$\text{Lookup Index} = (\text{raw d20} \bmod 10) + \text{Tier Modifier}$$
+
+* **Tier A (Minor)**: $+0$ (Indices 1–10)
+* **Tier B (Moderate)**: $+2$ (Indices 3–12)
+* **Tier C (Severe)**: $+4$ (Indices 5–14)
+* **Tier D (Lethal)**: $+6$ (Indices 7–16)
+* **Tier E (Catastrophic)**: $+8$ (Indices 9–18)
+
+| Index | Mastery Pulled | Concussion Damage & Bleed | Full Narrative & Mechanical Outcome |
+| :---: | :---: | :---: | :--- |
+| **1** | **Graze** | **+Ability Mod** | **Glancing Strike.** Deals extra damage equal to attacker's STR/DEX modifier. |
+| **2** | **Slow** | **+3 hits** | **Minor rib contusion.** Attacker gains Advantage on next attack roll against target before end of next turn. |
+| **3** | **Sap** | **+4 hits** | **Forearm blow.** Attacker gains Advantage on next attack roll; target drops weapon. |
+| **4** | **Push** | **+5 hits** | **Chest blow.** Knocked back 10 feet. |
+| **5** | **Topple** | **+6 hits** | **Thigh blow.** Target must make a CON save (DC = 8 + PB + Mod) or fall Prone, and is Stunned for 1 round. |
+| **6** | **Sap (Heavy)** | **+8 hits** | **Blow to shield shoulder breaks shield.** If no shield: shoulder broken, arm useless. |
+| **7** | **Topple (Heavy)** | **+10 hits** | **Blow breaks bone in leg.** Target automatically falls Prone and is Stunned for 2 rounds. |
+| **8** | **Push & Sap** | **+10 hits** | **Blow breaks weapon arm.** Weapon arm useless, target drops weapon and is Stunned for 2 rounds. |
+| **9** | **Topple (Severe)** | **+12 hits** | **Shatter knee.** Target falls Prone and is Stunned for 3 rounds. |
+| **10** | **Skull Concussion** | **+15 hits** | **Blow to side of head.** Stunned for 3 rounds. (If no helm: knocked out for 4 hours). |
+| **11** | — | **+15 hits** | **Shatter elbow in weapon arm.** Weapon arm useless, target drops weapon and is Stunned for 4 rounds. |
+| **12** | — | **+18 hits** | **Blow breaks hip.** Target falls Prone and is Stunned for 4 rounds. |
+| **13** | — | **+20 hits** | **Blast to chest sends ribcage through lungs.** Target falls Prone and is Stunned for 4 rounds. |
+| **14** | — | **Dying (0 HP)** | **Neck strike crushes throat.** Target immediately reaches 0 HP, falls Prone, and is Dying (begins Death Saves). |
+| **15** | — | **Dying (0 HP)** | **Blow to side crushes chest cavity.** Target reaches 0 HP, falls Prone, and is Dying (begins Death Saves). |
+| **16** | — | **Dying (0 HP)** | **Crushed skull and vertebrae.** Target reaches 0 HP, is unconscious and Dying (begins Death Saves). |
+| **17** | — | **Instant Death** | **Skull crushed.** Bone driven into brain. Target dies instantly. |
+| **18** | — | **Instant Death** | **Heart crushed.** Chest cavity collapsed. Target dies instantly. |
 
 ---
 
-### 3.3 CT-3: Puncture Critical Table (Daggers, Spears, Arrows)
+### 3.3 CT-3: Puncture Critical Table (Daggers, Spears, Arrows, Rapiers)
 
-| Index | Tier A (Minor) | Tier B (Moderate) | Tier C (Severe) | Tier D (Lethal) | Tier E (Catastrophic) |
-| :---: | :--- | :--- | :--- | :--- | :--- |
-| **1** | Glancing blow. No extra damage. | Glancing blow. No extra damage. | Glancing blow. No extra damage. | Glancing blow to side. +3 hits. | Thigh strike, +3 hits. If no leg armor: 3 hits per round. |
-| **2** | Glancing blow to side. +3 hits. | Glancing blow to side. +3 hits. | Glancing blow to side. +3 hits. | Thigh strike, +3 hits. If no leg armor: 3 hits per round. | Minor forearm wound. +2 hits. If no arm armor: stunned 1 round. |
-| **3** | Glancing blow to side. +3 hits. | Thigh strike, +3 hits. If no leg armor: 3 hits per round. | Thigh strike, +3 hits. If no leg armor: 3 hits per round. | Minor forearm wound. +2 hits. If no arm armor: stunned 1 round. | Minor forearm wound. +2 hits. If no arm armor: stunned 1 round. |
-| **4** | Thigh strike, +3 hits. If no leg armor: 3 hits per round. | Minor forearm wound. +2 hits. If no arm armor: stunned 1 round. | Minor forearm wound. +2 hits. If no arm armor: stunned 1 round. | Minor forearm wound. +2 hits. If no arm armor: stunned 1 round. | Strike along side of chest. 1 hit per round. Stunned 1 round. |
-| **5** | Minor forearm wound. +2 hits. If no arm armor: stunned 1 round. | Minor forearm wound. +2 hits. If no arm armor: stunned 1 round. | Minor forearm wound. +2 hits. If no arm armor: stunned 1 round. | Strike along side of chest. 1 hit per round. Stunned 1 round. | Strike to lower leg. Tendons torn. +3 hits. -25 to activity. Stunned 1 round. |
-| **6** | Minor forearm wound. +2 hits. If no arm armor: stunned 1 round. | Strike along side of chest. 1 hit per round. Stunned 1 round. | Strike along side of chest. 1 hit per round. Stunned 1 round. | Strike to lower leg. Tendons torn. +3 hits. -25 to activity. Stunned 1 round. | Strike to weapon arm. +10 hits. If no arm armor: bone broken, stunned 3 rounds. |
-| **7** | Strike along side of chest. 1 hit per round. Stunned 1 round. | Strike along side of chest. 1 hit per round. Stunned 1 round. | Strike to lower leg. Tendons torn. +3 hits. -25 to activity. Stunned 1 round. | Strike to weapon arm. +10 hits. If no arm armor: bone broken, stunned 3 rounds. | Strike through lower leg. Sever muscle. -50 to activity. Stunned 3 rounds. |
-| **8** | Strike along side of chest. 1 hit per round. Stunned 1 round. | Strike to lower leg. Tendons torn. +3 hits. -25 to activity. Stunned 1 round. | Strike to weapon arm. +10 hits. If no arm armor: bone broken, stunned 3 rounds. | Strike to weapon arm. +10 hits. If no arm armor: bone broken, stunned 3 rounds. | Strike to side of head. Knocked out for 6 hours. +10 hits. If no helm: dies instantly. |
-| **9** | Strike to lower leg. Tendons torn. +3 hits. -25 to activity. Stunned 1 round. | Strike to lower leg. Tendons torn. +3 hits. -25 to activity. Stunned 1 round. | Strike to weapon arm. +10 hits. If no arm armor: bone broken, stunned 3 rounds. | Strike to side of head. Knocked out for 6 hours. +10 hits. If no helm: dies instantly. | Major abdominal wound. +10 hits. 6 hits per round. -20 to activity. Stunned 4 rounds. |
-| **10** | Strike to lower leg. Tendons torn. +3 hits. -25 to activity. Stunned 1 round. | Strike to weapon arm. +10 hits. If no arm armor: bone broken, stunned 3 rounds. | Strike to side of head. Knocked out for 6 hours. +10 hits. If no helm: dies instantly. | Major abdominal wound. +10 hits. 6 hits per round. -20 to activity. Stunned 4 rounds. | Strike through leg. Artery severed. Down and unconscious. 12 hits per round. |
+The Puncture Critical Table uses a single-vector **1–18 lookup index** derived from the raw d20 roll's units digit plus a **Tier Modifier**:
+
+$$\text{Lookup Index} = (\text{raw d20} \bmod 10) + \text{Tier Modifier}$$
+
+* **Tier A (Minor)**: $+0$ (Indices 1–10)
+* **Tier B (Moderate)**: $+2$ (Indices 3–12)
+* **Tier C (Severe)**: $+4$ (Indices 5–14)
+* **Tier D (Lethal)**: $+6$ (Indices 7–16)
+* **Tier E (Catastrophic)**: $+8$ (Indices 9–18)
+
+| Index | Mastery Pulled | Concussion Damage & Bleed | Full Narrative & Mechanical Outcome |
+| :---: | :---: | :---: | :--- |
+| **1** | **Graze** | **+Ability Mod** | **Glancing Strike.** Deals extra damage equal to attacker's STR/DEX modifier. |
+| **2** | **Slow** | **+0 hits** (1 bleed/rd) | **Minor calf wound.** Reduces target's Speed by 10 ft until start of next turn. Attacker gains Advantage on next attack. |
+| **3** | **Vex** | **+2 hits** | **Forearm stab.** Attacker gains Advantage on next attack roll against target before end of next turn; target drops weapon. |
+| **4** | **Sap** | **+2 hits** (1 bleed/rd) | **Minor chest wound.** Target has Disadvantage on next attack roll before start of your next turn. |
+| **5** | **Topple** | **+3 hits** (1 bleed/rd) | **Leg tendon thrust.** Target must make a CON save (DC = 8 + PB + Mod) or fall Prone. |
+| **6** | **Push** | **+4 hits** | **Heavy chest thrust.** Target is pushed 10 feet back. |
+| **7** | **Vex (Heavy)** | **+5 hits** (1 bleed/rd) | **Weapon arm puncture.** Attacker gains Advantage on next attack; target has Disadvantage on all weapon attack rolls. |
+| **8** | **Slow & Sap** | **+5 hits** (2 bleed/rd) | **Knee tendon strike.** Target has Disadvantage on next attack roll. |
+| **9** | **Sap (Heavy)** | **+8 hits** | **Head strike.** Stunned 2 rounds, target has Disadvantage on next attack roll. (If no helm: KO 1 hr). |
+| **10** | **Topple (Severe)** | **+10 hits** (4 bleed/rd) | **Deep leg puncture.** Target automatically falls Prone and is Stunned for 2 rounds. |
+| **11** | — | **+8 hits** (5 bleed/rd) | **Major abdominal wound.** Target has Disadvantage on all physical checks & saves, Stunned 3 rounds. |
+| **12** | — | **+10 hits** (6 bleed/rd) | **Spinal puncture.** Target is Stunned for 4 rounds, leg useless. |
+| **13** | — | **+10 hits** (6 bleed/rd) | **Nailed in lower back.** Target falls Prone and is Stunned for 4 rounds. |
+| **14** | — | **+12 hits** (8 bleed/rd) | **Severed artery.** Target falls Prone and is Stunned for 4 rounds. |
+| **15** | — | **Dying (0 HP)** | **Kidney puncture.** Target immediately drops to 0 HP, falls Prone, and is Dying (begins Death Saves on Death Clock). |
+| **16** | — | **Dying (0 HP)** | **Subclavian artery puncture.** Target drops to 0 HP, is Unconscious and Dying (begins Death Saves). |
+| **17** | — | **Instant Death** | **Eye puncture.** Spear/arrow pierces eye into brain. Target dies instantly. |
+| **18** | — | **Instant Death** | **Heart pierced.** Heart punctured through chest. Target dies instantly. |
 
 ---
 
 ### 3.4 CT-4: Unbalancing Critical Table (Tackles, Trips, Shield Slams)
 
-| Index | Tier A (Minor) | Tier B (Moderate) | Tier C (Severe) | Tier D (Lethal) | Tier E (Catastrophic) |
-| :---: | :--- | :--- | :--- | :--- | :--- |
-| **1** | Fairly weak. +0 hits. Zip. | Fairly weak. +0 hits. Zip. | Fairly weak. +0 hits. Zip. | Arm strike. +2 hits. -5 to activity for 2 rounds. | Leg strike. +4 hits. If no leg armor: stunned 1 round. |
-| **2** | Arm strike. +2 hits. -5 to activity for 2 rounds. | Arm strike. +2 hits. -5 to activity for 2 rounds. | Arm strike. +2 hits. -5 to activity for 2 rounds. | Leg strike. +4 hits. If no leg armor: stunned 1 round. | Chest strike. Knocked back 3 feet. +5 hits. -10 to activity for 2 rnds. |
-| **3** | Arm strike. +2 hits. -5 to activity for 2 rounds. | Leg strike. +4 hits. If no leg armor: stunned 1 round. | Leg strike. +4 hits. If no leg armor: stunned 1 round. | Chest strike. Knocked back 3 feet. +5 hits. -10 to activity for 2 rnds. | Chest strike. Knocked back 3 feet. +5 hits. -10 to activity for 2 rnds. |
-| **4** | Leg strike. +4 hits. If no leg armor: stunned 1 round. | Chest strike. Knocked back 3 feet. +5 hits. -10 to activity for 2 rnds. | Chest strike. Knocked back 3 feet. +5 hits. -10 to activity for 2 rnds. | Chest strike. Knocked back 3 feet. +5 hits. -10 to activity for 2 rnds. | Blow to shield arm. +5 hits. Shield torn away. If no shield: +8 hits and stunned 2 rounds. |
-| **5** | Chest strike. Knocked back 3 feet. +5 hits. -10 to activity for 2 rnds. | Chest strike. Knocked back 3 feet. +5 hits. -10 to activity for 2 rnds. | Chest strike. Knocked back 3 feet. +5 hits. -10 to activity for 2 rnds. | Blow to shield arm. +5 hits. Shield torn away. If no shield: +8 hits and stunned 2 rounds. | Elbow strike. Forearm numbed. +8 hits. Drop weapon. -10 to activity for 10 rounds. |
-| **6** | Chest strike. Knocked back 3 feet. +5 hits. -10 to activity for 2 rnds. | Blow to shield arm. +5 hits. Shield torn away. If no shield: +8 hits and stunned 2 rounds. | Blow to shield arm. +5 hits. Shield torn away. If no shield: +8 hits and stunned 2 rounds. | Elbow strike. Forearm numbed. +8 hits. Drop weapon. -10 to activity for 10 rounds. | Shot to side. Knocked 5 feet sideways. Drop anything carried in hands. Stunned 3 rounds. |
-| **7** | Blow to shield arm. +5 hits. Shield torn away. If no shield: +8 hits and stunned 2 rounds. | Blow to shield arm. +5 hits. Shield torn away. If no shield: +8 hits and stunned 2 rounds. | Elbow strike. Forearm numbed. +8 hits. Drop weapon. -10 to activity for 10 rounds. | Shot to side. Knocked 5 feet sideways. Drop anything carried in hands. Stunned 3 rounds. | Side strike. Stumble ungracefully to an embarrassing prone position. Stunned 6 rounds. |
-| **8** | Blow to shield arm. +5 hits. Shield torn away. If no shield: +8 hits and stunned 2 rounds. | Elbow strike. Forearm numbed. +8 hits. Drop weapon. -10 to activity for 10 rounds. | Shot to side. Knocked 5 feet sideways. Drop anything carried in hands. Stunned 3 rounds. | Shot to side. Knocked 5 feet sideways. Drop anything carried in hands. Stunned 3 rounds. | Hard head strike. Knocked back 10' and stunned 6 rounds. If no helm: unconscious for 24 hours. |
-| **9** | Elbow strike. Forearm numbed. +8 hits. Drop weapon. -10 to activity for 10 rounds. | Elbow strike. Forearm numbed. +8 hits. Drop weapon. -10 to activity for 10 rounds. | Shot to side. Knocked 5 feet sideways. Drop anything carried in hands. Stunned 3 rounds. | Hard head strike. Knocked back 10' and stunned 6 rounds. If no helm: unconscious for 24 hours. | Blow breaks leg. +12 hits. -50 to activity. Stunned 1 round. |
-| **10** | Elbow strike. Forearm numbed. +8 hits. Drop weapon. -10 to activity for 10 rounds. | Shot to side. Knocked 5 feet sideways. Drop anything carried in hands. Stunned 3 rounds. | Hard head strike. Knocked back 10' and stunned 6 rounds. If no helm: unconscious for 24 hours. | Blow breaks leg. +12 hits. -50 to activity. Stunned 1 round. | Great side shot. Knocked down and sideways 5'. Lower leg broken. Stunned 7 rounds. -40 to activity. |
+The Unbalancing Critical Table uses a single-vector **1–18 lookup index** derived from the raw d20 roll's units digit plus a **Tier Modifier**:
 
+$$\text{Lookup Index} = (\text{raw d20} \bmod 10) + \text{Tier Modifier}$$
+
+* **Tier A (Minor)**: $+0$ (Indices 1–10)
+* **Tier B (Moderate)**: $+2$ (Indices 3–12)
+* **Tier C (Severe)**: $+4$ (Indices 5–14)
+* **Tier D (Lethal)**: $+6$ (Indices 7–16)
+* **Tier E (Catastrophic)**: $+8$ (Indices 9–18)
+
+| Index | Mastery Pulled | Concussion Damage & Bleed | Full Narrative & Mechanical Outcome |
+| :---: | :---: | :---: | :--- |
+| **1** | **Graze** | **+Ability Mod** | **Glancing Strike.** Deals extra damage equal to attacker's STR/DEX modifier. |
+| **2** | **Slow** | **+2 hits** | **Minor leg strike.** Attacker gains Advantage on next attack roll against target. |
+| **3** | **Push** | **+3 hits** | **Chest strike.** Knocked back 10 feet. |
+| **4** | **Disarm & Sap** | **+4 hits** | **Strike to weapon arm.** Attacker gains Advantage on next attack; target drops weapon. |
+| **5** | **Topple** | **+5 hits** | **Leg strike.** Target must make a CON save (DC = 8 + PB + Mod) or fall Prone, and is Stunned for 1 round. |
+| **6** | **Push Heavy** | **+6 hits** | **Shield arm strike.** Shield torn away, target knocked back 10 feet. |
+| **7** | **Topple Heavy** | **+8 hits** | **Blow to upper leg.** Target automatically falls Prone and is Stunned for 2 rounds. |
+| **8** | **Head Blow** | **+10 hits** | **Blow to side of head.** Stunned for 2 rounds. (If no helm: knocked out for 1 hour). |
+| **9** | **Push & Topple** | **+12 hits** | **Blow to chest.** Knocked back 10 feet, target falls Prone and is Stunned for 3 rounds. |
+| **10** | **Side Blow / Ribs** | **+12 hits** | **Blow to side.** Ribs broken, target falls Prone and is Stunned for 3 rounds. |
+| **11** | — | **+15 hits** | **Blow to leg.** Leg broken, target falls Prone and is Stunned for 4 rounds. |
+| **12** | — | **+15 hits** | **Blow to weapon arm.** Arm broken, target drops weapon, falls Prone and is Stunned for 4 rounds. |
+| **13** | — | **+18 hits** | **Blow to head.** Target falls Prone and is Stunned for 4 rounds. |
+| **14** | — | **Dying (0 HP)** | **Knocked off feet, head hits stone.** Target immediately reaches 0 HP, falls Prone, and is Dying (begins Death Saves). |
+| **15** | — | **Dying (0 HP)** | **Violent trip onto back.** Target reaches 0 HP, falls Prone, and is Dying (begins Death Saves). |
+| **16** | — | **Dying (0 HP)** | **Spinal fracture on impact.** Target reaches 0 HP, is unconscious and Dying (begins Death Saves). |
+| **17** | — | **Instant Death** | **Neck broken on impact.** Target dies instantly. |
+| **18** | — | **Instant Death** | **Skull crushed on impact.** Target dies instantly. |
+
+---
+
+### 3.5 CT-5: Grappling Critical Table (Holds, Joint Locks, Entanglements)
+
+The Grappling Critical Table uses a single-vector **1–18 lookup index**:
+
+$$\text{Lookup Index} = (\text{raw d20} \bmod 10) + \text{Tier Modifier}$$
+
+| Index | Mastery Pulled | Concussion Damage & Bleed | Full Narrative & Mechanical Outcome |
+| :---: | :---: | :---: | :--- |
+| **1** | **Graze** | **+Ability Mod** | **Opportunity lost.** Glancing hold. Extra damage equal to attacker's STR/DEX modifier. |
+| **2** | **Slow** | **+2 hits** | **Off-balance hold.** Reduces target's Speed by 10 ft until start of next turn. |
+| **3** | **Vex / Disarm** | **+3 hits** | **Wrist grasp.** Attacker gains Advantage on next attack; target drops weapon. |
+| **4** | **Sap** | **+3 hits** | **Spun about.** Target has Disadvantage on next attack roll before start of next turn. |
+| **5** | **Topple / Grapple** | **+4 hits** | **Shield arm entangled.** Target is Grappled (Speed 0) until freed. |
+| **6** | **Disarm & Sap** | **+5 hits** | **Weapon arm grasped.** Target is Disarmed (drops weapon) and has Disadvantage on next attack. |
+| **7** | **Topple Heavy** | **+6 hits** | **Leg entangled.** Target automatically falls Prone and is Stunned for 1 round. |
+| **8** | **Restrained** | **+8 hits** | **Both arms entangled & pinned to chest.** Target is Restrained (Speed 0, Disadvantage on attacks). |
+| **9** | **Head Grapple** | **+10 hits** | **Head grappled.** Target is Stunned for 2 rounds. (If no helm: KO for 1 hour). |
+| **10** | **Chest Crush** | **+10 hits** | **Chest grasped.** Ribs broken, target is Stunned for 3 rounds. |
+| **11** | — | **+12 hits** | **Foot entangled, stumble & fall.** Weapon arm broken, target drops weapon, falls Prone, Stunned 3 rounds. |
+| **12** | — | **+15 hits** | **Completely entangled & immobilized.** Target falls Prone, is Restrained and Stunned for 4 rounds. |
+| **13** | — | **+20 hits** | **Full body tumble.** Arm & ankle broken, target falls Prone and is Stunned for 4 rounds. |
+| **14** | — | **Dying (0 HP)** | **Vicious neck crank.** Target immediately reaches 0 HP, falls Prone, and is Dying (begins Death Saves). |
+| **15** | — | **Dying (0 HP)** | **Throat crushed in hold.** Target reaches 0 HP, falls Prone, and is Dying (begins Death Saves). |
+| **16** | — | **Dying (0 HP)** | **Head slammed into stone.** Target reaches 0 HP, is unconscious and Dying (begins Death Saves). |
+| **18** | — | **Instant Death** | **Spine crushed in submission hold.** Target dies instantly. |
+
+---
+
+### 3.6 CT-6: Heat Critical Table (Fire, Plasma, Searing Magic)
+
+The Heat Critical Table uses a single-vector **1–18 lookup index**:
+
+$$\text{Lookup Index} = (\text{raw d20} \bmod 10) + \text{Tier Modifier}$$
+
+| Index | Elemental Effect | Damage & Bleed | Full Narrative & Mechanical Outcome |
+| :---: | :---: | :---: | :--- |
+| **1** | **Graze** | **+Ability Mod** | **Glancing Strike.** Hot air blast. Extra damage equal to attacker's spellcasting modifier. |
+| **2** | **Heat Flash** | **+3 hits** | **Strong heat wave.** Attacker gains Advantage on next attack roll against target. |
+| **3** | **Smoke Blind** | **+6 hits** (1 burn/rd) | **Minor burns & hot smoke.** Target is Blinded until end of its next turn. |
+| **4** | **Ignite** | **+8 hits** (2 burn/rd) | **Clothing catches on fire.** Takes 2 fire damage per round until extinguished. |
+| **5** | **Fiery Blast** | **+10 hits** | **Fiery blast.** Target must make a CON save (DC = 8 + PB + Mod) or fall Prone. |
+| **6** | **Back Engulfed** | **+12 hits** (2 burn/rd) | **Fire engulfs back.** Target falls Prone. |
+| **7** | **Shield Fried** | **+12 hits** | **Shield arm scorched.** Shield broken (if no shield: arm useless). |
+| **8** | **Leg Scorched** | **+15 hits** (3 burn/rd) | **Blast to leg.** Leg useless, target falls Prone. |
+| **9** | **Head Scorched** | **+15 hits** | **Scorching head blast.** Target is Blinded and has Disadvantage on next attack. |
+| **10** | **Chest Blast** | **+18 hits** | **Blast to chest.** Chest armor broken, target falls Prone. |
+| **11** | **Organic Destruct** | **+20 hits** (4 burn/rd) | **Fire engulfs body.** Target falls Prone and is Stunned for 1 round. |
+| **12** | **Massive Burn** | **+22 hits** (5 burn/rd) | **Severe body incineration.** Target falls Prone. |
+| **13** | **Cerebral Shock** | **Dying (0 HP)** | **Blast to head causes massive shock.** Target immediately reaches 0 HP, falls Prone, and is Dying. |
+| **14** | **Nerve Failure** | **Dying (0 HP)** | **Body engulfed in searing flame.** Target reaches 0 HP, falls Prone, and is Dying. |
+| **15** | **Charred Organs** | **Dying (0 HP)** | **Internal organs charred by heat.** Target reaches 0 HP, is unconscious and Dying. |
+| **16** | **Midsection Melt** | **Dying (0 HP)** | **Midsection incinerated.** Target reaches 0 HP, is unconscious and Dying. |
+| **17** | **Instant Death** | **Instant Death** | **Reduced to ash.** Body incinerated. Target dies instantly. |
+| **18** | **Instant Death** | **Instant Death** | **Vaporized instantly by fiery inferno.** Target dies instantly. |
+
+---
+
+### 3.7 CT-7: Cold Critical Table (Frost, Ice, Cryo Magic)
+
+| Index | Elemental Effect | Damage & Bleed | Full Narrative & Mechanical Outcome |
+| :---: | :---: | :---: | :--- |
+| **1** | **Graze** | **+Ability Mod** | **Glancing Strike.** Cool breeze. Extra damage equal to attacker's spellcasting modifier. |
+| **2** | **Slow** | **+3 hits** | **Cold blast.** Target's Speed is reduced by 10 ft until start of next turn. |
+| **3** | **Frost Burn** | **+5 hits** (1 frost/rd) | **Frosty burn.** Target has Disadvantage on next attack roll. |
+| **4** | **Mild Frostbite** | **+6 hits** (2 frost/rd) | **Mild frostbite.** Target's Speed is reduced by 10 ft. |
+| **5** | **Ice Blast Back** | **+8 hits** (2 frost/rd) | **Cold strike to back.** Target must make a CON save (DC = 8 + PB + Mod) or fall Prone. |
+| **6** | **Foot Freeze** | **+8 hits** | **Low frost blast.** Target drops held item. |
+| **7** | **Leg Frostbite** | **+10 hits** (3 frost/rd) | **Strike to leg.** Lower leg useless, target falls Prone. |
+| **8** | **Hands Frozen** | **+12 hits** | **Blast freezes hands.** Target drops weapon. |
+| **9** | **Neck Freeze** | **+12 hits** | **Strike to neck and collar area.** Target has Disadvantage on next attack. |
+| **10** | **Pelvis Shatter** | **+15 hits** (4 frost/rd) | **Thigh iced & bone broken.** Target falls Prone. |
+| **11** | **Chest Freeze** | **+18 hits** (5 frost/rd) | **Icy blast to upper chest.** Target falls Prone. |
+| **12** | **Hypothermia** | **+20 hits** | **Severe body freeze.** Target falls Prone. |
+| **13** | **Organ Freeze** | **Dying (0 HP)** | **Heart and lungs frozen.** Target immediately reaches 0 HP, falls Prone, and is Dying. |
+| **14** | **Pelvic Shatter Death** | **Dying (0 HP)** | **Pelvis shattered by deep freeze.** Target reaches 0 HP, falls Prone, and is Dying. |
+| **15** | **Hypothermic Collapse** | **Dying (0 HP)** | **Core body temperature plummets.** Target reaches 0 HP, is unconscious and Dying. |
+| **16** | **Frozen Statue** | **Dying (0 HP)** | **Frozen solid into a statue.** Target reaches 0 HP, is unconscious and Dying. |
+| **17** | **Instant Death** | **Instant Death** | **Frozen solid and shatters into pieces.** Target dies instantly. |
+| **18** | **Instant Death** | **Instant Death** | **Brain and heart flash frozen.** Target dies instantly. |
+
+---
+
+### 3.8 CT-8: Electricity Critical Table (Lightning, Shock, Arc Magic)
+
+| Index | Elemental Effect | Damage & Bleed | Full Narrative & Mechanical Outcome |
+| :---: | :---: | :---: | :--- |
+| **1** | **Graze** | **+Ability Mod** | **Glancing Strike.** Static charge. Extra damage equal to attacker's spellcasting modifier. |
+| **2** | **Light Charge** | **+3 hits** | **Light electrical charge.** Attacker gains Advantage on next attack roll against target. |
+| **3** | **Arc Flash** | **+4 hits** | **Arc flash explosion.** Target is Blinded until end of next turn. |
+| **4** | **Medium Charge** | **+6 hits** | **Medium electrical charge.** Target has Disadvantage on next attack roll. |
+| **5** | **Heavy Charge** | **+9 hits** | **Heavy electrical charge.** Target must make a CON save (DC = 8 + PB + Mod) or fall Prone. |
+| **6** | **Shield Shock** | **+12 hits** | **Strike to shield arm.** Target drops shield. |
+| **7** | **Arm Spasm** | **+12 hits** (2 shock/rd) | **Strike to weapon arm.** Weapon arm useless, target drops weapon. |
+| **8** | **Facial Flash** | **+14 hits** | **Strike to face.** Target is Blinded and falls Prone. |
+| **9** | **Chest Discharge** | **+15 hits** | **Chest strike.** Target has Disadvantage on next attack roll. |
+| **10** | **Abdominal Shock** | **+18 hits** (4 shock/rd) | **Abdomen strike.** Target falls Prone. |
+| **11** | **Arc Chain** | **+20 hits** (5 shock/rd) | **Massive chest discharge.** Target falls Prone. |
+| **12** | **Neural Overload** | **+22 hits** | **Neural system shock.** Target falls Prone. |
+| **13** | **Nervous System Collapse** | **Dying (0 HP)** | **Permeated by electricity.** Target immediately reaches 0 HP, falls Prone, and is Dying. |
+| **14** | **Neural Failure** | **Dying (0 HP)** | **Brain falls victim to massive neural shock.** Target reaches 0 HP, falls Prone, and is Dying. |
+| **15** | **Cardiac Arrest** | **Dying (0 HP)** | **Heart and lungs destroyed by high voltage.** Target reaches 0 HP, is unconscious and Dying. |
+| **16** | **Abdominal Sever** | **Dying (0 HP)** | **Abdominal cavity severed by electrical arc.** Target reaches 0 HP, is unconscious and Dying. |
+| **17** | **Instant Death** | **Instant Death** | **Heart disintegrated by superconductor arc.** Target dies instantly. |
+| **18** | **Instant Death** | **Instant Death** | **Cell structure disrupted.** Body turned to ash. Target dies instantly. |
+
+---
+
+### 3.9 CT-9: Impact Critical Table (Force, Kinetic Blasts, Sonic Magic)
+
+| Index | Elemental Effect | Damage & Bleed | Full Narrative & Mechanical Outcome |
+| :---: | :---: | :---: | :--- |
+| **1** | **Graze** | **+Ability Mod** | **Glancing Strike.** Grazing blast. Extra damage equal to attacker's spellcasting modifier. |
+| **2** | **Stagger** | **+5 hits** | **Grazing blast.** Attacker gains Advantage on next attack roll against target. |
+| **3** | **Spun About** | **+8 hits** | **Strike to shoulder spun about.** Knocked back 10 feet. |
+| **4** | **Knockdown** | **+8 hits** | **Strike to leg.** Target must make a CON save (DC = 8 + PB + Mod) or fall Prone. |
+| **5** | **Side Blast** | **+10 hits** | **Staggered by side blast.** Knocked back 10 feet. |
+| **6** | **Shield Smashed** | **+10 hits** | **Blast to shield arm.** Shield broken (if no shield: shoulder broken). |
+| **7** | **Collar Blast** | **+12 hits** | **Blast to collar area.** Target drops weapon. |
+| **8** | **Torn Muscle** | **+15 hits** | **Blow to upper leg.** Leg useless, target falls Prone. |
+| **9** | **Knee Dislocation** | **+15 hits** | **Knee dislocated.** Target falls Prone. |
+| **10** | **Jaw Fracture** | **+15 hits** | **Blow to jaw.** Target has Disadvantage on next attack roll. |
+| **11** | **Abdomen Blast** | **+18 hits** | **Blast to abdomen.** Target falls Prone. |
+| **12** | **Arms Broken** | **+20 hits** | **Both arms broken.** Target drops weapon, falls Prone. |
+| **13** | **Kidney Rupture** | **Dying (0 HP)** | **Blow to side drives rib into kidneys.** Target immediately reaches 0 HP, falls Prone, and is Dying. |
+| **14** | **Organ Destruction** | **Dying (0 HP)** | **Internal organs destroyed by shockwave.** Target reaches 0 HP, falls Prone, and is Dying. |
+| **15** | **Chest Collapse** | **Dying (0 HP)** | **Chest cavity crushed by impact.** Target reaches 0 HP, is unconscious and Dying. |
+| **16** | **Skull Fractured** | **Dying (0 HP)** | **Skull fractured into pieces.** Target reaches 0 HP, is unconscious and Dying. |
+| **17** | **Instant Death** | **Instant Death** | **Skull shattered into particles.** Target dies instantly. |
+| **18** | **Instant Death** | **Instant Death** | **Entire skeleton pulverized by kinetic force.** Target dies instantly. |
 ---
 
 ## 4. Resolution Walkthrough Example

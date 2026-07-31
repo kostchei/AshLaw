@@ -11,6 +11,7 @@ namespace Ash.Rules;
 public readonly record struct VaultCheckResult(
     Ability Ability,
     bool HadAdvantage,
+    bool HadDisadvantage,
     IReadOnlyList<int> Rolls,
     int Roll,
     int Bonus,
@@ -78,35 +79,39 @@ public static class VaultCheck
         characterClass == CharacterClass.Rogue &&
         ability == Ability.Dexterity;
 
+    /// <summary>
+    /// Rolls the attempt. A body that has lost the reliable use of the ability
+    /// carrying it rolls at disadvantage — which is what a wound costs, and why
+    /// a hurt character should think twice about the crate they cleared on the
+    /// way in.
+    /// </summary>
     public static VaultCheckResult Roll(
         Dice dice,
         AbilityScores scores,
         CharacterClass characterClass,
-        AbilityBonusTable bonuses)
+        AbilityBonusTable bonuses,
+        AbilityMask impairments = AbilityMask.None)
     {
         ArgumentNullException.ThrowIfNull(dice);
         ArgumentNullException.ThrowIfNull(scores);
         ArgumentNullException.ThrowIfNull(bonuses);
 
         var ability = GoverningAbility(scores);
-        var advantage = HasAdvantage(characterClass, ability);
-
-        // Both dice are always rolled under advantage, and both are kept in
-        // roll order: consuming a fixed number of rolls is what lets a saved
-        // world resume the sequence it would have rolled.
-        var rolls = advantage
-            ? new[] { dice.D20(), dice.D20() }
-            : [dice.D20()];
-        var roll = advantage ? Math.Max(rolls[0], rolls[1]) : rolls[0];
-        var bonus = bonuses.BonusFor(scores[ability]);
-        var check = checked(roll + bonus);
+        var check = AbilityCheck.Against(
+            dice,
+            scores,
+            bonuses,
+            ability,
+            impairments,
+            HasAdvantage(characterClass, ability));
         return new VaultCheckResult(
             ability,
-            advantage,
-            rolls,
-            roll,
-            bonus,
-            check,
-            StepHeightFor(check));
+            check.HadAdvantage,
+            check.HadDisadvantage,
+            check.Rolls,
+            check.Roll,
+            check.Bonus,
+            check.Total,
+            StepHeightFor(check.Total));
     }
 }

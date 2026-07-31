@@ -27,6 +27,8 @@ public static class RulesRepository
     private static readonly Lazy<CharacterCreationData> LoadedCreation =
         new(LoadCreation);
 
+    private static readonly Lazy<VitalityData> LoadedVitality = new(LoadVitality);
+
     public static RulesData Rules => Loaded.Value;
 
     public static ClassProgressionTable ClassProgression =>
@@ -37,6 +39,13 @@ public static class RulesRepository
 
     public static AbilityBonusTable AbilityBonuses =>
         LoadedCreation.Value.AbilityBonuses;
+
+    /// <summary>
+    /// Concussion hits, wounds and the death clock. Also this game's own rules:
+    /// the vendored package produces concussion hits as a damage quantity and
+    /// leaves where they land to the engine.
+    /// </summary>
+    public static VitalityData Vitality => LoadedVitality.Value;
 
     private static RulesData Load()
     {
@@ -49,6 +58,13 @@ public static class RulesRepository
         var directory = FindRepositoryDirectory("data");
         return CharacterCreationLoader.LoadFromFile(
             Path.Combine(directory, CharacterCreationLoader.FileName));
+    }
+
+    private static VitalityData LoadVitality()
+    {
+        var directory = FindRepositoryDirectory("data");
+        return VitalityLoader.LoadFromFile(
+            Path.Combine(directory, VitalityLoader.FileName));
     }
 
     private static string FindDataDirectory() =>

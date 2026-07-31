@@ -27,6 +27,10 @@ public enum CriticalTableId
     Slash,
     Puncture,
     Unbalancing,
+    Heat,
+    Cold,
+    Electricity,
+    Impact,
 }
 
 public enum CriticalTier

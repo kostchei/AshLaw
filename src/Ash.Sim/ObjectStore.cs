@@ -615,9 +615,19 @@ public sealed record ObjectSpawn
     /// </summary>
     public int GearSlotBonus { get; init; }
 
+    /// <summary>Current concussion hits: the outer layer of punishment.</summary>
     public int Health { get; init; }
 
     public int MaxHealth { get; init; }
+
+    /// <summary>
+    /// Current wounds: the layer under concussion hits. A spawn starts whole,
+    /// so the death-save counters and impairment are not authored — they are
+    /// what happens to a body, not what it was made with.
+    /// </summary>
+    public int Wounds { get; init; }
+
+    public int MaxWounds { get; init; }
 
     /// <summary>
     /// The object this spawn would become, so capacity and placement can be
@@ -645,6 +655,12 @@ public sealed record ObjectSpawn
             Condition,
             Health,
             MaxHealth,
+            Wounds,
+            MaxWounds,
+            0,
+            0,
+            AbilityMask.None,
+            VitalityState.Standing,
             SlotCost,
             SlotCapacity,
             QuantityPerSlot,
@@ -684,6 +700,12 @@ public readonly record struct WorldObject(
     int Condition,
     int Health,
     int MaxHealth,
+    int Wounds,
+    int MaxWounds,
+    int DeathSaveSuccesses,
+    int DeathSaveFailures,
+    AbilityMask Impairments,
+    VitalityState Vitality,
     int SlotCost,
     int SlotCapacity,
     int QuantityPerSlot,
@@ -703,7 +725,25 @@ public readonly record struct WorldObject(
 {
     public bool HasFlag(ObjectFlags flag) => (Flags & flag) != 0;
 
-    public bool IsAlive => MaxHealth > 0 && Health > 0;
+    /// <summary>
+    /// Whether the body is still in the world as something other than a corpse.
+    /// Running out of concussion hits is no longer the same as dying: a body
+    /// with a wound layer keeps going into it, and one on the death clock is
+    /// alive until the clock says otherwise.
+    /// </summary>
+    public bool IsAlive => MaxHealth > 0 && Vitality != VitalityState.Dead;
+
+    /// <summary>Everything about how hurt this body is, as one value.</summary>
+    public InjuryState Injury =>
+        new(
+            Health,
+            MaxHealth,
+            Wounds,
+            MaxWounds,
+            DeathSaveSuccesses,
+            DeathSaveFailures,
+            Impairments,
+            Vitality);
 
     /// <summary>
     /// Whether this object's top face can hold another object. Solid volumes
@@ -808,6 +848,12 @@ public sealed class ObjectStore
     private readonly List<int> _conditions = [];
     private readonly List<int> _health = [];
     private readonly List<int> _maxHealth = [];
+    private readonly List<int> _wounds = [];
+    private readonly List<int> _maxWounds = [];
+    private readonly List<int> _deathSaveSuccesses = [];
+    private readonly List<int> _deathSaveFailures = [];
+    private readonly List<AbilityMask> _impairments = [];
+    private readonly List<VitalityState> _vitality = [];
     private readonly List<int> _slotCosts = [];
     private readonly List<int> _slotCapacities = [];
     private readonly List<int> _quantitiesPerSlot = [];
@@ -976,6 +1022,12 @@ public sealed class ObjectStore
         _conditions[index] = spawn.Condition;
         _health[index] = spawn.Health;
         _maxHealth[index] = spawn.MaxHealth;
+        _wounds[index] = spawn.Wounds;
+        _maxWounds[index] = spawn.MaxWounds;
+        _deathSaveSuccesses[index] = 0;
+        _deathSaveFailures[index] = 0;
+        _impairments[index] = AbilityMask.None;
+        _vitality[index] = VitalityState.Standing;
         _slotCosts[index] = spawn.SlotCost;
         _slotCapacities[index] = spawn.SlotCapacity;
         _quantitiesPerSlot[index] = spawn.QuantityPerSlot;
@@ -1062,13 +1114,18 @@ public sealed class ObjectStore
         }
     }
 
-    public int Damage(ObjectId id, int amount)
+    /// <summary>
+    /// Writes a body's whole injury state back in one go.
+    /// </summary>
+    /// <remarks>
+    /// The store owns the numbers; <see cref="Ash.Rules.Injury"/> owns what
+    /// they mean. Every transition — damage, a death save, healing, a day's
+    /// rest — is resolved there as a pure function and lands here as one
+    /// assignment, so concussion hits, wounds, the death clock and impairment
+    /// can never be written half-updated relative to each other.
+    /// </remarks>
+    public void SetInjury(ObjectId id, InjuryState injury)
     {
-        if (amount <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(amount));
-        }
-
         var index = ResolveSlot(id);
         if (_maxHealth[index] <= 0)
         {
@@ -1076,9 +1133,54 @@ public sealed class ObjectStore
                 $"Object {id} has no health component.");
         }
 
-        _health[index] = Math.Max(0, _health[index] - amount);
+        if (injury.MaximumConcussion != _maxHealth[index] ||
+            injury.MaximumWounds != _maxWounds[index])
+        {
+            throw new InvalidOperationException(
+                $"Object {id} was given an injury state built for a different " +
+                "body. Its maximums change when the character does, not when " +
+                "it is hurt.");
+        }
+
+        if (injury.Concussion < 0 ||
+            injury.Concussion > injury.MaximumConcussion ||
+            injury.Wounds < 0 ||
+            injury.Wounds > injury.MaximumWounds ||
+            injury.DeathSaveSuccesses < 0 ||
+            injury.DeathSaveFailures < 0)
+        {
+            throw new InvalidOperationException(
+                $"Object {id} was given an out-of-range injury state.");
+        }
+
+        _health[index] = injury.Concussion;
+        _wounds[index] = injury.Wounds;
+        _deathSaveSuccesses[index] = injury.DeathSaveSuccesses;
+        _deathSaveFailures[index] = injury.DeathSaveFailures;
+        _impairments[index] = injury.Impairments;
+        _vitality[index] = injury.State;
         Publish(ObjectStoreChangeKind.Updated, id);
-        return _health[index];
+    }
+
+    /// <summary>How hurt a body is right now.</summary>
+    public InjuryState InjuryOf(ObjectId id)
+    {
+        var index = ResolveSlot(id);
+        if (_maxHealth[index] <= 0)
+        {
+            throw new InvalidOperationException(
+                $"Object {id} has no health component.");
+        }
+
+        return new InjuryState(
+            _health[index],
+            _maxHealth[index],
+            _wounds[index],
+            _maxWounds[index],
+            _deathSaveSuccesses[index],
+            _deathSaveFailures[index],
+            _impairments[index],
+            _vitality[index]);
     }
 
     public void Transform(
@@ -1208,6 +1310,35 @@ public sealed class ObjectStore
             {
                 throw new InvalidOperationException(
                     $"Object {id} has invalid quantity or health.");
+            }
+
+            if (_wounds[index] < 0 ||
+                _wounds[index] > _maxWounds[index] ||
+                _deathSaveSuccesses[index] < 0 ||
+                _deathSaveFailures[index] < 0)
+            {
+                throw new InvalidOperationException(
+                    $"Object {id} has an invalid wound or death-clock state.");
+            }
+
+            // A body is on the death clock exactly when it has run out of both
+            // layers and has a wound layer to have run out of. Anything else is
+            // two numbers disagreeing about whether someone is dying.
+            if (_vitality[index] == VitalityState.Standing &&
+                _maxHealth[index] > 0 &&
+                _health[index] == 0 &&
+                _wounds[index] == 0)
+            {
+                throw new InvalidOperationException(
+                    $"Object {id} is standing with nothing left to stand on.");
+            }
+
+            if (_vitality[index] is VitalityState.Dying or VitalityState.Stable &&
+                (_wounds[index] > 0 || _maxWounds[index] < 1))
+            {
+                throw new InvalidOperationException(
+                    $"Object {id} is {_vitality[index]} without being out of " +
+                    "the wounds that put it there.");
             }
 
             if (_maxQuantities[index] > 1 &&
@@ -1341,6 +1472,12 @@ public sealed class ObjectStore
         _conditions.Add(0);
         _health.Add(0);
         _maxHealth.Add(0);
+        _wounds.Add(0);
+        _maxWounds.Add(0);
+        _deathSaveSuccesses.Add(0);
+        _deathSaveFailures.Add(0);
+        _impairments.Add(AbilityMask.None);
+        _vitality.Add(VitalityState.Standing);
         _slotCosts.Add(GearSlots.StandardCost);
         _slotCapacities.Add(0);
         _quantitiesPerSlot.Add(0);
@@ -1492,6 +1629,21 @@ public sealed class ObjectStore
         {
             throw new ArgumentException(
                 "Health must be between zero and max health.");
+        }
+
+        if (spawn.MaxWounds < 0 ||
+            spawn.Wounds < 0 ||
+            spawn.Wounds > spawn.MaxWounds)
+        {
+            throw new ArgumentException(
+                "Wounds must be between zero and max wounds.");
+        }
+
+        if (spawn.MaxWounds > 0 && spawn.MaxHealth < 1)
+        {
+            throw new ArgumentException(
+                "A wound layer sits under concussion hits, so a body with " +
+                "wounds must have concussion hits to lose first.");
         }
     }
 
@@ -1792,6 +1944,12 @@ public sealed class ObjectStore
         _conditions[index] = value.Condition;
         _health[index] = value.Health;
         _maxHealth[index] = value.MaxHealth;
+        _wounds[index] = value.Wounds;
+        _maxWounds[index] = value.MaxWounds;
+        _deathSaveSuccesses[index] = value.DeathSaveSuccesses;
+        _deathSaveFailures[index] = value.DeathSaveFailures;
+        _impairments[index] = value.Impairments;
+        _vitality[index] = value.Vitality;
         _slotCosts[index] = value.SlotCost;
         _slotCapacities[index] = value.SlotCapacity;
         _quantitiesPerSlot[index] = value.QuantityPerSlot;
@@ -1832,6 +1990,12 @@ public sealed class ObjectStore
             _conditions[index],
             _health[index],
             _maxHealth[index],
+            _wounds[index],
+            _maxWounds[index],
+            _deathSaveSuccesses[index],
+            _deathSaveFailures[index],
+            _impairments[index],
+            _vitality[index],
             _slotCosts[index],
             _slotCapacities[index],
             _quantitiesPerSlot[index],

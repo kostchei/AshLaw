@@ -68,11 +68,34 @@ public sealed class PlayableSliceWorld : IDisposable
     private const int AvatarStrength = 12;
 
     /// <summary>
+    /// Keeps the Avatar's body off the world's roll stream. His hit dice are
+    /// rolled before the world exists, so rolling them from the world seed
+    /// directly would make the first monster's recognition delay depend on how
+    /// many dice his class happens to take.
+    /// </summary>
+    private const ulong AvatarBodySalt = 0x9E3779B97F4A7C15UL;
+
+    /// <summary>
     /// What a world is generated against. Difficulty and treasure scale from
     /// the character a world is made for, and a world is made for a fresh one.
     /// </summary>
     private static readonly CharacterTier StartingTier =
         new(Level: 1, CharacterClass.Fighter);
+
+    /// <summary>
+    /// The Avatar's scores, until character creation rolls them. This is the
+    /// seam: <see cref="CharacterCreation"/> already produces a
+    /// <see cref="CreatedCharacter"/> carrying exactly these, and nothing here
+    /// derives anything from a literal that a created character would not also
+    /// supply.
+    /// </summary>
+    private static readonly AbilityScores AvatarScores = new(
+        strength: AvatarStrength,
+        dexterity: 12,
+        constitution: 14,
+        intelligence: 10,
+        wisdom: 10,
+        charisma: 12);
 
     private const int TableHeight = 40;
     private const int CrateHeight = 32;
@@ -97,7 +120,12 @@ public sealed class PlayableSliceWorld : IDisposable
         // The combat beat is read off the physics tick, so a loaded world
         // resumes the fight's pacing on the same beat it was saved on.
         Clock = new CombatClock(startPhysicsTick: startTick);
-        Combat = new CombatDirector(objects, Clock, Dice, playerId);
+        Vitality = new ActorVitality(
+            objects,
+            RulesRepository.Vitality,
+            RulesRepository.AbilityBonuses,
+            Dice);
+        Combat = new CombatDirector(objects, Clock, Dice, Vitality, playerId);
         SaveGate = new WorldSaveGate(objects, Physics, Dice, ContentFingerprint);
         Drag = new DragService(objects);
         Stacks = new StackService(objects);
@@ -146,6 +174,16 @@ public sealed class PlayableSliceWorld : IDisposable
 
     /// <summary>Attack and defence derived from scores, class and worn gear.</summary>
     public ActorSheets Sheets { get; }
+
+    /// <summary>
+    /// The only thing in the world that hurts or heals a body. Concussion
+    /// hits, the wound layer under them and the death clock under that all
+    /// resolve here.
+    /// </summary>
+    public ActorVitality Vitality { get; }
+
+    /// <summary>How hurt the Avatar is.</summary>
+    public InjuryState PlayerInjury => Vitality.Of(PlayerId);
 
     public ActorSheet PlayerSheet => Sheets.For(PlayerId);
 
@@ -254,7 +292,8 @@ public sealed class PlayableSliceWorld : IDisposable
         var objects = new ObjectStore();
         var player = SpawnAvatar(
             objects,
-            DemoMapLocation(new GridPosition(4, 14)));
+            DemoMapLocation(new GridPosition(4, 14)),
+            RollAvatarBody(seed));
 
         SpawnChest(
             objects,
@@ -384,7 +423,8 @@ public sealed class PlayableSliceWorld : IDisposable
                     first.MapId,
                     AnchorOf(
                         new GridPosition(cellX, cellY),
-                        first.Beats[0].FloorZ)));
+                        first.Beats[0].FloorZ)),
+                RollAvatarBody(worldSeed));
             var world = new PlayableSliceWorld(
                 objects,
                 player,
@@ -511,11 +551,27 @@ public sealed class PlayableSliceWorld : IDisposable
     }
 
     /// <summary>
+    /// The body the Avatar walks in with: one hit die per level carrying his
+    /// constitution bonus, over a wound pool of level plus whatever he is best
+    /// at. Rolled rather than authored, so a d10 fighter and a d4 wizard are
+    /// not the same person with a different hat.
+    /// </summary>
+    private static RolledBody RollAvatarBody(ulong seed) =>
+        ActorVitality.RollBody(
+            RulesRepository.Vitality,
+            RulesRepository.AbilityBonuses,
+            new Dice(seed ^ AvatarBodySalt),
+            StartingTier.Class,
+            StartingTier.Level,
+            AvatarScores);
+
+    /// <summary>
     /// The Avatar and what he starts out holding, wherever the world puts him.
     /// </summary>
     private static ObjectId SpawnAvatar(
         ObjectStore objects,
-        ObjectLocation location)
+        ObjectLocation location,
+        RolledBody body)
     {
         var player = objects.Create(new ObjectSpawn
         {
@@ -532,16 +588,18 @@ public sealed class PlayableSliceWorld : IDisposable
                 ObjectFlags.Solid |
                 ObjectFlags.AffectedByGravity |
                 ObjectFlags.Visible,
-            Strength = AvatarStrength,
-            Dexterity = 12,
-            Constitution = 14,
-            Intelligence = 10,
-            Wisdom = 10,
-            Charisma = 12,
+            Strength = AvatarScores.Strength,
+            Dexterity = AvatarScores.Dexterity,
+            Constitution = AvatarScores.Constitution,
+            Intelligence = AvatarScores.Intelligence,
+            Wisdom = AvatarScores.Wisdom,
+            Charisma = AvatarScores.Charisma,
             Class = StartingTier.Class,
             Level = StartingTier.Level,
-            Health = 12,
-            MaxHealth = 12,
+            Health = body.MaximumConcussion,
+            MaxHealth = body.MaximumConcussion,
+            Wounds = body.MaximumWounds,
+            MaxWounds = body.MaximumWounds,
         });
         SpawnItem(
             objects,
@@ -810,7 +868,8 @@ public sealed class PlayableSliceWorld : IDisposable
                 Dice,
                 PlayerSheet.Abilities,
                 Player.Class,
-                RulesRepository.AbilityBonuses);
+                RulesRepository.AbilityBonuses,
+                Player.Impairments);
             vault = rolled;
             sweep = Movement.Resolve(PlayerId, displacement, rolled.StepHeight);
         }
@@ -1229,13 +1288,13 @@ public sealed class PlayableSliceWorld : IDisposable
         }
 
         var monster = target.Value;
-        var remaining = Objects.Damage(monster.Id, PlayerAttackDamage);
-        if (remaining > 0)
+        var blow = Vitality.Damage(monster.Id, PlayerAttackDamage);
+        if (!blow.State.IsDead)
         {
             return Finish(
                 true,
                 $"Hit {monster.Name} for {PlayerAttackDamage} damage " +
-                $"({remaining}/{monster.MaxHealth} HP).");
+                $"({blow.State.Concussion}/{monster.MaxHealth} HP).");
         }
 
         // The body becomes one container holding everything it had, worn gear
@@ -1732,7 +1791,8 @@ public sealed class PlayableSliceWorld : IDisposable
     /// </summary>
     private static string DescribeVault(VaultCheckResult vault) =>
         $"{vault.Ability} {vault.Roll}{vault.Bonus:+#;-#;+0}" +
-        $"{(vault.HadAdvantage ? " adv" : string.Empty)} " +
+        $"{(vault.HadAdvantage ? " adv" : string.Empty)}" +
+        $"{(vault.HadDisadvantage ? " dis" : string.Empty)} " +
         $"= {vault.StepHeight} high";
 
     private static string Describe(WorldObject value) =>

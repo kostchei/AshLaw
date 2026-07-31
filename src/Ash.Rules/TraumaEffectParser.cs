@@ -305,7 +305,7 @@ internal static partial class TraumaEffectParser
     private static partial Regex ProneRegex();
 
     [GeneratedRegex(
-        @"\b(?:dies instantly|instant death|skull crushed)\b",
+        @"\b(?:dies instantly|instant death|(?:skull|chest|head|body|heart|throat)?\s*crushed)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DeathRegex();
 
@@ -320,7 +320,7 @@ internal static partial class TraumaEffectParser
     private static partial Regex DropItemRegex();
 
     [GeneratedRegex(
-        @"\bbreaks shield\b",
+        @"\b(?:breaks shield|shield broken|shield destroyed|armor broken|armor destroyed)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex BreakItemRegex();
 
@@ -330,7 +330,7 @@ internal static partial class TraumaEffectParser
     /// outcome.
     /// </summary>
     [GeneratedRegex(
-        @"\bbreaks?\s+(?:bone\s+in\s+)?(?<part>(?:lower\s+|upper\s+)?(?:leg|arm)|hip|shoulder|ribs?|collarbone|jaw|elbow|knee|forearm)\b|\b(?<part>bone|hip|shoulder|ribs?|skull|collarbone|jaw|(?:lower\s+|upper\s+)?(?:leg|arm)|forearm|elbow|knee)\s+broken\b(?!\s*(?:&|and)\s*useless)",
+        @"\bbreaks?\s+(?:bone\s+in\s+)?(?<part>(?:lower\s+|upper\s+)?(?:legs?|arms?)|hip|shoulder|ribs?|collarbone|jaw|elbow|knee|forearm)\b|\b(?<part>bone|hip|shoulder|ribs?|skull|collarbone|jaw|(?:lower\s+|upper\s+)?(?:legs?|arms?)|forearm|elbow|knee)\s+broken\b(?!\s*(?:&|and)\s*useless)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex BreakBoneRegex();
 
@@ -340,7 +340,7 @@ internal static partial class TraumaEffectParser
     private static partial Regex DisableLimbRegex();
 
     [GeneratedRegex(
-        @"\bdestroys one eye\b",
+        @"\b(?:destroys one eye|blinded|blinds)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DestroyEyeRegex();
 

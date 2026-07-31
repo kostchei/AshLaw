@@ -1,4 +1,5 @@
 using Ash.Core;
+using Ash.Rules;
 
 namespace Ash.Sim.Tests;
 
@@ -101,7 +102,10 @@ public sealed class ObjectStoreTests
         var loot = store.Create(
             Item("token", ObjectLocation.InContainer(monster)));
 
-        Assert.Equal(0, store.Damage(monster, 2));
+        var killed = Injury.Damage(store.InjuryOf(monster), 2, new Dice(1));
+        store.SetInjury(monster, killed.State);
+        Assert.Equal(0, killed.State.Concussion);
+        Assert.True(killed.State.IsDead);
         store.Transform(
             monster,
             "remains.goblin",

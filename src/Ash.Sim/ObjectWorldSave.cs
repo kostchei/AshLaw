@@ -52,12 +52,14 @@ public static class ObjectWorldSave
 
     /// <summary>
     /// Version 2 added the terrain section, version 3 stack limits, version 4
-    /// gear slots, and version 5 the actor sheet: ability scores, class, level
-    /// and armour.
+    /// gear slots, version 5 the actor sheet — ability scores, class, level and
+    /// armour — and version 6 the injury state: the wound layer under
+    /// concussion hits, the death clock, and which abilities a body has lost
+    /// the reliable use of.
     /// Version 1 was never written outside this repository's tests, so it has
     /// no migration and is simply refused.
     /// </summary>
-    public const int FormatVersion = 5;
+    public const int FormatVersion = 6;
 
     /// <summary>
     /// The oldest format this build still reads. Version 2 migrates forward
@@ -70,7 +72,7 @@ public static class ObjectWorldSave
     /// The oldest reader that can still make sense of a file this build writes.
     /// A reader below this refuses the file instead of guessing at it.
     /// </summary>
-    public const int MinimumReaderVersion = 5;
+    public const int MinimumReaderVersion = 6;
 
     /// <summary>A sanity bound so a corrupt length cannot ask for a huge buffer.</summary>
     public const int MaximumPayloadBytes = 256 * 1024 * 1024;
@@ -476,6 +478,12 @@ public static class ObjectWorldSave
         WriteInt32(buffer, value.Condition);
         WriteInt32(buffer, value.Health);
         WriteInt32(buffer, value.MaxHealth);
+        WriteInt32(buffer, value.Wounds);
+        WriteInt32(buffer, value.MaxWounds);
+        WriteInt32(buffer, value.DeathSaveSuccesses);
+        WriteInt32(buffer, value.DeathSaveFailures);
+        WriteInt32(buffer, (int)value.Impairments);
+        WriteInt32(buffer, (int)value.Vitality);
         WriteInt32(buffer, value.SlotCost);
         WriteInt32(buffer, value.SlotCapacity);
         WriteInt32(buffer, value.QuantityPerSlot);
@@ -544,6 +552,39 @@ public static class ObjectWorldSave
         var condition = reader.ReadInt32();
         var health = reader.ReadInt32();
         var maxHealth = reader.ReadInt32();
+
+        // Version 5 and earlier had no wound layer, so running out of
+        // concussion hits was simply death — which is exactly what those worlds
+        // meant, and the only reading that keeps a corpse a corpse across the
+        // upgrade. A body with no wound layer reads as one that never had one.
+        var wounds = 0;
+        var maxWounds = 0;
+        var deathSaveSuccesses = 0;
+        var deathSaveFailures = 0;
+        var impairments = AbilityMask.None;
+        var vitality = maxHealth > 0 && health == 0
+            ? VitalityState.Dead
+            : VitalityState.Standing;
+        if (formatVersion >= 6)
+        {
+            wounds = reader.ReadInt32();
+            maxWounds = reader.ReadInt32();
+            deathSaveSuccesses = reader.ReadInt32();
+            deathSaveFailures = reader.ReadInt32();
+            impairments = (AbilityMask)reader.ReadInt32();
+            if ((impairments & ~AbilityMask.All) != 0)
+            {
+                throw new ObjectWorldSaveException(
+                    $"Slot {index} names an ability that does not exist in its " +
+                    "impairments.");
+            }
+
+            vitality = ReadEnum<VitalityState>(
+                ref reader,
+                index,
+                nameof(VitalityState));
+        }
+
         // Version 3 wrote one capacity field here; version 4 writes the slot
         // cost, the capacity, and the strength and bonus behind it.
         var slotCost = GearSlots.StandardCost;
@@ -628,6 +669,12 @@ public static class ObjectWorldSave
             condition,
             health,
             maxHealth,
+            wounds,
+            maxWounds,
+            deathSaveSuccesses,
+            deathSaveFailures,
+            impairments,
+            vitality,
             slotCost,
             slotCapacity,
             quantityPerSlot,

@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 using Ash.Core;
+using Ash.Rules;
 
 namespace Ash.Sim.Tests;
 
@@ -73,6 +74,40 @@ public sealed class SaveMigrationTests
         loaded.Maps.Single().Dispose();
     }
 
+    /// <summary>
+    /// Before version 6 there was no wound layer, so running out of concussion
+    /// hits was simply death. Reading a body as dead is the only migration that
+    /// keeps a corpse a corpse; giving it a wound layer it never had would
+    /// resurrect everything that had already fallen.
+    /// </summary>
+    [Fact]
+    public void ABodyFromBeforeTheWoundLayerKeepsItsAnswerAboutBeingDead()
+    {
+        var fallen = ObjectWorldSave.Restore(
+            ObjectWorldSave.Read(
+                WriteVersion2Save(quantity: 1, health: 0, maxHealth: 6),
+                Fingerprint));
+        var standing = ObjectWorldSave.Restore(
+            ObjectWorldSave.Read(
+                WriteVersion2Save(quantity: 1, health: 4, maxHealth: 6),
+                Fingerprint));
+
+        var corpse = fallen.Objects.Enumerate().Single();
+        Assert.Equal(VitalityState.Dead, corpse.Vitality);
+        Assert.False(corpse.IsAlive);
+        Assert.Equal(0, corpse.MaxWounds);
+
+        var alive = standing.Objects.Enumerate().Single();
+        Assert.Equal(VitalityState.Standing, alive.Vitality);
+        Assert.True(alive.IsAlive);
+        Assert.Equal(AbilityMask.None, alive.Impairments);
+
+        fallen.Objects.ValidateInvariants();
+        standing.Objects.ValidateInvariants();
+        fallen.Maps.Single().Dispose();
+        standing.Maps.Single().Dispose();
+    }
+
     [Fact]
     public void AVersionWithNoMigrationIsRefused()
     {
@@ -97,7 +132,9 @@ public sealed class SaveMigrationTests
     /// </summary>
     private static byte[] WriteVersion2Save(
         int quantity,
-        int formatVersion = 2)
+        int formatVersion = 2,
+        int health = 0,
+        int maxHealth = 0)
     {
         using var payload = new MemoryStream();
 
@@ -141,8 +178,8 @@ public sealed class SaveMigrationTests
 
         // No MaxQuantity field: that is exactly what version 2 lacked.
         Int32(payload, 100);
-        Int32(payload, 0);
-        Int32(payload, 0);
+        Int32(payload, health);
+        Int32(payload, maxHealth);
         Int32(payload, 0);
         payload.WriteByte(0);
 

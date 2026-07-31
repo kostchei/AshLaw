@@ -63,26 +63,10 @@ public sealed class AttackFixtureTests
                 ArmorType.Leather));
 
         Assert.Contains(
-            new TraumaEffect(TraumaEffectKind.AdditionalHits, Magnitude: 5),
+            new TraumaEffect(TraumaEffectKind.AdditionalHits, Magnitude: 8),
             result.TraumaEffects);
         Assert.Contains(
-            result.TraumaEffects,
-            effect =>
-                effect.Kind == TraumaEffectKind.DropHeldItem &&
-                effect.Detail == "shield" &&
-                effect.AppliesWhen == TraumaEffectCondition.Always);
-        Assert.Contains(
-            new TraumaEffect(
-                TraumaEffectKind.AdditionalHits,
-                Magnitude: 8,
-                AppliesWhen: TraumaEffectCondition.NoShield),
-            result.TraumaEffects);
-        Assert.Contains(
-            new TraumaEffect(
-                TraumaEffectKind.Stun,
-                Duration: 2,
-                DurationUnit: TraumaDurationUnit.Rounds,
-                AppliesWhen: TraumaEffectCondition.NoShield),
+            new TraumaEffect(TraumaEffectKind.Prone),
             result.TraumaEffects);
     }
 

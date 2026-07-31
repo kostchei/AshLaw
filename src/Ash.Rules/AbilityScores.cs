@@ -11,6 +11,41 @@ public enum Ability
 }
 
 /// <summary>
+/// A set of abilities, as one value. Impairment names abilities rather than
+/// counting them, so a body carrying two hurt stats says which two.
+/// </summary>
+[Flags]
+public enum AbilityMask
+{
+    None = 0,
+    Strength = 1 << Ability.Strength,
+    Dexterity = 1 << Ability.Dexterity,
+    Constitution = 1 << Ability.Constitution,
+    Intelligence = 1 << Ability.Intelligence,
+    Wisdom = 1 << Ability.Wisdom,
+    Charisma = 1 << Ability.Charisma,
+    All = Strength | Dexterity | Constitution | Intelligence | Wisdom | Charisma,
+}
+
+public static class AbilityMaskExtensions
+{
+    public static AbilityMask AsMask(this Ability ability) =>
+        (AbilityMask)(1 << (int)ability);
+
+    public static bool Includes(this AbilityMask mask, Ability ability) =>
+        (mask & ability.AsMask()) != 0;
+
+    public static int Count(this AbilityMask mask) =>
+        System.Numerics.BitOperations.PopCount((uint)mask);
+
+    /// <summary>The abilities in the mask, in canonical order.</summary>
+    public static IReadOnlyList<Ability> Abilities(this AbilityMask mask) =>
+        Enum.GetValues<Ability>()
+            .Where(ability => mask.Includes(ability))
+            .ToArray();
+}
+
+/// <summary>
 /// The six ability scores and the one curve that turns them into bonuses.
 /// </summary>
 /// <remarks>

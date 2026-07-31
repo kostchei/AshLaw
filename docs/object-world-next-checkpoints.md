@@ -100,10 +100,13 @@ transfer — are done:
   physical placement contract on a map — before either side changes;
 - every arrival of goods goes through those rules, whether the player clicked,
   dragged or dropped, so two finds of gold become one purse rather than two rows;
-- the save format is at version 3, and **version 2 migrates rather than being
-  refused** — the first real use of the migration policy in 4.5. A version 2
-  object carrying more than one becomes a stack whose limit is exactly what it
-  carried: the reading that keeps the invariants without inventing capacity.
+- stacks took the save format to version 3, and **version 2 migrates rather
+  than being refused** — the first real use of the migration policy in 4.5. A
+  version 2 object carrying more than one becomes a stack whose limit is
+  exactly what it carried: the reading that keeps the invariants without
+  inventing capacity. Gear slots then took it to 4, the actor sheet to 5, and
+  the injury model to 6; every step migrates rather than refusing, and the
+  format version in `ObjectWorldSave` is the authority over this paragraph.
 
 Carrying capacity is **gear slots**, not weight — a Shadowdark-style model:
 

@@ -28,16 +28,16 @@ public sealed class TraumaEffectParserTests
             }
         }
 
-        Assert.Equal(200, lines);
+        Assert.Equal(400, lines);
     }
 
     [Theory]
     // A signed modifier the parser has no rule for.
-    [InlineData("Weak grip. No extra damage. +0 hits.", "Weak grip. -7 to morale. +0 hits.", "-7")]
+    [InlineData("Chest blow. +5 hits. Knocked back 10 feet.", "Chest blow. -7 to morale. +5 hits.", "-7")]
     // A number bound to a mechanical unit.
-    [InlineData("Blow to side. +4 hits. -40 to activity for 1 round.", "Blow to side. Slowed 3 rounds.", "3 rounds")]
+    [InlineData("Chest blow. +5 hits. Knocked back 10 feet.", "Chest blow. Slowed 3 rounds. Knocked back 10 feet.", "3 rounds")]
     // A state-change verb with no supporting numbers.
-    [InlineData("Minor fracture of ribs. +5 hits. -5 to activity.", "Minor fracture of ribs. Target blinded.", "blinded")]
+    [InlineData("Chest blow. +5 hits. Knocked back 10 feet.", "Chest blow. Target frozen 3 rounds. Knocked back 10 feet.", "frozen")]
     public void UnhandledMechanicalPhraseFailsTheLoad(
         string original,
         string replacement,
@@ -63,8 +63,8 @@ public sealed class TraumaEffectParserTests
         using var copy = TemporaryRulesData.Create();
         copy.Replace(
             "ct_1_crush_critical_table.csv",
-            "Blow to side. +4 hits. -40 to activity for 1 round.",
-            "Ghastly flank laceration. Artery nicked. +4 hits. -40 to activity for 1 round.");
+            "Chest blow. +5 hits. Knocked back 10 feet.",
+            "Ghastly flank laceration. Chest blow. +5 hits. Knocked back 10 feet.");
 
         var rules = RulesDataLoader.LoadFromDirectory(copy.DirectoryPath);
 
@@ -72,14 +72,12 @@ public sealed class TraumaEffectParserTests
     }
 
     /// <summary>
-    /// These three lines state a broken bone that no other effect on the line
-    /// represents. They were silently dropped before <see cref="TraumaEffectKind.BreakBone"/>
-    /// existed.
+    /// Lines stating a broken bone are captured as BreakBone effects.
     /// </summary>
     [Theory]
-    [InlineData(CriticalTableId.Crush, "shoulder", TraumaEffectCondition.NoShield)]
-    [InlineData(CriticalTableId.Unbalancing, "lower leg", TraumaEffectCondition.Always)]
-    [InlineData(CriticalTableId.Puncture, "bone", TraumaEffectCondition.NoArmArmor)]
+    [InlineData(CriticalTableId.Crush, "leg", TraumaEffectCondition.Always)]
+    [InlineData(CriticalTableId.Unbalancing, "leg", TraumaEffectCondition.Always)]
+    [InlineData(CriticalTableId.Cold, "bone", TraumaEffectCondition.Always)]
     public void BrokenBonesAreCapturedAsEffects(
         CriticalTableId table,
         string expectedPart,
@@ -102,19 +100,19 @@ public sealed class TraumaEffectParserTests
     [Fact]
     public void ConditionalClausesAttachTheirCondition()
     {
-        // Crush Tier E index 2: "Blow to forearm. +5 hits. If no arm armor, stunned 1 round."
-        var outcome = Rules.GetCriticalOutcome(CriticalTableId.Crush, CriticalTier.E, 2);
-        Assert.Contains("If no arm armor", outcome.Text, StringComparison.Ordinal);
+        // Impact Tier C index 2: "Blast to shield arm. +10 hits. Shield broken. If no shield: shoulder broken."
+        var outcome = Rules.GetCriticalOutcome(CriticalTableId.Impact, CriticalTier.C, 2);
+        Assert.Contains("If no shield", outcome.Text, StringComparison.Ordinal);
 
         Assert.Contains(
-            new TraumaEffect(TraumaEffectKind.AdditionalHits, Magnitude: 5),
+            new TraumaEffect(TraumaEffectKind.AdditionalHits, Magnitude: 10),
             outcome.Effects);
         Assert.Contains(
             new TraumaEffect(
-                TraumaEffectKind.Stun,
-                Duration: 1,
-                DurationUnit: TraumaDurationUnit.Rounds,
-                AppliesWhen: TraumaEffectCondition.NoArmArmor),
+                TraumaEffectKind.BreakBone,
+                DurationUnit: TraumaDurationUnit.Permanent,
+                Detail: "shoulder",
+                AppliesWhen: TraumaEffectCondition.NoShield),
             outcome.Effects);
     }
 
@@ -125,8 +123,8 @@ public sealed class TraumaEffectParserTests
     [Fact]
     public void BleedIsNotAlsoCountedAsAdditionalHits()
     {
-        // Slash Tier E index 2: "Minor chest wound. +3 hits. 1 hit per round. -5 to activity."
-        var outcome = Rules.GetCriticalOutcome(CriticalTableId.Slash, CriticalTier.E, 2);
+        // Slash Tier B index 2: "Minor chest wound. +2 hits. 1 hit per round. Target has Disadvantage on next attack roll before start of your next turn."
+        var outcome = Rules.GetCriticalOutcome(CriticalTableId.Slash, CriticalTier.B, 2);
         Assert.Contains("1 hit per round", outcome.Text, StringComparison.Ordinal);
 
         var additional = outcome.Effects
@@ -136,7 +134,7 @@ public sealed class TraumaEffectParserTests
             .Where(effect => effect.Kind == TraumaEffectKind.Bleeding)
             .ToArray();
 
-        Assert.Equal(3, Assert.Single(additional).Magnitude);
+        Assert.Equal(2, Assert.Single(additional).Magnitude);
         Assert.Equal(1, Assert.Single(bleeds).Magnitude);
     }
 
@@ -146,8 +144,8 @@ public sealed class TraumaEffectParserTests
         using var copy = TemporaryRulesData.Create();
         copy.Replace(
             "ct_1_crush_critical_table.csv",
-            "If no arm armor, stunned 1 round.",
-            "If no greaves, stunned 1 round.");
+            "If no helm",
+            "If no greaves");
 
         var exception = Assert.Throws<RulesDataException>(
             () => RulesDataLoader.LoadFromDirectory(copy.DirectoryPath));

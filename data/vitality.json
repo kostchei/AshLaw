@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "description": "U8_Ash vitality: concussion hits, wounds, the death clock, and how any of it comes back. These are this game's rules, not part of the vendored Ash V1 package — that package produces concussion hits as a damage quantity and says only that they land on 'actor injury or vitality state'. This file is that state. Changing a value here changes the game without touching engine code.",
+  "hit_dice": {
+    "description": "Concussion hits are rolled, one die per level, and each die carries the constitution bonus with it. A die that would give less than minimum_per_die gives minimum_per_die: taking a level never makes a character frailer.",
+    "maximum_dice": 10,
+    "minimum_per_die": 1,
+    "non_fighter_constitution_bonus_cap": 2,
+    "classes": [
+      {
+        "id": "wizard",
+        "die_sides": 4,
+        "caps_constitution_bonus": true
+      },
+      {
+        "id": "rogue",
+        "die_sides": 6,
+        "caps_constitution_bonus": true
+      },
+      {
+        "id": "cleric",
+        "die_sides": 8,
+        "caps_constitution_bonus": true
+      },
+      {
+        "id": "fighter",
+        "die_sides": 10,
+        "caps_constitution_bonus": false
+      }
+    ]
+  },
+  "concussion_recovery": {
+    "description": "A day gives back one hit die. A full day of rest — a day plus a long rest, somewhere safe, with food and water — gives another, and medical attention another. What can actually be spent in a day is capped by level and by the dice the character has.",
+    "dice_per_day": 1,
+    "full_rest_bonus_dice": 1,
+    "medical_attention_bonus_dice": 1,
+    "daily_dice_brackets": [
+      { "first_level": 1, "dice": 1 },
+      { "first_level": 2, "dice": 2 },
+      { "first_level": 5, "dice": 3 }
+    ]
+  },
+  "wounds": {
+    "description": "The layer under concussion hits: level plus the character's best ability bonus, whichever ability that is. Wounds are only lost once concussion hits have run out, and each one costs the use of a stat until they are healed.",
+    "minimum": 1,
+    "impairments_on_death_clock_survival": 2
+  },
+  "wound_recovery": {
+    "description": "Wounds come back slowly and one at a time. A potion or a healing spell restores one wound and spends the rest of itself on concussion hits.",
+    "per_day": 1,
+    "per_healing": 1
+  },
+  "death_clock": {
+    "description": "At no wounds, a constitution save every round until it resolves one way or the other. Surviving is not free: the body keeps two stats' worth of damage until it is healed.",
+    "save_dc": 10,
+    "successes_to_stabilise": 3,
+    "failures_to_die": 3
+  },
+  "infection": {
+    "description": "Every day spent with wounds missing risks a complication: a constitution save against the standard of care, and a failure costs concussion hits.",
+    "damage_dice": 1,
+    "damage_die_sides": 6,
+    "care_levels": [
+      {
+        "id": "treated",
+        "dc": 9,
+        "description": "A full day of rest with medical treatment."
+      },
+      {
+        "id": "rested",
+        "dc": 12,
+        "description": "Rest, or treatment, but not both."
+      },
+      {
+        "id": "adventuring",
+        "dc": 15,
+        "description": "Carrying on regardless."
+      }
+    ]
+  }
+}

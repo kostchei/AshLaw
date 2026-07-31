@@ -30,6 +30,12 @@ public enum CombatEventKind : byte
 
     /// <summary>A blow finished off its target.</summary>
     Killed = 2,
+
+    /// <summary>A round of the death clock was rolled.</summary>
+    DeathSave = 3,
+
+    /// <summary>The death clock ran out in the body's favour.</summary>
+    Stabilised = 4,
 }
 
 /// <summary>
@@ -91,9 +97,16 @@ public sealed class CombatDirector
     /// <summary>What an NPC's swing takes off, until weapon rules drive it.</summary>
     public const int NpcSwingDamage = 1;
 
+    /// <summary>
+    /// The round the death clock is counted in: the same six seconds a swing
+    /// takes, so a body bleeding out and a body fighting are on one schedule.
+    /// </summary>
+    public const int DeathSaveIntervalMilliseconds = 6000;
+
     private readonly ObjectStore _objects;
     private readonly CombatClock _clock;
     private readonly Dice _dice;
+    private readonly ActorVitality _vitality;
     private readonly ObjectId _playerId;
     private readonly Dictionary<ObjectId, NpcCombatState> _npcs = [];
 
@@ -108,6 +121,14 @@ public sealed class CombatDirector
     private long _playerReadyAtTick;
 
     /// <summary>
+    /// The beat the player's next death save falls on. Like recognition and
+    /// swing timers this is not saved: a loaded world rolls the next save a
+    /// full round after the load rather than resuming a countdown the player
+    /// never watched.
+    /// </summary>
+    private long? _playerDeathSaveAtTick;
+
+    /// <summary>
     /// A fight is wherever the player is. The director takes no map: it reads
     /// the one the player is standing on each beat, so walking into another
     /// subzone leaves that subzone's monsters behind without the world having
@@ -117,11 +138,13 @@ public sealed class CombatDirector
         ObjectStore objects,
         CombatClock clock,
         Dice dice,
+        ActorVitality vitality,
         ObjectId playerId)
     {
         _objects = objects ?? throw new ArgumentNullException(nameof(objects));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _dice = dice ?? throw new ArgumentNullException(nameof(dice));
+        _vitality = vitality ?? throw new ArgumentNullException(nameof(vitality));
         if (playerId.IsNone)
         {
             throw new ArgumentException(
@@ -200,8 +223,21 @@ public sealed class CombatDirector
         {
             // Nothing to recognise. Existing states stay put rather than being
             // cleared, so a dead player does not reset the room.
+            _playerDeathSaveAtTick = null;
             return events;
         }
+
+        // A body that is not upright is not a fight. While the death clock is
+        // running it is the only thing running: nobody swings at someone who is
+        // already on the floor, so the clock resolves on its own terms instead
+        // of racing a stream of blows it can never survive.
+        if (!player.Injury.IsUpright)
+        {
+            AdvanceDeathClock(player, events);
+            return events;
+        }
+
+        _playerDeathSaveAtTick = null;
 
         // Object id order, so the same tick sequence always produces the same
         // events in the same order — the dice are shared, and an unordered walk
@@ -362,6 +398,74 @@ public sealed class CombatDirector
         }
     }
 
+    /// <summary>
+    /// One round of the player's death clock, when a round has passed. A body
+    /// that came off the clock stable stays where it is: stabilising is not
+    /// standing up, and only healing puts a wound back.
+    /// </summary>
+    private void AdvanceDeathClock(WorldObject player, List<CombatEvent> events)
+    {
+        if (!player.Injury.IsOnTheDeathClock)
+        {
+            _playerDeathSaveAtTick = null;
+            return;
+        }
+
+        var interval = CombatClock.BeatsIn(DeathSaveIntervalMilliseconds);
+        if (_playerDeathSaveAtTick is null)
+        {
+            _playerDeathSaveAtTick = checked(_clock.Tick + interval);
+            return;
+        }
+
+        if (_clock.Tick < _playerDeathSaveAtTick)
+        {
+            return;
+        }
+
+        var save = _vitality.RollDeathSave(_playerId);
+        _playerDeathSaveAtTick = save.Outcome == DeathClockOutcome.Continuing
+            ? checked(_clock.Tick + interval)
+            : null;
+        events.Add(
+            new CombatEvent(
+                save.Outcome switch
+                {
+                    DeathClockOutcome.Died => CombatEventKind.Killed,
+                    DeathClockOutcome.Stabilised => CombatEventKind.Stabilised,
+                    _ => CombatEventKind.DeathSave,
+                },
+                _clock.Tick,
+                _playerId,
+                _playerId,
+                CreatureVoices.For(player.TypeId),
+                0,
+                save.State.Concussion,
+                DescribeDeathSave(save)));
+    }
+
+    private static string DescribeDeathSave(DeathSaveOutcome save) =>
+        save.Outcome switch
+        {
+            DeathClockOutcome.Died => "You stop breathing.",
+            DeathClockOutcome.Stabilised =>
+                "Your breathing steadies. You are alive, and " +
+                Describe(save.NewImpairments) + " will not answer.",
+            _ => save.Succeeded
+                ? $"You hold on ({save.State.DeathSaveSuccesses} steady, " +
+                  $"{save.State.DeathSaveFailures} slipping)."
+                : $"You slip further ({save.State.DeathSaveSuccesses} steady, " +
+                  $"{save.State.DeathSaveFailures} slipping).",
+        };
+
+    /// <summary>Names the abilities a body has lost the reliable use of.</summary>
+    public static string Describe(AbilityMask impairments) =>
+        impairments == AbilityMask.None
+            ? "nothing"
+            : string.Join(
+                " and ",
+                impairments.Abilities().Select(ability => ability.ToString()));
+
     private void Swing(
         WorldObject npc,
         WorldObject player,
@@ -380,20 +484,50 @@ public sealed class CombatDirector
         {
             ReadyAtTick = checked(_clock.Tick + SwingBeatsFor(npc.Id)),
         };
-        var remaining = _objects.Damage(_playerId, NpcSwingDamage);
+        var blow = _vitality.Damage(_playerId, NpcSwingDamage);
         events.Add(
             new CombatEvent(
-                remaining > 0 ? CombatEventKind.Swing : CombatEventKind.Killed,
+                blow.State.IsUpright
+                    ? CombatEventKind.Swing
+                    : CombatEventKind.Killed,
                 _clock.Tick,
                 npc.Id,
                 _playerId,
                 CreatureVoices.For(npc.TypeId),
                 NpcSwingDamage,
-                remaining,
-                remaining > 0
-                    ? $"{npc.Name} hits you for {NpcSwingDamage} " +
-                      $"({remaining}/{player.MaxHealth} HP)."
-                    : $"{npc.Name} strikes you down."));
+                blow.State.Concussion,
+                DescribeBlow(npc, player, blow)));
+    }
+
+    /// <summary>
+    /// What a blow reads as. Concussion hits are the ordinary case; a blow that
+    /// reaches the wound layer says which ability it took with it, because that
+    /// is the cost the player has to notice.
+    /// </summary>
+    private static string DescribeBlow(
+        WorldObject npc,
+        WorldObject player,
+        DamageOutcome blow)
+    {
+        if (blow.State.IsDead)
+        {
+            return $"{npc.Name} strikes you down.";
+        }
+
+        if (blow.EnteredDeathClock)
+        {
+            return $"{npc.Name} puts you on the floor. You are bleeding out.";
+        }
+
+        if (blow.WoundsLost > 0)
+        {
+            return $"{npc.Name} wounds you ({blow.State.Wounds}/" +
+                $"{blow.State.MaximumWounds} wounds). " +
+                $"{Describe(blow.NewImpairments)} will not answer.";
+        }
+
+        return $"{npc.Name} hits you for {blow.ConcussionLost} " +
+            $"({blow.State.Concussion}/{player.MaxHealth} HP).";
     }
 
     private IReadOnlyList<WorldObject> LivingNpcs() =>
