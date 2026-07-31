@@ -10,39 +10,41 @@ An em dash means the source cell is blank. OB means Offensive Bonus.
 
 | Weapon | Fumble | Primary critical | Secondary critical | Base range (ft) | Weight (lb) | Special modifications |
 |---|---:|---|---|---:|---:|---|
-| Broadsword | 1–3 | Slash | — | — | 4 | — |
-| Dagger | 1 | Puncture (max C) | — | 15 | 1 | −15 OB |
-| Handaxe | 1–4 | Slash | — | 15 | 5 | +5 OB against chain and plate |
-| Scimitar | 1–4 | Slash | — | — | 4 | −5 OB against chain/plate; +5 OB otherwise |
-| Short Sword | 1–2 | Slash | — | 3 | 3 | −10 OB against chain/plate; +10 OB otherwise |
-| Club | 1–4 | Crush (max D) | — | 2 | 5 | −10 OB |
-| Mace | 1–2 | Crush | — | 5 | 5 | — |
-| Morning Star | 1–8 | Crush | Puncture (max A) | — | 5 | +10 OB; take a B critical if fumbled |
-| Net | 1–6 | Grapple | — | 10 | 3 | +15 OB against chain/plate; −10 OB otherwise |
-| War Hammer | 1–4 | Crush | — | 10 | 5 | +5 OB |
-| Whip | 1–6 | Grapple (max C) | Slash (max A) | — | 3 | −10 OB; usable from second line |
-| Javelin | 1–4 | Puncture | — | 30 | 4 | −10 OB; usable from second line |
-| Spear | 1–5 | Puncture | Slash (max A) | 20 | 5 | −5 OB; usable from second line |
-| Mounted Lance | 1–7 | Puncture | Unbalance | — | 10 | +15 OB; take a B critical if fumbled |
-| Halberd | 1–7 | Slash | Puncture | — | 7 | −5 OB; usable from second line |
-| Battle-axe | 1–5 | Slash | Crush | — | 7 | +5 OB against chain/plate; −5 OB otherwise |
-| Flail | 1–8 | Crush | Puncture | — | 6 | +10 OB; take a C critical if fumbled |
-| Quarterstaff | 1–3 | Crush | — | — | 4 | −10 OB |
-| Two-Handed Sword | 1–5 | Slash | Crush | — | 8 | — |
-| Bola | 1–7 | Grapple | Crush (max A) | 40 | 3 | −5 OB; take a B critical if fumbled |
-| Composite Bow | 1–4 | Puncture | — | 75 | 3 | Load (1), or Reload (0) at −25 OB |
-| Crossbow | 1–5 | Puncture | — | 90 | 8 | Load (2); +20 OB at up to 50 ft |
-| Long Bow | 1–5 | Puncture | — | 100 | 3 | Load (1), or Reload (0) at −35 OB |
-| Short Bow | 1–4 | Puncture | — | 60 | 2 | Load (1), or Reload (0) at −10 OB |
-| Sling | 1–6 | Crush (max D) | — | 50 | 0.5 | Load (1); usable with a shield |
+| Broadsword | — | Slash | — | — | 4 | — |
+| Dagger | — | Puncture (max C) | — | 15 | 1 | −15 OB |
+| Handaxe | — | Slash | — | 15 | 5 | +5 OB against chain and plate |
+| Scimitar | — | Slash | — | — | 4 | −5 OB against chain/plate; +5 OB otherwise |
+| Short Sword | — | Slash | — | 3 | 3 | −10 OB against chain/plate; +10 OB otherwise |
+| Club | — | Crush (max D) | — | 2 | 5 | −10 OB |
+| Mace | — | Crush | — | 5 | 5 | — |
+| Morning Star | 1 | Crush | Puncture (max A) | — | 5 | +10 OB; take a B critical if fumbled |
+| Net | 1 | Grapple | — | 10 | 3 | +15 OB against chain/plate; −10 OB otherwise |
+| War Hammer | — | Crush | — | 10 | 5 | +5 OB |
+| Whip | 1 | Grapple (max C) | Slash (max A) | — | 3 | −10 OB; usable from second line |
+| Javelin | — | Puncture | — | 30 | 4 | −10 OB; usable from second line |
+| Spear | 1 | Puncture | Slash (max A) | 20 | 5 | −5 OB; usable from second line |
+| Mounted Lance | 1 | Puncture | Unbalance | — | 10 | +15 OB; take a B critical if fumbled |
+| Halberd | 1 | Slash | Puncture | — | 7 | −5 OB; usable from second line |
+| Battle-axe | 1 | Slash | Crush | — | 7 | +5 OB against chain/plate; −5 OB otherwise |
+| Flail | 1 | Crush | Puncture | — | 6 | +10 OB; take a C critical if fumbled |
+| Quarterstaff | — | Crush | — | — | 4 | −10 OB |
+| Two-Handed Sword | 1 | Slash | Crush | — | 8 | — |
+| Bola | 1 | Grapple | Crush (max A) | 40 | 3 | −5 OB; take a B critical if fumbled |
+| Composite Bow | — | Puncture | — | 75 | 3 | Load (1), or Reload (0) at −25 OB |
+| Crossbow | 1 | Puncture | — | 90 | 8 | Load (2); +20 OB at up to 50 ft |
+| Long Bow | 1 | Puncture | — | 100 | 3 | Load (1), or Reload (0) at −35 OB |
+| Short Bow | — | Puncture | — | 60 | 2 | Load (1), or Reload (0) at −10 OB |
+| Sling | 1 | Crush (max D) | — | 50 | 0.5 | Load (1); usable with a shield |
 
 One-handed edged and concussion weapons may be used with a shield. One-handed
 polearms may be used with a shield, or used two-handed for +10 OB. Two-handed
 polearms and weapons require both hands. Missile weapons may not be used in melee.
 
-For a non-missile weapon with a listed range, treat it as a thrown weapon. Fumble
-ranges marked with an asterisk in the source apply when firing/loading fails and
-use the relevant fumble table.
+On a 1d20 scale, a raw roll of 1 is always an automatic miss. Legacy d100 fumble ranges
+are converted for 1d20: weapons with a legacy fumble chance of 5% or higher (1–5 through
+1–8 in the source d100 tables) also suffer a weapon fumble on a raw d20 roll of 1. Weapons
+with a legacy fumble chance below 5% (1–1 through 1–4) miss on a 1 but do not fumble.
+For a non-missile weapon with a listed range, treat it as a thrown weapon.
 
 Primary critical is the delivered critical type. A parenthesized letter is its
 maximum severity; if absent, the maximum is E. A secondary critical is delivered
