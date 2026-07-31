@@ -96,6 +96,8 @@ public sealed class DeathTests
         MoveNextTo(world, world.GetGridPosition(scout.Id));
         for (var swing = 0; swing < 5 && world.Objects.Get(scout.Id).IsAlive; swing++)
         {
+            // Each blow costs its own six-second round.
+            CombatRound.WaitForPlayerSwing(world);
             Assert.True(world.AttackAdjacentMonster().Succeeded);
         }
 
@@ -115,17 +117,17 @@ public sealed class DeathTests
         while (world.PlayerPosition.Y != target.Y)
         {
             var step = world.PlayerPosition.Y < target.Y ? 1 : -1;
-            Assert.True(world.MovePlayer(0, step).Succeeded);
+            Assert.True(CombatRound.Step(world, 0, step).Succeeded);
         }
 
         while (world.PlayerPosition.X < target.X - 1)
         {
-            Assert.True(world.MovePlayer(1, 0).Succeeded);
+            Assert.True(CombatRound.Step(world, 1, 0).Succeeded);
         }
 
         while (world.PlayerPosition.X > target.X + 1)
         {
-            Assert.True(world.MovePlayer(-1, 0).Succeeded);
+            Assert.True(CombatRound.Step(world, -1, 0).Succeeded);
         }
     }
 

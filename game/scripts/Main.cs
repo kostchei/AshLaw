@@ -1,5 +1,6 @@
 using Ash.Content;
 using Ash.Core;
+using Ash.Rules;
 using Ash.Sim;
 using Godot;
 
@@ -57,6 +58,7 @@ public partial class Main : Node2D
 
     private PlayableSliceWorld _world = PlayableSliceWorld.CreateDemo();
     private readonly FollowCamera _camera = new(Vec2i.Zero);
+    private readonly AlertVoices _voices = new();
     private ShapePackDefinition? _shapePack;
     private IReadOnlyDictionary<string, Texture2D> _shapeTextures =
         new Dictionary<string, Texture2D>();
@@ -150,6 +152,7 @@ public partial class Main : Node2D
         }
 
         LoadShapePack();
+        AddChild(_voices);
         SnapCameraToPlayer();
 
         // Until the mouse moves there is no cursor to hang a held object on, so
@@ -411,7 +414,18 @@ public partial class Main : Node2D
     {
         // The Godot physics step is the simulation's fixed tick: gravity,
         // support maintenance and landings all advance here, never in _Draw.
+        // Combat rides the same tick at a twelfth of the rate — one 200 ms beat
+        // per twelve physics steps — so a fight paces identically whatever the
+        // frame rate is doing.
         _world.AdvancePhysics();
+        foreach (var combat in _world.LastCombatEvents)
+        {
+            if (combat.Kind == CombatEventKind.Alerted)
+            {
+                _voices.Play(combat.Voice);
+            }
+        }
+
         _camera.StepToward(
             CameraTargetForPlayer(),
             CameraPixelsPerPhysicsTick);
@@ -458,7 +472,7 @@ public partial class Main : Node2D
             ("RIGHT CLICK", "let go"),
             ("I / B", "carried gear"),
             ("E", "open what you stand by"),
-            ("F / SPACE", "attack"),
+            ("F / SPACE", "attack (6s round)"),
             ("Q", "hand the top weapon"),
             ("G / X", "grab / drop"),
             ("T", "collapse the trestle"),
@@ -2118,6 +2132,7 @@ public partial class Main : Node2D
                 : $"HAND {Shorten(rightHand.Value.Name, 9)}",
             7,
             rightHand is null ? MutedText : Text);
+        DrawSwingReadiness();
 
         if (_world.BackpackOpen && _world.ActiveChest is null)
         {
@@ -2138,6 +2153,62 @@ public partial class Main : Node2D
             ? CarriedGridY + (CarriedGridRows() * CarriedCellStride) + 8
             : 66;
         DrawMessageLog(logTop);
+    }
+
+    /// <summary>
+    /// How much of the six-second round the player's weapon has left to run.
+    /// The bar fills as the swing comes back round, so a player deciding
+    /// whether to close or back off can see the answer rather than count.
+    /// </summary>
+    private void DrawSwingReadiness()
+    {
+        const int BarX = 246;
+        const int BarY = 44;
+        const int BarWidth = 68;
+        const int BarHeight = 3;
+
+        var remaining = _world.Combat.PlayerCooldownRemainingMilliseconds;
+        var round = AttackSpeed.RoundMilliseconds;
+        var filled = round == 0
+            ? BarWidth
+            : (BarWidth * (round - Math.Min(remaining, round))) / round;
+
+        DrawRect(new Rect2(BarX, BarY, BarWidth, BarHeight), PanelInset);
+        if (filled > 0)
+        {
+            DrawRect(
+                new Rect2(BarX, BarY, filled, BarHeight),
+                remaining == 0 ? Highlight : MutedText);
+        }
+
+        DrawRect(
+            new Rect2(BarX, BarY, BarWidth, BarHeight),
+            PanelEdge,
+            filled: false,
+            width: 1);
+
+        // The round's other allowance. Movement and attacks are separate
+        // budgets, so they are drawn as separate things.
+        DrawStepAllowance(BarX, BarY + BarHeight + 2);
+    }
+
+    /// <summary>
+    /// The tiles left in the round's move, one pip each, so a player can see
+    /// whether they can still close the distance before committing to it.
+    /// </summary>
+    private void DrawStepAllowance(int x, int y)
+    {
+        const int PipWidth = 3;
+        const int PipStride = 5;
+        const int PipHeight = 3;
+
+        var remaining = _world.Combat.PlayerStepsRemainingInRound;
+        for (var pip = 0; pip < MovementAllowance.StepsPerRound; pip++)
+        {
+            DrawRect(
+                new Rect2(x + (pip * PipStride), y, PipWidth, PipHeight),
+                pip < remaining ? Highlight : PanelInset);
+        }
     }
 
     /// <summary>

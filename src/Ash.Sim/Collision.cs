@@ -155,13 +155,26 @@ public sealed class MovementSolver
         _objects = objects ?? throw new ArgumentNullException(nameof(objects));
     }
 
-    public MovementResolution Resolve(ObjectId moverId, Vec3i displacement)
+    /// <summary>
+    /// Sweeps a move. <paramref name="stepHeight"/> overrides how high this
+    /// particular attempt can climb, because vaulting is rolled per attempt
+    /// rather than fixed on the body; omitting it uses the mover's own.
+    /// </summary>
+    public MovementResolution Resolve(
+        ObjectId moverId,
+        Vec3i displacement,
+        int? stepHeight = null)
     {
         if (displacement == Vec3i.Zero)
         {
             throw new ArgumentException(
                 "A movement sweep requires a non-zero displacement.",
                 nameof(displacement));
+        }
+
+        if (stepHeight is < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(stepHeight));
         }
 
         var mover = _objects.Get(moverId);
@@ -186,10 +199,11 @@ public sealed class MovementSolver
             checked(origin.X + displacement.X),
             checked(origin.Y + displacement.Y),
             checked(origin.Z + displacement.Z));
+        var reach = stepHeight ?? mover.StepHeight;
 
         // 1. Resolve the elevation the move happens at, so a step up onto a
         //    stair or platform is swept at the height it will end on.
-        var climb = map.FindSupport(At(mover, target), target.Z + mover.StepHeight);
+        var climb = map.FindSupport(At(mover, target), target.Z + reach);
         if (climb.IsNone)
         {
             var anySurface = map.FindSupport(At(mover, target), int.MaxValue);
@@ -230,7 +244,7 @@ public sealed class MovementSolver
                 ? MotionState.Falling
                 : MotionState.Resting;
         }
-        else if (sweepZ - support.TopZ <= mover.StepHeight)
+        else if (sweepZ - support.TopZ <= reach)
         {
             resolved = swept with { Z = support.TopZ };
         }
