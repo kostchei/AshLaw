@@ -313,6 +313,21 @@ public static class WorldPlanner
     }
 
     /// <summary>
+    /// Where a subzone is entered: the near edge of its first beat, on the
+    /// corridor line.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not the room's centre. The first beat is the encounter, and
+    /// its guardian stands in the middle of it — arriving there puts the
+    /// traveller on top of the monster rather than in front of it.
+    /// </remarks>
+    public static (int X, int Y) EntranceCell(SubzonePlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return (plan.Beats[0].Cells.XMin, plan.CorridorY);
+    }
+
+    /// <summary>
     /// The cells joining beat <paramref name="beat"/> to the one after it.
     /// </summary>
     public static WorldRectangle CorridorCells(
