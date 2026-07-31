@@ -18,9 +18,9 @@ public sealed class PlayableSliceTests
                 item.EquipmentSlots == EquipmentSlotMask.RightHand);
         Assert.Equal(4, world.Chests.Count);
         Assert.Equal(4, world.Monsters.Count);
-        Assert.Equal(20, world.Map.IndexedObjectCount);
-        Assert.True(PlayableSliceWorld.MapWidth > 19);
-        Assert.True(PlayableSliceWorld.MapHeight > 13);
+        Assert.Equal(20, world.CurrentMap.IndexedObjectCount);
+        Assert.True(PlayableSliceWorld.DemoMapWidth > 19);
+        Assert.True(PlayableSliceWorld.DemoMapHeight > 13);
         Assert.Contains(
             world.Monsters,
             monster => monster.TypeId == "monster.many-eyed-tyrant");
@@ -31,11 +31,11 @@ public sealed class PlayableSliceTests
                     world.GetGridPosition(monster.Id))),
             position =>
             {
-                Assert.InRange(position.X, 0, PlayableSliceWorld.MapWidth - 1);
-                Assert.InRange(position.Y, 0, PlayableSliceWorld.MapHeight - 1);
+                Assert.InRange(position.X, 0, PlayableSliceWorld.DemoMapWidth - 1);
+                Assert.InRange(position.Y, 0, PlayableSliceWorld.DemoMapHeight - 1);
             });
         world.Objects.ValidateInvariants();
-        world.Map.ValidateIndex();
+        world.CurrentMap.ValidateIndex();
     }
 
     [Fact]
@@ -135,11 +135,11 @@ public sealed class PlayableSliceTests
         Assert.True(world.DropFromBackpack(swordIndex).Succeeded);
         Assert.Equal(world.Player.Location, world.Objects.Get(sword.Id).Location);
         Assert.Contains(world.GroundItems, item => item.Id == sword.Id);
-        Assert.Equal(21, world.Map.IndexedObjectCount);
+        Assert.Equal(21, world.CurrentMap.IndexedObjectCount);
 
         Assert.True(world.PickUpAtPlayerFeet().Succeeded);
         Assert.Contains(world.BackpackItems, item => item.Id == sword.Id);
-        Assert.Equal(20, world.Map.IndexedObjectCount);
+        Assert.Equal(20, world.CurrentMap.IndexedObjectCount);
 
         MoveToFirstChest(world);
         Assert.True(world.ToggleNearestChest().Succeeded);
@@ -289,7 +289,7 @@ public sealed class PlayableSliceTests
         Assert.False(result.Succeeded);
         Assert.Contains("(2, 3)", result.Message);
         Assert.Equal(new GridPosition(3, 3), world.PlayerPosition);
-        world.Map.ValidateIndex();
+        world.CurrentMap.ValidateIndex();
     }
 
     [Fact]
@@ -300,7 +300,7 @@ public sealed class PlayableSliceTests
         for (var step = 0; step < 40; step++)
         {
             CombatRound.Step(world, step % 3 == 0 ? 0 : 1, step % 3 == 0 ? 1 : 0);
-            var solids = world.Map.QueryAll(ObjectFlags.Solid);
+            var solids = world.CurrentMap.QueryAll(ObjectFlags.Solid);
             foreach (var first in solids)
             {
                 foreach (var second in solids)
@@ -315,7 +315,7 @@ public sealed class PlayableSliceTests
         }
 
         world.Objects.ValidateInvariants();
-        world.Map.ValidateIndex();
+        world.CurrentMap.ValidateIndex();
     }
 
     [Fact]
@@ -349,7 +349,7 @@ public sealed class PlayableSliceTests
 
         var candlestick = world.GroundItems.Single(
             item => item.Name == "Brass Candlestick");
-        var table = world.Map.QueryAll().Single(
+        var table = world.CurrentMap.QueryAll().Single(
             value => value.TypeId == "prop.oak-table");
 
         Assert.Equal(MotionState.Resting, candlestick.Motion);
@@ -360,7 +360,7 @@ public sealed class PlayableSliceTests
             candlestick.Location.Position.Z);
         Assert.Equal(
             [candlestick.Id],
-            world.Map.SupportedObjects(table.Id));
+            world.CurrentMap.SupportedObjects(table.Id));
         world.Physics.ValidateInvariants();
     }
 
@@ -386,7 +386,7 @@ public sealed class PlayableSliceTests
         Assert.Equal(0, landed.Location.Position.Z);
         Assert.Equal(SupportKind.Terrain, landed.Support.Kind);
         world.Physics.ValidateInvariants();
-        world.Map.ValidateIndex();
+        world.CurrentMap.ValidateIndex();
     }
 
     [Fact]
@@ -449,7 +449,7 @@ public sealed class PlayableSliceTests
         Assert.Equal(MotionState.Resting, dropped.Motion);
         Assert.False(dropped.Support.IsNone);
         world.Physics.ValidateInvariants();
-        world.Map.ValidateIndex();
+        world.CurrentMap.ValidateIndex();
     }
 
     [Fact]
@@ -569,7 +569,7 @@ public sealed class PlayableSliceTests
             var savedUrn = world.Objects.Get(urn.Id);
             var savedPlayer = world.Player;
             var savedTick = world.Physics.Tick;
-            var savedTerrain = world.Map.GetTerrain(
+            var savedTerrain = world.CurrentMap.GetTerrain(
                 PlayableSliceWorld.PlatformXMin,
                 PlayableSliceWorld.TerraceYMin);
 
@@ -581,12 +581,12 @@ public sealed class PlayableSliceTests
             Assert.Equal(savedUrn, loaded.Objects.Get(urn.Id));
             Assert.Equal(
                 savedTerrain,
-                loaded.Map.GetTerrain(
+                loaded.CurrentMap.GetTerrain(
                     PlayableSliceWorld.PlatformXMin,
                     PlayableSliceWorld.TerraceYMin));
             Assert.Equal(
-                world.Map.IndexedObjectCount,
-                loaded.Map.IndexedObjectCount);
+                world.CurrentMap.IndexedObjectCount,
+                loaded.CurrentMap.IndexedObjectCount);
 
             // Loading resumes rather than settles: the urn is still falling,
             // and one tick on each world lands it in the same place.
@@ -599,7 +599,7 @@ public sealed class PlayableSliceTests
                 world.Objects.Get(urn.Id),
                 loaded.Objects.Get(urn.Id));
             loaded.Physics.ValidateInvariants();
-            loaded.Map.ValidateIndex();
+            loaded.CurrentMap.ValidateIndex();
         }
         finally
         {

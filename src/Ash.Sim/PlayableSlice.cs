@@ -20,9 +20,14 @@ public sealed record SliceActionResult(bool Succeeded, string Message);
 /// </summary>
 public sealed class PlayableSliceWorld : IDisposable
 {
+    /// <summary>
+    /// The hand-built acceptance map. Generated subzones are numbered from one,
+    /// so the demo never collides with a world's own maps.
+    /// </summary>
     public const ushort DemoMapId = 0;
-    public const int MapWidth = 41;
-    public const int MapHeight = 29;
+
+    public const int DemoMapWidth = 41;
+    public const int DemoMapHeight = 29;
     public const int WorldUnitsPerTile = WorldMap.WorldUnitsPerTile;
     public const int PlayerAttackDamage = 2;
 
@@ -62,6 +67,13 @@ public sealed class PlayableSliceWorld : IDisposable
     /// <summary>The Avatar's strength, and so a 12-slot pack.</summary>
     private const int AvatarStrength = 12;
 
+    /// <summary>
+    /// What a world is generated against. Difficulty and treasure scale from
+    /// the character a world is made for, and a world is made for a fresh one.
+    /// </summary>
+    private static readonly CharacterTier StartingTier =
+        new(Level: 1, CharacterClass.Fighter);
+
     private const int TableHeight = 40;
     private const int CrateHeight = 32;
     private const int BridgeDeckHeight = 4;
@@ -70,7 +82,6 @@ public sealed class PlayableSliceWorld : IDisposable
 
     private PlayableSliceWorld(
         ObjectStore objects,
-        WorldMap map,
         ObjectId playerId,
         long startTick,
         ulong diceState)
@@ -79,14 +90,14 @@ public sealed class PlayableSliceWorld : IDisposable
         Objects = objects;
         Transfers = new ObjectTransferService(objects);
         Movement = new MovementSolver(objects);
+        Transitions = new MapTransitionService(objects);
         PlayerId = playerId;
-        Map = map;
         Physics = new PhysicsSystem(objects, startTick: startTick);
 
         // The combat beat is read off the physics tick, so a loaded world
         // resumes the fight's pacing on the same beat it was saved on.
         Clock = new CombatClock(startPhysicsTick: startTick);
-        Combat = new CombatDirector(objects, map, Clock, Dice, playerId);
+        Combat = new CombatDirector(objects, Clock, Dice, playerId);
         SaveGate = new WorldSaveGate(objects, Physics, Dice, ContentFingerprint);
         Drag = new DragService(objects);
         Stacks = new StackService(objects);
@@ -102,6 +113,9 @@ public sealed class PlayableSliceWorld : IDisposable
     public ObjectTransferService Transfers { get; }
 
     public MovementSolver Movement { get; }
+
+    /// <summary>Carries a body from the map it is on to another one.</summary>
+    public MapTransitionService Transitions { get; }
 
     public PhysicsSystem Physics { get; }
 
@@ -141,7 +155,33 @@ public sealed class PlayableSliceWorld : IDisposable
             ? value
             : null;
 
-    public WorldMap Map { get; }
+    /// <summary>
+    /// The map the world is currently being played on: whichever one the Avatar
+    /// is standing on.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately derived rather than stored. A world holds every map it has
+    /// built, and there is exactly one thing that decides which of them is the
+    /// one being looked at, walked through and drawn — where the Avatar is. A
+    /// second copy of that fact would only be a second thing to get wrong on a
+    /// transition or a load.
+    /// </remarks>
+    public ushort CurrentMapId
+    {
+        get
+        {
+            var player = Player;
+            if (player.Location.Kind != LocationKind.OnMap)
+            {
+                throw new InvalidOperationException(
+                    $"{player.Name} is not on a map.");
+            }
+
+            return player.Location.MapId;
+        }
+    }
+
+    public WorldMap CurrentMap => Objects.Maps.Get(CurrentMapId);
 
     public ObjectId PlayerId { get; }
 
@@ -158,14 +198,14 @@ public sealed class PlayableSliceWorld : IDisposable
     public string LastMessage { get; private set; }
 
     public IReadOnlyList<WorldObject> Chests =>
-        Map.QueryAll(ObjectFlags.Container)
+        CurrentMap.QueryAll(ObjectFlags.Container)
             .Where(candidate =>
                 candidate.Id != PlayerId &&
                 !candidate.HasFlag(ObjectFlags.Monster))
             .ToArray();
 
     public IReadOnlyList<WorldObject> Monsters =>
-        Map.QueryAll(ObjectFlags.Monster)
+        CurrentMap.QueryAll(ObjectFlags.Monster)
             .Where(candidate =>
                 candidate.IsAlive)
             .ToArray();
@@ -189,7 +229,7 @@ public sealed class PlayableSliceWorld : IDisposable
             .ToArray();
 
     public IReadOnlyList<WorldObject> GroundItems =>
-        Map.QueryAll(ObjectFlags.Item);
+        CurrentMap.QueryAll(ObjectFlags.Item);
 
     /// <summary>Gear slots the Avatar can carry: max(Strength, 10).</summary>
     public int BackpackCapacity => Player.CarryCapacity;
@@ -212,40 +252,9 @@ public sealed class PlayableSliceWorld : IDisposable
     public static PlayableSliceWorld CreateDemo(ulong seed = DefaultSeed)
     {
         var objects = new ObjectStore();
-        var player = objects.Create(new ObjectSpawn
-        {
-            TypeId = AvatarTypeId,
-            Name = "Avatar",
-            ShapeId = "avatar.knight",
-            Location = MapLocation(new GridPosition(4, 14)),
-            Footprint = new ObjectFootprint(128, 128),
-            Height = 64,
-            StepHeight = StepHeightUnits,
-            Flags =
-                ObjectFlags.Actor |
-                ObjectFlags.Container |
-                ObjectFlags.Solid |
-                ObjectFlags.AffectedByGravity |
-                ObjectFlags.Visible,
-            Strength = AvatarStrength,
-            Dexterity = 12,
-            Constitution = 14,
-            Intelligence = 10,
-            Wisdom = 10,
-            Charisma = 12,
-            Class = CharacterClass.Fighter,
-            Level = 1,
-            Health = 12,
-            MaxHealth = 12,
-        });
-        SpawnItem(
+        var player = SpawnAvatar(
             objects,
-            player,
-            "item.rusty-sword",
-            "Rusty Sword",
-            "loot.shortsword",
-            EquipmentSlotMask.RightHand);
-        SpawnItem(objects, player, "item.apple", "Apple");
+            DemoMapLocation(new GridPosition(4, 14)));
 
         SpawnChest(
             objects,
@@ -311,16 +320,90 @@ public sealed class PlayableSliceWorld : IDisposable
             loot: ["Iron Buckle", "Guard Token"]);
 
         SpawnPhysicsArea(objects);
-        var map = new WorldMap(objects, DemoMapId, MapWidth, MapHeight);
-        BuildTerrain(map);
-        var world = new PlayableSliceWorld(
-            objects,
-            map,
-            player,
-            startTick: 0,
-            seed);
-        world.Settle();
-        return world;
+        var map = new WorldMap(objects, DemoMapId, DemoMapWidth, DemoMapHeight);
+        try
+        {
+            BuildTerrain(map);
+            var world = new PlayableSliceWorld(
+                objects,
+                player,
+                startTick: 0,
+                seed);
+            world.Settle();
+            return world;
+        }
+        catch
+        {
+            // A map left registered with the store would be indexed on every
+            // later commit and would show up in a save.
+            map.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// A fresh generated world: the whole eighteen-subzone plan for
+    /// <paramref name="worldSeed"/>, built, with the Avatar standing at the
+    /// first subzone's way in.
+    /// </summary>
+    /// <remarks>
+    /// Every subzone is built up front and every map is kept. Eighteen maps of
+    /// 65 by at most 29 cells is a few hundred kilobytes, which buys something
+    /// worth having: a transition is a move between two maps that already
+    /// exist, so it cannot fail halfway through building the far side, and the
+    /// save is the whole world rather than the room the player happens to be
+    /// standing in. Building lazily is a change to make when a world is too big
+    /// to hold, not before.
+    /// </remarks>
+    public static PlayableSliceWorld CreateGenerated(ulong worldSeed)
+    {
+        if (worldSeed == 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(worldSeed),
+                worldSeed,
+                "A world seed of zero would leave the dice with no state to " +
+                "start from.");
+        }
+
+        var plan = WorldPlanner.Plan(worldSeed, StartingTier);
+        var objects = new ObjectStore();
+        var built = new List<WorldMap>(plan.Subzones.Count);
+        try
+        {
+            foreach (var subzone in plan.Subzones)
+            {
+                built.Add(SubzoneBuilder.Build(objects, subzone).Map);
+            }
+
+            var first = plan.Subzones[0];
+            var (cellX, cellY) = WorldPlanner.EntranceCell(first);
+            var player = SpawnAvatar(
+                objects,
+                ObjectLocation.OnMap(
+                    first.MapId,
+                    AnchorOf(
+                        new GridPosition(cellX, cellY),
+                        first.Beats[0].FloorZ)));
+            var world = new PlayableSliceWorld(
+                objects,
+                player,
+                startTick: 0,
+                worldSeed);
+            world.Settle();
+            world.LastMessage =
+                $"You enter {first.Theme}. Find the way on.";
+            return world;
+        }
+        catch
+        {
+            foreach (var map in built)
+            {
+                map.Dispose();
+            }
+
+            throw;
+        }
     }
 
     /// <summary>
@@ -331,7 +414,7 @@ public sealed class PlayableSliceWorld : IDisposable
     /// </summary>
     public SliceActionResult RequestSave(string path)
     {
-        var attempt = SaveGate.Request(path, DemoMapId);
+        var attempt = SaveGate.Request(path, CurrentMapId);
         return Finish(attempt.Saved, attempt.Message);
     }
 
@@ -344,7 +427,6 @@ public sealed class PlayableSliceWorld : IDisposable
     public static PlayableSliceWorld Load(string path)
     {
         var loaded = ObjectWorldSave.RestoreFile(path, ContentFingerprint);
-        var map = loaded.Objects.Maps.Get(loaded.CurrentMapId);
         var avatars = loaded.Objects.Enumerate()
             .Where(value => value.TypeId == AvatarTypeId)
             .ToArray();
@@ -355,10 +437,21 @@ public sealed class PlayableSliceWorld : IDisposable
                 $"one holds {avatars.Length}.");
         }
 
+        // The save names the map that was being played, and the Avatar stands
+        // on one. Two answers to one question is one too many, so a save that
+        // disagrees with itself is refused rather than half-adopted.
+        var avatar = avatars[0];
+        if (avatar.Location.Kind != LocationKind.OnMap ||
+            avatar.Location.MapId != loaded.CurrentMapId)
+        {
+            throw new InvalidOperationException(
+                $"The save was taken on map {loaded.CurrentMapId} but its " +
+                $"{AvatarTypeId} is at {avatar.Location}.");
+        }
+
         return new PlayableSliceWorld(
             loaded.Objects,
-            map,
-            avatars[0].Id,
+            avatar.Id,
             loaded.SimulationTick,
             loaded.DiceState);
     }
@@ -373,8 +466,8 @@ public sealed class PlayableSliceWorld : IDisposable
 
     public SliceActionResult DropDragOnMap(GridPosition cell)
     {
-        var anchor = MapLocation(cell).Position;
-        return FromDrag(Drag.DropOnMap(DemoMapId, anchor.X, anchor.Y));
+        var anchor = AnchorOf(cell);
+        return FromDrag(Drag.DropOnMap(CurrentMapId, anchor.X, anchor.Y));
     }
 
     public SliceActionResult DropDragInBackpack() =>
@@ -400,13 +493,65 @@ public sealed class PlayableSliceWorld : IDisposable
         Finish(false, message);
 
     /// <summary>
-    /// Releases this world's map from its object store. A replaced world must
-    /// be disposed so its map stops indexing a store nobody is using.
+    /// Releases every map this world built from its object store. A replaced
+    /// world must be disposed so its maps stop indexing a store nobody is
+    /// using.
     /// </summary>
     public void Dispose()
     {
         SaveGate.Cancel();
-        Map.Dispose();
+
+        // Every map, not just the one being played: a generated world holds
+        // eighteen, and any left registered would keep indexing a store
+        // nothing else is using.
+        foreach (var map in Objects.Maps.All)
+        {
+            map.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// The Avatar and what he starts out holding, wherever the world puts him.
+    /// </summary>
+    private static ObjectId SpawnAvatar(
+        ObjectStore objects,
+        ObjectLocation location)
+    {
+        var player = objects.Create(new ObjectSpawn
+        {
+            TypeId = AvatarTypeId,
+            Name = "Avatar",
+            ShapeId = "avatar.knight",
+            Location = location,
+            Footprint = new ObjectFootprint(128, 128),
+            Height = 64,
+            StepHeight = StepHeightUnits,
+            Flags =
+                ObjectFlags.Actor |
+                ObjectFlags.Container |
+                ObjectFlags.Solid |
+                ObjectFlags.AffectedByGravity |
+                ObjectFlags.Visible,
+            Strength = AvatarStrength,
+            Dexterity = 12,
+            Constitution = 14,
+            Intelligence = 10,
+            Wisdom = 10,
+            Charisma = 12,
+            Class = StartingTier.Class,
+            Level = StartingTier.Level,
+            Health = 12,
+            MaxHealth = 12,
+        });
+        SpawnItem(
+            objects,
+            player,
+            "item.rusty-sword",
+            "Rusty Sword",
+            "loot.shortsword",
+            EquipmentSlotMask.RightHand);
+        SpawnItem(objects, player, "item.apple", "Apple");
+        return player;
     }
 
     /// <summary>
@@ -565,7 +710,7 @@ public sealed class PlayableSliceWorld : IDisposable
         }
 
         // End of a completed tick: the one point a deferred save is safe.
-        if (SaveGate.Flush(DemoMapId) is { } attempt && attempt.Saved)
+        if (SaveGate.Flush(CurrentMapId) is { } attempt && attempt.Saved)
         {
             LastMessage = attempt.Message;
         }
@@ -590,7 +735,7 @@ public sealed class PlayableSliceWorld : IDisposable
     /// </summary>
     public SliceActionResult RemoveTrestleSupport()
     {
-        var trestle = Map.QueryAll()
+        var trestle = CurrentMap.QueryAll()
             .Where(value => value.TypeId == "prop.trestle")
             .Cast<WorldObject?>()
             .FirstOrDefault();
@@ -599,7 +744,7 @@ public sealed class PlayableSliceWorld : IDisposable
             return Finish(false, "The trestle is already gone.");
         }
 
-        var dependants = Map.SupportedObjects(trestle.Value.Id).Count;
+        var dependants = CurrentMap.SupportedObjects(trestle.Value.Id).Count;
         Objects.Destroy(trestle.Value.Id);
         return Finish(
             true,
@@ -687,7 +832,7 @@ public sealed class PlayableSliceWorld : IDisposable
                 new ObjectTransferRequest(
                     PlayerId,
                     Player.Location,
-                    ObjectLocation.OnMap(DemoMapId, sweep.ResolvedPosition)),
+                    ObjectLocation.OnMap(CurrentMapId, sweep.ResolvedPosition)),
             ],
             [sweep.PhysicsFor(PlayerId)]);
         if (!move.Succeeded)
@@ -764,6 +909,114 @@ public sealed class PlayableSliceWorld : IDisposable
             true,
             $"{chest.Name} opened. Click an item to move it.");
     }
+
+    /// <summary>
+    /// The one "use what I am standing by" command: a chest if there is one,
+    /// and otherwise the way on or the way back.
+    /// </summary>
+    public SliceActionResult Interact()
+    {
+        var chest = ToggleNearestChest();
+        if (chest.Succeeded)
+        {
+            return chest;
+        }
+
+        var travelled = UseNearestWaymark();
+        return travelled.Succeeded
+            ? travelled
+            : Finish(
+                false,
+                "Stand next to a chest, a corpse, or a way through first.");
+    }
+
+    /// <summary>
+    /// The ways in and out of the map the Avatar is on.
+    /// </summary>
+    public IReadOnlyList<WorldObject> Waymarks =>
+        CurrentMap.QueryAll()
+            .Where(IsWaymark)
+            .OrderBy(candidate => candidate.Id)
+            .ToArray();
+
+    /// <summary>
+    /// Steps through the way on, or the way back, that the Avatar is standing
+    /// on or beside.
+    /// </summary>
+    public SliceActionResult UseNearestWaymark()
+    {
+        var here = PlayerPosition;
+        var nearest = QueryNearPlayer(1, ObjectFlags.Visible)
+            .Where(IsWaymark)
+            .Where(mark => here.ManhattanDistance(GridPositionOf(mark)) <= 1)
+            .OrderBy(mark => here.ManhattanDistance(GridPositionOf(mark)))
+            .ThenBy(mark => mark.Id)
+            .Cast<WorldObject?>()
+            .FirstOrDefault();
+        return nearest is null
+            ? Finish(false, "There is no way through from here.")
+            : Travel(nearest.Value);
+    }
+
+    /// <summary>
+    /// Carries the Avatar through <paramref name="waymark"/> to the matching
+    /// one on the neighbouring subzone.
+    /// </summary>
+    /// <remarks>
+    /// Subzone <c>n</c> is map <c>n + 1</c>, so the neighbour is one map id
+    /// away, and the arrival cell is wherever that map's own waymark stands.
+    /// Both ends are objects in the world, which is why this works identically
+    /// on a world that was just generated and on one that was loaded from a
+    /// save: nothing here needs the plan that made them.
+    /// </remarks>
+    private SliceActionResult Travel(WorldObject waymark)
+    {
+        var onward = waymark.TypeId == SubzoneBuilder.ExitTypeId;
+        var fromMapId = waymark.Location.MapId;
+        var toMapId = checked((ushort)(onward ? fromMapId + 1 : fromMapId - 1));
+        if (!Objects.Maps.TryGet(toMapId, out var destination))
+        {
+            return Finish(
+                false,
+                $"{waymark.Name} leads to map {toMapId}, which this world " +
+                "has not built.");
+        }
+
+        var arrivalTypeId = onward
+            ? SubzoneBuilder.EntranceTypeId
+            : SubzoneBuilder.ExitTypeId;
+        var arrival = destination.QueryAll()
+            .Where(candidate => candidate.TypeId == arrivalTypeId)
+            .OrderBy(candidate => candidate.Id)
+            .Cast<WorldObject?>()
+            .FirstOrDefault();
+        if (arrival is null)
+        {
+            throw new InvalidOperationException(
+                $"Map {toMapId} holds no {arrivalTypeId} for {waymark.Name} " +
+                "to come out at.");
+        }
+
+        var cell = GridPositionOf(arrival.Value);
+        var moved = Transitions.Move(PlayerId, toMapId, cell.X, cell.Y);
+        if (!moved.Succeeded)
+        {
+            return Finish(false, moved.Message);
+        }
+
+        // Panels are about the room that was left. A chest two subzones back is
+        // not something the Avatar still has his hand in.
+        CloseActiveChest();
+        return Finish(
+            true,
+            onward
+                ? $"You take the way on into subzone {toMapId}."
+                : $"You go back through to subzone {toMapId}.");
+    }
+
+    private static bool IsWaymark(WorldObject value) =>
+        value.TypeId == SubzoneBuilder.EntranceTypeId ||
+        value.TypeId == SubzoneBuilder.ExitTypeId;
 
     public SliceActionResult TakeFromOpenChest(int itemIndex)
     {
@@ -933,7 +1186,7 @@ public sealed class PlayableSliceWorld : IDisposable
 
     public SliceActionResult PickUpAtPlayerFeet()
     {
-        var item = Map.QueryAnchor(
+        var item = CurrentMap.QueryAnchor(
                 Player.Location.Position,
                 ObjectFlags.Item)
             .OrderBy(candidate => candidate.Id)
@@ -1047,7 +1300,7 @@ public sealed class PlayableSliceWorld : IDisposable
             TypeId = typeId,
             Name = name,
             ShapeId = "container.chest",
-            Location = MapLocation(position),
+            Location = DemoMapLocation(position),
             Footprint = new ObjectFootprint(128, 128),
             Height = 40,
             Flags =
@@ -1126,7 +1379,7 @@ public sealed class PlayableSliceWorld : IDisposable
             TypeId = typeId,
             Name = name,
             ShapeId = shapeId,
-            Location = MapLocation(position),
+            Location = DemoMapLocation(position),
             Footprint = shapeId == "monster.many-eyed"
                 ? new ObjectFootprint(160, 160)
                 : new ObjectFootprint(128, 128),
@@ -1182,7 +1435,7 @@ public sealed class PlayableSliceWorld : IDisposable
         bool solid = true,
         ObjectFootprint? footprint = null)
     {
-        var location = MapLocation(position);
+        var location = DemoMapLocation(position);
         objects.Create(new ObjectSpawn
         {
             TypeId = typeId,
@@ -1207,7 +1460,7 @@ public sealed class PlayableSliceWorld : IDisposable
         GridPosition position,
         int baseZ)
     {
-        var location = MapLocation(position);
+        var location = DemoMapLocation(position);
         objects.Create(new ObjectSpawn
         {
             TypeId = ItemTypeId(name),
@@ -1253,15 +1506,17 @@ public sealed class PlayableSliceWorld : IDisposable
     /// <summary>
     /// A footprint is anchored at the far corner of the cell it occupies, so
     /// the anchor of cell <c>c</c> is <c>(c + 1) * WorldUnitsPerTile</c>. That
-    /// keeps every demo footprint inside the map's world bounds.
+    /// keeps every footprint inside the map's world bounds.
     /// </summary>
-    private static ObjectLocation MapLocation(GridPosition position) =>
-        ObjectLocation.OnMap(
-            DemoMapId,
-            new Vec3i(
-                (position.X + 1) * WorldUnitsPerTile,
-                (position.Y + 1) * WorldUnitsPerTile,
-                0));
+    private static Vec3i AnchorOf(GridPosition position, int z = 0) =>
+        new(
+            checked((position.X + 1) * WorldUnitsPerTile),
+            checked((position.Y + 1) * WorldUnitsPerTile),
+            z);
+
+    /// <summary>A cell of the hand-built demo map, at floor level.</summary>
+    private static ObjectLocation DemoMapLocation(GridPosition position) =>
+        ObjectLocation.OnMap(DemoMapId, AnchorOf(position));
 
     private static GridPosition GridPositionOf(WorldObject value)
     {
@@ -1352,7 +1607,7 @@ public sealed class PlayableSliceWorld : IDisposable
     {
         var center = Player.Location.Position;
         var radius = checked(radiusTiles * WorldUnitsPerTile);
-        return Map.Query(
+        return CurrentMap.Query(
             new WorldRectangle(
                 checked(center.X - radius),
                 checked(center.X + radius + 1),
@@ -1461,7 +1716,7 @@ public sealed class PlayableSliceWorld : IDisposable
             case PlacementBlockerKind.Terrain:
                 // A solid cell is a wall, not a ledge: it has no top to get
                 // onto however high you jump.
-                var cell = Map.GetTerrain(blocker.TerrainX, blocker.TerrainY);
+                var cell = CurrentMap.GetTerrain(blocker.TerrainX, blocker.TerrainY);
                 return cell.Flags.HasFlag(TerrainFlags.Solid)
                     ? null
                     : cell.FloorZ;

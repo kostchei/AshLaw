@@ -92,7 +92,6 @@ public sealed class CombatDirector
     public const int NpcSwingDamage = 1;
 
     private readonly ObjectStore _objects;
-    private readonly WorldMap _map;
     private readonly CombatClock _clock;
     private readonly Dice _dice;
     private readonly ObjectId _playerId;
@@ -108,15 +107,19 @@ public sealed class CombatDirector
 
     private long _playerReadyAtTick;
 
+    /// <summary>
+    /// A fight is wherever the player is. The director takes no map: it reads
+    /// the one the player is standing on each beat, so walking into another
+    /// subzone leaves that subzone's monsters behind without the world having
+    /// to hand combat a new director and lose the round in progress.
+    /// </summary>
     public CombatDirector(
         ObjectStore objects,
-        WorldMap map,
         CombatClock clock,
         Dice dice,
         ObjectId playerId)
     {
         _objects = objects ?? throw new ArgumentNullException(nameof(objects));
-        _map = map ?? throw new ArgumentNullException(nameof(map));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _dice = dice ?? throw new ArgumentNullException(nameof(dice));
         if (playerId.IsNone)
@@ -394,10 +397,24 @@ public sealed class CombatDirector
     }
 
     private IReadOnlyList<WorldObject> LivingNpcs() =>
-        _map.QueryAll(ObjectFlags.Monster)
+        PlayerMap()
+            .QueryAll(ObjectFlags.Monster)
             .Where(candidate => candidate.IsAlive)
             .OrderBy(candidate => candidate.Id)
             .ToArray();
+
+    private WorldMap PlayerMap()
+    {
+        var player = _objects.Get(_playerId);
+        if (player.Location.Kind != LocationKind.OnMap)
+        {
+            throw new InvalidOperationException(
+                $"{player.Name} is not on a map, so there is no room to " +
+                "fight in.");
+        }
+
+        return _objects.Maps.Get(player.Location.MapId);
+    }
 
     private static int TileDistance(WorldObject from, WorldObject to)
     {

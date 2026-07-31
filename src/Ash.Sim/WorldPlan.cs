@@ -328,6 +328,20 @@ public static class WorldPlanner
     }
 
     /// <summary>
+    /// Where a subzone is left: the far edge of its last beat, on the corridor
+    /// line — the mirror of <see cref="EntranceCell"/>.
+    /// </summary>
+    /// <remarks>
+    /// The last beat is the reward, and its chest stands in the middle of it,
+    /// so the way on sits at the room's far wall rather than on the payoff.
+    /// </remarks>
+    public static (int X, int Y) ExitCell(SubzonePlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return (plan.Beats[^1].Cells.XMax - 1, plan.CorridorY);
+    }
+
+    /// <summary>
     /// The cells joining beat <paramref name="beat"/> to the one after it.
     /// </summary>
     public static WorldRectangle CorridorCells(

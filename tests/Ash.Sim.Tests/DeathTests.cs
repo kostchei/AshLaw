@@ -109,7 +109,7 @@ public sealed class DeathTests
             item => item.Id == blade.Id);
         world.Objects.ValidateInvariants();
         world.Physics.ValidateInvariants();
-        world.Map.ValidateIndex();
+        world.CurrentMap.ValidateIndex();
     }
 
     private static void MoveNextTo(PlayableSliceWorld world, GridPosition target)
