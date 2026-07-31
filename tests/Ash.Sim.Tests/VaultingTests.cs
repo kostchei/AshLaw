@@ -117,7 +117,7 @@ public sealed class VaultingTests
 
         world.Objects.ValidateInvariants();
         world.Physics.ValidateInvariants();
-        world.Map.ValidateIndex();
+        world.CurrentMap.ValidateIndex();
     }
 
     [Fact]
@@ -146,7 +146,7 @@ public sealed class VaultingTests
         string typeId,
         int fromDeltaX)
     {
-        var prop = world.Map.QueryAll()
+        var prop = world.CurrentMap.QueryAll()
             .First(value => value.TypeId == typeId);
         PlaceAt(
             world,

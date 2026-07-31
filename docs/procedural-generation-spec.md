@@ -50,22 +50,24 @@ The world is generated as a sequence of 18 distinct subzones.
 This is the largest piece of work the specification implies, and it is worth
 stating plainly rather than discovering later.
 
-`WorldMapSet` already keys live maps by `ushort` map id, `ObjectStore` already
-validates placement per map, and the save format already carries a
-`CurrentMapId` and a terrain section per map. What does not yet exist:
+`WorldMapSet` keys live maps by `ushort` map id, `ObjectStore` validates
+placement per map, and the save format carries a `CurrentMapId` and a terrain
+section per map. On top of that:
 
-- `PlayableSliceWorld` is single-map: `DemoMapId` is a constant and `Map` is one
-  map fixed at construction. Eighteen subzones need a current-map concept and
-  the ability to change it.
-- Nothing transfers an actor between maps. `ObjectLocation.OnMap` names a map
-  id, so the transactional machinery can express the move; no service performs
-  it.
-- Nothing decides which maps are resident. Eighteen fully built subzones held at
-  once is the simplest correct answer and should be the first implementation;
-  streaming is an optimisation to make only when it is measured to be needed.
-
-Until that work lands, generation targets one map at a time, which is enough to
-build and test every rule below.
+- `PlayableSliceWorld` is multi-map. `CurrentMapId` is derived from the map the
+  Avatar is standing on rather than stored, so a transition and a load both
+  change it by moving him and nothing else has to be kept in step.
+  `PlayableSliceWorld.CreateGenerated` plans a world, builds every subzone, and
+  starts him at the first one's way in. `DemoMapId` is now only the hand-built
+  acceptance map, which keeps the physics area no generated subzone carries.
+- `MapTransitionService` performs the move, and `SubzoneBuilder` gives each
+  subzone the two ends it needs: a `portal.entrance` on every subzone after the
+  first and a `portal.exit` on every one before the last. Both ends are objects
+  in the world, so a loaded world can be left the same way a freshly generated
+  one can — nothing has to reconstruct the plan that made them.
+- Every subzone is resident. Eighteen fully built maps is the simplest correct
+  answer and is what is implemented; streaming is an optimisation to make only
+  when it is measured to be needed.
 
 ## 2. Micro structure: the 5-beat pacing
 

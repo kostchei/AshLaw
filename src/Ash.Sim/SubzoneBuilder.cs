@@ -23,12 +23,22 @@ public sealed record SubzoneBuild(
 /// </remarks>
 public static class SubzoneBuilder
 {
+    /// <summary>
+    /// The way in: where a traveller arriving from the previous subzone lands,
+    /// and the way back to it.
+    /// </summary>
+    public const string EntranceTypeId = "portal.entrance";
+
+    /// <summary>The way on to the next subzone.</summary>
+    public const string ExitTypeId = "portal.exit";
+
     /// <summary>Solid rock, which every subzone is carved out of.</summary>
     public static TerrainCell Rock => new(0, TerrainFlags.Solid);
 
     private const int PropHeight = 40;
     private const int ChestHeight = 40;
     private const int DecalHeight = 1;
+    private const int WaymarkHeight = 1;
     private const int MonsterHeight = 56;
     private const int TileUnits = WorldMap.WorldUnitsPerTile;
 
@@ -56,6 +66,7 @@ public static class SubzoneBuilder
                 spawned.AddRange(FillBeat(objects, map, plan, beat));
             }
 
+            spawned.AddRange(SpawnWaymarks(objects, map, plan));
             return new SubzoneBuild(plan, map, spawned);
         }
         catch
@@ -85,6 +96,85 @@ public static class SubzoneBuilder
             }
         }
     }
+
+    /// <summary>
+    /// The way in and the way on, as objects standing on the cells they name.
+    /// </summary>
+    /// <remarks>
+    /// A cross-map move needs to know where the traveller comes out, and the
+    /// only thing that survives a save is the world itself: a plan is made from
+    /// a seed nothing stores. Putting the two ends in the world means a loaded
+    /// subzone can be left the same way a freshly built one can — the exit of
+    /// subzone <c>n</c> looks for the entrance on map <c>n + 1</c> and finds it.
+    ///
+    /// The first subzone has no way back and the last has no way on, so neither
+    /// gets a mark it could not lead anywhere through.
+    /// </remarks>
+    private static IReadOnlyList<ObjectId> SpawnWaymarks(
+        ObjectStore objects,
+        WorldMap map,
+        SubzonePlan plan)
+    {
+        var marks = new List<ObjectId>();
+        if (plan.Index > 0)
+        {
+            var (x, y) = WorldPlanner.EntranceCell(plan);
+            marks.Add(
+                SpawnWaymark(
+                    objects,
+                    map,
+                    plan,
+                    EntranceTypeId,
+                    "Way In",
+                    x,
+                    y,
+                    plan.Beats[0].FloorZ));
+        }
+
+        if (plan.Index < WorldPlanner.SubzoneCount - 1)
+        {
+            var (x, y) = WorldPlanner.ExitCell(plan);
+            marks.Add(
+                SpawnWaymark(
+                    objects,
+                    map,
+                    plan,
+                    ExitTypeId,
+                    "Way On",
+                    x,
+                    y,
+                    plan.Beats[^1].FloorZ));
+        }
+
+        return marks;
+    }
+
+    private static ObjectId SpawnWaymark(
+        ObjectStore objects,
+        WorldMap map,
+        SubzonePlan plan,
+        string typeId,
+        string name,
+        int cellX,
+        int cellY,
+        int floorZ) =>
+        Spawn(
+            objects,
+            map,
+            plan,
+            new ObjectSpawn
+            {
+                TypeId = typeId,
+                Name = name,
+                ShapeId = "loot.generic",
+                Location = Anchor(plan, cellX, cellY, floorZ),
+                Footprint = new ObjectFootprint(TileUnits, TileUnits),
+                Height = WaymarkHeight,
+
+                // A threshold is scenery: it must never block the step through
+                // it, and it is not something anyone picks up and carries off.
+                Flags = ObjectFlags.Visible,
+            });
 
     private static void CarveTerrain(WorldMap map, SubzonePlan plan)
     {

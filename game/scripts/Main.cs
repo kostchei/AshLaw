@@ -27,6 +27,15 @@ public partial class Main : Node2D
     /// </summary>
     private const int CarriedGridMinimumRows = 2;
 
+    /// <summary>
+    /// How much of the default walk goes east before it turns south. The walk
+    /// spends the round's whole move, and spending it 4-then-2 rather than
+    /// alternating leaves the Avatar within arm's reach of the demo map's oak
+    /// table — so <c>--smoke-drag-drop</c> has something it can actually pick
+    /// up when the run finishes walking.
+    /// </summary>
+    private const int DefaultWalkEastwardSteps = 4;
+
     /// <summary>How many messages the side log remembers.</summary>
     private const int LogHistory = 12;
     private const int WorldUnitsPerTile = 256;
@@ -56,7 +65,23 @@ public partial class Main : Node2D
     private static readonly Color DebugOrigin = new("ff5fa2");
     private static readonly Color DebugSortOrder = new("ffe36a");
 
-    private PlayableSliceWorld _world = PlayableSliceWorld.CreateDemo();
+    /// <summary>
+    /// The world a run generates when it is not told otherwise. A fixed seed,
+    /// so launching the game twice gives the same eighteen subzones and a
+    /// screenshot means the same thing tomorrow.
+    /// </summary>
+    private const ulong DefaultWorldSeed = 20260731;
+
+    private PlayableSliceWorld _world = null!;
+    private ulong _worldSeed = DefaultWorldSeed;
+
+    /// <summary>
+    /// Play the hand-built acceptance map instead of a generated world. It
+    /// holds the physics area — the trestle, the stacked crates, the bridge
+    /// over the pit — which no generated subzone carries.
+    /// </summary>
+    private bool _demoWorld;
+
     private readonly FollowCamera _camera = new(Vec2i.Zero);
     private readonly AlertVoices _voices = new();
     private ShapePackDefinition? _shapePack;
@@ -134,6 +159,15 @@ public partial class Main : Node2D
     public override void _Ready()
     {
         var userArguments = OS.GetCmdlineUserArgs();
+        _demoWorld = userArguments.Contains("--demo", StringComparer.Ordinal);
+        if (Argument(userArguments, "--world-seed") is { } seed)
+        {
+            _worldSeed = ulong.Parse(
+                seed,
+                System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        _world = CreateConfiguredWorld();
         _debugOverlayVisible = userArguments.Contains(
             "--debug-overlay",
             StringComparer.Ordinal);
@@ -168,6 +202,15 @@ public partial class Main : Node2D
         AdvanceSmokeRun();
         QueueRedraw();
     }
+
+    /// <summary>
+    /// A new world of whichever kind this run asked for, so restarting gives
+    /// back what was launched rather than always the demo.
+    /// </summary>
+    private PlayableSliceWorld CreateConfiguredWorld() =>
+        _demoWorld
+            ? PlayableSliceWorld.CreateDemo()
+            : PlayableSliceWorld.CreateGenerated(_worldSeed);
 
     private static SmokeRun? ParseSmokeRun(IReadOnlyList<string> arguments)
     {
@@ -257,12 +300,18 @@ public partial class Main : Node2D
             {
                 smoke.WalkStepsTaken += StepToward(destination) ? 1 : 0;
             }
-            else if (smoke.Frame % 5 == 0 && smoke.WalkStepsTaken < 8)
+            // The whole default walk falls inside one six-second round — ninety
+            // frames is nowhere near the 360 physics ticks a round runs for —
+            // so it asks for exactly what the round allows and no more. Asking
+            // for more would not walk further; it would just spend the last
+            // steps being refused.
+            else if (smoke.Frame % 5 == 0 &&
+                     smoke.WalkStepsTaken < MovementAllowance.StepsPerRound)
             {
                 smoke.WalkStepsTaken++;
-                _ = smoke.WalkStepsTaken % 2 == 0
-                    ? _world.MovePlayer(0, 1)
-                    : _world.MovePlayer(1, 0);
+                _ = smoke.WalkStepsTaken <= DefaultWalkEastwardSteps
+                    ? _world.MovePlayer(1, 0)
+                    : _world.MovePlayer(0, 1);
             }
         }
 
@@ -345,7 +394,7 @@ public partial class Main : Node2D
         var drawItems = BuildWorldDrawItems();
         var sortResult = VolumeSorter.Sort(
             drawItems.Select(item => item.SortItem).ToArray());
-        var falling = _world.Map.QueryAll()
+        var falling = _world.CurrentMap.QueryAll()
             .Count(value => value.Motion == MotionState.Falling);
         var lines = new List<string>
         {
@@ -354,12 +403,14 @@ public partial class Main : Node2D
             $"frames={smoke.Frame}",
             $"walk_steps={smoke.WalkStepsTaken}",
             $"physics_tick={_world.Physics.Tick}",
+            $"map_id={_world.CurrentMapId}",
+            $"map_size={_world.CurrentMap.Width}x{_world.CurrentMap.Depth}",
             $"player_grid={_world.PlayerPosition.X},{_world.PlayerPosition.Y}",
             $"player_world={position.X},{position.Y},{position.Z}",
             $"player_motion={player.Motion}",
             $"player_support={DescribeSupport(player.Support)}",
-            $"map_revision={_world.Map.Revision}",
-            $"map_objects={_world.Map.IndexedObjectCount}",
+            $"map_revision={_world.CurrentMap.Revision}",
+            $"map_objects={_world.CurrentMap.IndexedObjectCount}",
             $"draw_items={drawItems.Count}",
             $"sort_cycles={sortResult.Cycles.Count}",
             $"falling_objects={falling}",
@@ -404,7 +455,7 @@ public partial class Main : Node2D
         // caller checks for.
         _world.Physics.ValidateInvariants();
         _world.Objects.ValidateInvariants();
-        _world.Map.ValidateIndex();
+        _world.CurrentMap.ValidateIndex();
         lines.Add("invariants=ok");
         System.IO.File.WriteAllLines(smoke.ReportPath, lines);
         GD.Print($"smoke report written to {smoke.ReportPath}");
@@ -471,7 +522,7 @@ public partial class Main : Node2D
             ("MOUSE DRAG", "pick up and place"),
             ("RIGHT CLICK", "let go"),
             ("I / B", "carried gear"),
-            ("E", "open what you stand by"),
+            ("E", "open, or take the way on"),
             ("F / SPACE", "attack (6s round)"),
             ("Q", "hand the top weapon"),
             ("G / X", "grab / drop"),
@@ -553,7 +604,7 @@ public partial class Main : Node2D
                 _world.DropFromBackpack();
                 return true;
             case Key.E:
-                _world.ToggleNearestChest();
+                _world.Interact();
                 return true;
             case Key.F:
             case Key.Space:
@@ -575,7 +626,7 @@ public partial class Main : Node2D
                 _world.ClosePanels();
                 return true;
             case Key.R:
-                Adopt(PlayableSliceWorld.CreateDemo());
+                Adopt(CreateConfiguredWorld());
                 return true;
             case Key.F5:
                 _world.RequestSave(SavePath);
@@ -1045,9 +1096,13 @@ public partial class Main : Node2D
         DrawOutsideRock();
         DrawBackWalls();
 
-        for (var y = 0; y < PlayableSliceWorld.MapHeight; y++)
+        // The map being played decides how much floor there is, not a
+        // compiled-in size: a generated subzone is 65 cells across and between
+        // 21 and 29 deep, and the demo map is neither.
+        var map = _world.CurrentMap;
+        for (var y = 0; y < map.Depth; y++)
         {
-            for (var x = 0; x < PlayableSliceWorld.MapWidth; x++)
+            for (var x = 0; x < map.Width; x++)
             {
                 DrawFloorTile(new GridPosition(x, y));
             }
@@ -1114,7 +1169,7 @@ public partial class Main : Node2D
             DebugSortOrder);
         DrawText(
             new Vector2(4, 16),
-            $"MAP r{_world.Map.Revision} n{_world.Map.IndexedObjectCount}",
+            $"MAP r{_world.CurrentMap.Revision} n{_world.CurrentMap.IndexedObjectCount}",
             size: 5,
             DebugSortOrder);
         DrawPhysicsReadout(_world.Player);
@@ -1390,7 +1445,8 @@ public partial class Main : Node2D
 
     private void DrawBackWalls()
     {
-        for (var x = 0; x < PlayableSliceWorld.MapWidth; x++)
+        var map = _world.CurrentMap;
+        for (var x = 0; x < map.Width; x++)
         {
             var at = Iso(new GridPosition(x, 0));
             var left = at + new Vector2(-TileHalfWidth, 0);
@@ -1406,7 +1462,7 @@ public partial class Main : Node2D
             DrawWallCourses(left, top, BackWallHeight, x);
         }
 
-        for (var y = 0; y < PlayableSliceWorld.MapHeight; y++)
+        for (var y = 0; y < map.Depth; y++)
         {
             var at = Iso(new GridPosition(0, y));
             var top = at + new Vector2(0, -TileHalfHeight);
@@ -1423,13 +1479,13 @@ public partial class Main : Node2D
         }
 
         DrawWallPillar(Iso(new GridPosition(0, 0)) + new Vector2(0, -3));
-        for (var x = 7; x < PlayableSliceWorld.MapWidth; x += 7)
+        for (var x = 7; x < map.Width; x += 7)
         {
             DrawWallPillar(
                 Iso(new GridPosition(x, 0)) + new Vector2(-5, -1));
         }
 
-        for (var y = 6; y < PlayableSliceWorld.MapHeight; y += 6)
+        for (var y = 6; y < map.Depth; y += 6)
         {
             DrawWallPillar(
                 Iso(new GridPosition(0, y)) + new Vector2(5, -1));
@@ -1498,7 +1554,7 @@ public partial class Main : Node2D
 
     private void DrawFloorTile(GridPosition position)
     {
-        var terrain = _world.Map.GetTerrain(position.X, position.Y);
+        var terrain = _world.CurrentMap.GetTerrain(position.X, position.Y);
         var ground = Iso(position);
         var at = ground + Elevation(terrain.FloorZ);
         if (terrain.FloorZ != 0)
@@ -1506,14 +1562,19 @@ public partial class Main : Node2D
             DrawFloorRiser(ground, at);
         }
 
+        // Carpet and floorboards are the demo map's dressing, laid out against
+        // its cells. A generated subzone is stone throughout until the theme
+        // tag drives a palette of its own.
+        var dressed = _world.CurrentMapId == PlayableSliceWorld.DemoMapId;
         Color colour;
-        if (IsCarpetTile(position))
+        if (dressed && IsCarpetTile(position))
         {
             colour = (position.X + position.Y) % 2 == 0
                 ? CarpetA
                 : CarpetB;
         }
-        else if (position.X <= 13 &&
+        else if (dressed &&
+                 position.X <= 13 &&
                  position.Y is >= 7 and <= 21)
         {
             colour = (position.X + position.Y) % 2 == 0
@@ -1544,7 +1605,7 @@ public partial class Main : Node2D
                 1);
         }
 
-        if (IsCarpetBorder(position))
+        if (dressed && IsCarpetBorder(position))
         {
             DrawLine(
                 at + new Vector2(-5, 0),
@@ -1664,99 +1725,119 @@ public partial class Main : Node2D
          position.Y is >= 18 and <= 24 &&
          (position.X is 27 or 36 || position.Y is 18 or 24));
 
+    /// <summary>
+    /// The demo map's hand-placed dressing: barrels, altars and braziers at
+    /// cells chosen for that map and no other.
+    /// </summary>
+    private IReadOnlyList<WorldDrawItem> DemoScenery() =>
+    [
+        CreateDrawItem(
+            id: 10,
+            new GridPosition(3, 2),
+            footprintWidth: 128,
+            footprintDepth: 128,
+            height: 96,
+            shapeNumber: 10,
+            () => DrawBarrel(
+                Iso(new GridPosition(3, 2)) + new Vector2(0, 3))),
+        CreateDrawItem(
+            id: 11,
+            new GridPosition(11, 2),
+            footprintWidth: 256,
+            footprintDepth: 192,
+            height: 160,
+            shapeNumber: 11,
+            () => DrawAltar(
+                Iso(new GridPosition(11, 2)) + new Vector2(0, 3))),
+        CreateDrawItem(
+            id: 12,
+            new GridPosition(1, 8),
+            footprintWidth: 96,
+            footprintDepth: 96,
+            height: 160,
+            shapeNumber: 12,
+            () => DrawBrazier(
+                Iso(new GridPosition(1, 8)) + new Vector2(0, 3))),
+        CreateDrawItem(
+            id: 13,
+            new GridPosition(15, 4),
+            footprintWidth: 96,
+            footprintDepth: 96,
+            height: 160,
+            shapeNumber: 12,
+            () => DrawBrazier(
+                Iso(new GridPosition(15, 4)) + new Vector2(0, 3))),
+        CreateDrawItem(
+            id: 14,
+            new GridPosition(12, 20),
+            footprintWidth: 128,
+            footprintDepth: 128,
+            height: 96,
+            shapeNumber: 10,
+            () => DrawBarrel(
+                Iso(new GridPosition(12, 20)) + new Vector2(0, 3))),
+        CreateDrawItem(
+            id: 15,
+            new GridPosition(29, 14),
+            footprintWidth: 128,
+            footprintDepth: 128,
+            height: 96,
+            shapeNumber: 10,
+            () => DrawBarrel(
+                Iso(new GridPosition(29, 14)) + new Vector2(0, 3))),
+        CreateDrawItem(
+            id: 16,
+            new GridPosition(33, 23),
+            footprintWidth: 256,
+            footprintDepth: 192,
+            height: 160,
+            shapeNumber: 11,
+            () => DrawAltar(
+                Iso(new GridPosition(33, 23)) + new Vector2(0, 3))),
+        CreateDrawItem(
+            id: 17,
+            new GridPosition(20, 25),
+            footprintWidth: 96,
+            footprintDepth: 96,
+            height: 160,
+            shapeNumber: 12,
+            () => DrawBrazier(
+                Iso(new GridPosition(20, 25)) + new Vector2(0, 3))),
+        CreateDrawItem(
+            id: 18,
+            new GridPosition(38, 17),
+            footprintWidth: 96,
+            footprintDepth: 96,
+            height: 160,
+            shapeNumber: 12,
+            () => DrawBrazier(
+                Iso(new GridPosition(38, 17)) + new Vector2(0, 3))),
+    ];
+
     private List<WorldDrawItem> BuildWorldDrawItems()
     {
         var visibleObjects = _world.VisibleObjects();
-        var items = new List<WorldDrawItem>
+        var items = new List<WorldDrawItem>();
+
+        // What has already been given a drawing. The last pass below draws
+        // whatever is left, so a generated subzone can never put something in
+        // the world that the player has no way of seeing.
+        var drawn = new HashSet<ObjectId> { _world.PlayerId };
+
+        // Scenery placed by hand at demo-map cells. A generated subzone is
+        // carved out of rock and dresses itself, so hanging a brazier on cell
+        // (1, 8) of one would put it inside a wall.
+        if (_world.CurrentMapId == PlayableSliceWorld.DemoMapId)
         {
-            CreateDrawItem(
-                id: 10,
-                new GridPosition(3, 2),
-                footprintWidth: 128,
-                footprintDepth: 128,
-                height: 96,
-                shapeNumber: 10,
-                () => DrawBarrel(
-                    Iso(new GridPosition(3, 2)) + new Vector2(0, 3))),
-            CreateDrawItem(
-                id: 11,
-                new GridPosition(11, 2),
-                footprintWidth: 256,
-                footprintDepth: 192,
-                height: 160,
-                shapeNumber: 11,
-                () => DrawAltar(
-                    Iso(new GridPosition(11, 2)) + new Vector2(0, 3))),
-            CreateDrawItem(
-                id: 12,
-                new GridPosition(1, 8),
-                footprintWidth: 96,
-                footprintDepth: 96,
-                height: 160,
-                shapeNumber: 12,
-                () => DrawBrazier(
-                    Iso(new GridPosition(1, 8)) + new Vector2(0, 3))),
-            CreateDrawItem(
-                id: 13,
-                new GridPosition(15, 4),
-                footprintWidth: 96,
-                footprintDepth: 96,
-                height: 160,
-                shapeNumber: 12,
-                () => DrawBrazier(
-                    Iso(new GridPosition(15, 4)) + new Vector2(0, 3))),
-            CreateDrawItem(
-                id: 14,
-                new GridPosition(12, 20),
-                footprintWidth: 128,
-                footprintDepth: 128,
-                height: 96,
-                shapeNumber: 10,
-                () => DrawBarrel(
-                    Iso(new GridPosition(12, 20)) + new Vector2(0, 3))),
-            CreateDrawItem(
-                id: 15,
-                new GridPosition(29, 14),
-                footprintWidth: 128,
-                footprintDepth: 128,
-                height: 96,
-                shapeNumber: 10,
-                () => DrawBarrel(
-                    Iso(new GridPosition(29, 14)) + new Vector2(0, 3))),
-            CreateDrawItem(
-                id: 16,
-                new GridPosition(33, 23),
-                footprintWidth: 256,
-                footprintDepth: 192,
-                height: 160,
-                shapeNumber: 11,
-                () => DrawAltar(
-                    Iso(new GridPosition(33, 23)) + new Vector2(0, 3))),
-            CreateDrawItem(
-                id: 17,
-                new GridPosition(20, 25),
-                footprintWidth: 96,
-                footprintDepth: 96,
-                height: 160,
-                shapeNumber: 12,
-                () => DrawBrazier(
-                    Iso(new GridPosition(20, 25)) + new Vector2(0, 3))),
-            CreateDrawItem(
-                id: 18,
-                new GridPosition(38, 17),
-                footprintWidth: 96,
-                footprintDepth: 96,
-                height: 160,
-                shapeNumber: 12,
-                () => DrawBrazier(
-                    Iso(new GridPosition(38, 17)) + new Vector2(0, 3))),
-        };
+            items.AddRange(DemoScenery());
+        }
 
         foreach (var chest in visibleObjects.Where(candidate =>
                      candidate.Id != _world.PlayerId &&
                      candidate.HasFlag(ObjectFlags.Container) &&
                      !candidate.HasFlag(ObjectFlags.Monster)))
         {
+            drawn.Add(chest.Id);
             items.Add(CreateObjectDrawItem(
                 chest,
                 shapeNumber: chest.HasFlag(ObjectFlags.Corpse) ? 20 : 21,
@@ -1767,6 +1848,7 @@ public partial class Main : Node2D
                      candidate.HasFlag(ObjectFlags.Monster) &&
                      candidate.IsAlive))
         {
+            drawn.Add(monster.Id);
             items.Add(CreateObjectDrawItem(
                 monster,
                 shapeNumber:
@@ -1777,6 +1859,7 @@ public partial class Main : Node2D
         foreach (var item in visibleObjects.Where(candidate =>
                      candidate.HasFlag(ObjectFlags.Item)))
         {
+            drawn.Add(item.Id);
             items.Add(CreateObjectDrawItem(
                 item,
                 shapeNumber: 40,
@@ -1788,10 +1871,32 @@ public partial class Main : Node2D
                          "prop.",
                          StringComparison.Ordinal)))
         {
+            drawn.Add(prop.Id);
             items.Add(CreateObjectDrawItem(
                 prop,
                 shapeNumber: 22,
                 () => DrawProp(prop)));
+        }
+
+        foreach (var waymark in visibleObjects.Where(IsWaymark))
+        {
+            drawn.Add(waymark.Id);
+            items.Add(CreateObjectDrawItem(
+                waymark,
+                shapeNumber: 5,
+                () => DrawWaymark(waymark)));
+        }
+
+        // Everything else that is visible and has no drawing of its own — the
+        // cracked floor hinting at a hazard, say. A hint the player cannot see
+        // is a trap, and the generator promises a warning rather than one.
+        foreach (var marking in visibleObjects.Where(candidate =>
+                     !drawn.Contains(candidate.Id)))
+        {
+            items.Add(CreateObjectDrawItem(
+                marking,
+                shapeNumber: 6,
+                () => DrawMarking(marking)));
         }
 
         items.Add(CreateObjectDrawItem(
@@ -1799,6 +1904,81 @@ public partial class Main : Node2D
             shapeNumber: 1,
             DrawPlayer));
         return items;
+    }
+
+    /// <summary>
+    /// A flat marking on the floor: something painted on the cell rather than
+    /// standing on it. Sized from its own footprint, so what is drawn is what
+    /// the object says it covers.
+    /// </summary>
+    private void DrawMarking(WorldObject marking)
+    {
+        var at = Iso(_world.GetGridPosition(marking.Id)) +
+            new Vector2(0, 3) +
+            Elevation(marking.Location.Position.Z);
+        var halfWidth = Math.Max(
+            2,
+            marking.Footprint.Width * TileHalfWidth / WorldUnitsPerTile);
+        var halfDepth = Math.Max(
+            1,
+            marking.Footprint.Depth * TileHalfHeight / WorldUnitsPerTile);
+        DrawColoredPolygon(
+            Diamond(at, halfWidth - 1, halfDepth - 1, close: false),
+            new Color("2e2823"));
+        DrawPolyline(
+            Diamond(at, halfWidth - 1, halfDepth - 1, close: true),
+            new Color("8a5a3a"),
+            1);
+        DrawLine(
+            at + new Vector2(-halfWidth / 2f, -1),
+            at + new Vector2(halfWidth / 2f, 1),
+            new Color("6d4a33"),
+            1);
+    }
+
+    private static bool IsWaymark(WorldObject value) =>
+        value.TypeId == SubzoneBuilder.EntranceTypeId ||
+        value.TypeId == SubzoneBuilder.ExitTypeId;
+
+    /// <summary>
+    /// A threshold: the way on out of a subzone, or the way back into the last
+    /// one. It lies flat on the cell it marks, because it is something to be
+    /// stood on rather than walked round.
+    /// </summary>
+    private void DrawWaymark(WorldObject waymark)
+    {
+        var at = Iso(_world.GetGridPosition(waymark.Id)) +
+            new Vector2(0, 3) +
+            Elevation(waymark.Location.Position.Z);
+        var onward = waymark.TypeId == SubzoneBuilder.ExitTypeId;
+        var colour = onward ? new Color("d8b25a") : new Color("6f8fa8");
+
+        DrawColoredPolygon(
+            Diamond(at, TileHalfWidth - 1, TileHalfHeight - 1, close: false),
+            new Color("1c1a17"));
+        DrawPolyline(
+            Diamond(at, TileHalfWidth - 1, TileHalfHeight - 1, close: true),
+            colour,
+            1);
+
+        // An arrow along the axis of travel: out of the subzone, or back into
+        // the one behind.
+        var reach = onward ? 4 : -4;
+        DrawLine(
+            at + new Vector2(-reach / 2f, 0),
+            at + new Vector2(reach, 0),
+            colour,
+            1);
+        DrawLine(
+            at + new Vector2(reach, 0),
+            at + new Vector2(reach / 2f, -2),
+            colour,
+            1);
+        DrawLine(
+            at + new Vector2(reach, 0),
+            at + new Vector2(reach / 2f, 2),
+            colour,
+            1);
     }
 
     /// <summary>
@@ -2597,22 +2777,23 @@ public partial class Main : Node2D
         var desiredY = Mathf.RoundToInt(
             (WorldViewportHeight / 2f) - playerOrigin.Y);
 
+        // The camera is held inside the map actually being played, so walking
+        // into another subzone reframes on that subzone's extents rather than
+        // on the ones the first map happened to have.
+        var map = _world.CurrentMap;
         var worldMinX =
             IsoOriginX -
-            ((PlayableSliceWorld.MapHeight - 1) * TileHalfWidth) -
+            ((map.Depth - 1) * TileHalfWidth) -
             TileHalfWidth;
         var worldMaxX =
             IsoOriginX +
-            ((PlayableSliceWorld.MapWidth - 1) * TileHalfWidth) +
+            ((map.Width - 1) * TileHalfWidth) +
             TileHalfWidth;
         // Pillar caps extend six compact pixels above the wall courses.
         var worldMinY = IsoOriginY - BackWallHeight - 6;
         var worldMaxY =
             IsoOriginY +
-            ((PlayableSliceWorld.MapWidth +
-              PlayableSliceWorld.MapHeight -
-              2) *
-             TileHalfHeight) +
+            ((map.Width + map.Depth - 2) * TileHalfHeight) +
             TileHalfHeight;
 
         return new Vec2i(

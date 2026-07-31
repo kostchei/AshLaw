@@ -22,15 +22,17 @@
 #
 #   pwsh ./tools/run-game.ps1                    headless smoke run
 #   pwsh ./tools/run-game.ps1 -Screenshot        windowed run, saves a PNG
-#   pwsh ./tools/run-game.ps1 -Goto 28,6 -Screenshot
-#                                                walk somewhere first, then shoot
+#   pwsh ./tools/run-game.ps1 -Demo -Goto 28,6 -Screenshot
+#                                                the acceptance map, walked to a
+#                                                cell, then shot
+#   pwsh ./tools/run-game.ps1 -WorldSeed 4242    a different generated world
 #   pwsh ./tools/run-game.ps1 -Interactive       just play it, no reporting
 #
 # Artifacts land in artifacts/run-game/ (git-ignored).
 
 param(
-    # Frames to run before the report is taken. The scripted walk takes eight
-    # steps over the first 40 frames.
+    # Frames to run before the report is taken. The scripted walk takes the six
+    # steps a six-second round allows, over the first 60 frames.
     [int]$Frames = 90,
 
     # Run with a window instead of headless. Implied by -Screenshot, because a
@@ -62,6 +64,15 @@ param(
     # With -DragDrop, keep the object in hand instead of dropping it, so a
     # screenshot shows a live drag.
     [switch]$Hold,
+
+    # Play the hand-built acceptance map instead of a generated world. It is
+    # the only map with the physics area — the trestle, the stacked crates and
+    # the bridge over the pit — so -DragDrop and -Goto runs aimed at those want
+    # this.
+    [switch]$Demo,
+
+    # Generate the world from this seed instead of the built-in one.
+    [string]$WorldSeed,
 
     # Hand the game to a human: no smoke run, no timeout, no reaping.
     [switch]$Interactive,
@@ -153,7 +164,10 @@ if (-not $SkipBuild) {
 
 if ($Interactive) {
     Write-Host "=== Launching Godot (interactive). Close the window when done."
-    & $godot --path $gameDir -- --debug-overlay
+    $playArgs = @("--debug-overlay")
+    if ($Demo) { $playArgs += "--demo" }
+    if ($WorldSeed) { $playArgs += "--world-seed=$WorldSeed" }
+    & $godot --path $gameDir -- @playArgs
     exit 0
 }
 
@@ -183,6 +197,8 @@ if ($Help) { $godotArgs += "--help-open" }
 if ($SaveLoad) { $godotArgs += "--smoke-save-load" }
 if ($DragDrop) { $godotArgs += "--smoke-drag-drop" }
 if ($Hold) { $godotArgs += "--smoke-hold" }
+if ($Demo) { $godotArgs += "--demo" }
+if ($WorldSeed) { $godotArgs += "--world-seed=$WorldSeed" }
 
 Write-Host "=== Running $(if ($Windowed) { 'windowed' } else { 'headless' }) smoke run ($Frames frames)"
 $process = Start-Process -FilePath $godot -ArgumentList $godotArgs -PassThru -NoNewWindow `
