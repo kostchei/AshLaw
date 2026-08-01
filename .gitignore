@@ -34,6 +34,29 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+*.user
+*.suo
+*.userprefs
+*.nupkg
+*.snupkg
+
+# Test and coverage output
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+# IDEs and operating systems
+.vs/
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
 .ssh/
 *.key
 *.pem
@@ -42,3 +65,4 @@ Thumbs.db
 
 # Source reference scans (transcribed to docs/reference/)
 docs/*.bmp
+*.pdf
