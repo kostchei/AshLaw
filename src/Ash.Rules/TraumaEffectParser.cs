@@ -154,9 +154,12 @@ internal static partial class TraumaEffectParser
             effects.Add(new TraumaEffect(TraumaEffectKind.Topple, AppliesWhen: condition));
         }
 
-        foreach (var _ in MatchAll(GrazeRegex(), clause, covered))
+        foreach (var match in MatchAll(GrazeRegex(), clause, covered))
         {
-            effects.Add(new TraumaEffect(TraumaEffectKind.Graze, AppliesWhen: condition));
+            effects.Add(new TraumaEffect(
+                TraumaEffectKind.Graze,
+                Magnitude: ParseOptionalInt(match, "multiplier"),
+                AppliesWhen: condition));
         }
 
         foreach (var _ in MatchAll(CleaveRegex(), clause, covered))
@@ -172,6 +175,35 @@ internal static partial class TraumaEffectParser
         foreach (var _ in MatchAll(PushRegex(), clause, covered))
         {
             effects.Add(new TraumaEffect(TraumaEffectKind.Push, AppliesWhen: condition));
+        }
+
+        foreach (var match in MatchAll(ExhaustionRegex(), clause, covered))
+        {
+            effects.Add(new TraumaEffect(
+                TraumaEffectKind.Exhaustion,
+                Magnitude: ParseInt(match, "levels"),
+                DurationUnit: TraumaDurationUnit.UntilHealed,
+                AppliesWhen: condition));
+        }
+
+        foreach (var match in MatchAll(InjuredRegex(), clause, covered))
+        {
+            effects.Add(new TraumaEffect(
+                TraumaEffectKind.Injured,
+                Magnitude: ParseNumberWord(match.Groups["count"].Value),
+                DurationUnit: TraumaDurationUnit.UntilHealed,
+                AppliesWhen: condition));
+        }
+
+        foreach (var _ in MatchAll(StableAtZeroRegex(), clause, covered))
+        {
+            effects.Add(new TraumaEffect(
+                TraumaEffectKind.StableAtZero,
+                Magnitude: 1,
+                Duration: 1,
+                DurationUnit: TraumaDurationUnit.D4Hours,
+                AppliesWhen: condition,
+                Detail: "0 hit points and 0 wounds"));
         }
 
         foreach (var match in MatchAll(UnconsciousRegex(), clause, covered))
@@ -360,6 +392,14 @@ internal static partial class TraumaEffectParser
     private static int ParseOptionalInt(Match match, string group) =>
         match.Groups[group].Success ? ParseInt(match, group) : 0;
 
+    private static int ParseNumberWord(string value) =>
+        value.ToLowerInvariant() switch
+        {
+            "one" => 1,
+            "two" => 2,
+            _ => throw new RulesDataException($"Unsupported number word '{value}'."),
+        };
+
     [GeneratedRegex(
         @"If no (?<condition>arm armor|leg armor|helm|shield)\s*(?:,|:)\s*(?<clause>.*?)(?=(?:\s+If no )|$)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
@@ -418,7 +458,9 @@ internal static partial class TraumaEffectParser
     [GeneratedRegex(@"\btopple\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ToppleRegex();
 
-    [GeneratedRegex(@"\bgraze\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(
+        @"\bgraze(?:\s+damage)?(?:\s*[x×]\s*(?<multiplier>\d+))?\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex GrazeRegex();
 
     [GeneratedRegex(@"\bcleave\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
@@ -429,6 +471,21 @@ internal static partial class TraumaEffectParser
 
     [GeneratedRegex(@"\bpush\b(?!\s+\d)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex PushRegex();
+
+    [GeneratedRegex(
+        @"\b(?<levels>\d+)\s+levels?\s+of\s+exhaustion\s+until\s+healed\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ExhaustionRegex();
+
+    [GeneratedRegex(
+        @"\binjured:\s+disadvantage\s+on\s+(?<count>one|two)\s+ability\s+scores?\s+and\s+half\s+speed\s+until\s+healed\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex InjuredRegex();
+
+    [GeneratedRegex(
+        @"\bstable\s+at\s+0\s+hit\s+points\s+and\s+0\s+wounds\.\s+wakes\s+in\s+1d4\s+hours\s+with\s+1\s+hit\s+point\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex StableAtZeroRegex();
 
     [GeneratedRegex(
         @"\b(?:unconscious|knocked out)(?:\s+for\s+(?<duration>\d+)\s+hours?)?",
@@ -503,7 +560,7 @@ internal static partial class TraumaEffectParser
     /// would apply unconditionally instead of being gated.
     /// </remarks>
     [GeneratedRegex(
-        @"[+-]\s*\d+|\b\d+\s*(?:hits?|rounds?|rnds?|rds?|hours?|feet|foot|ft|')|\bif\s+no\b|\b(?:broken|useless|crushed|stunned|restrained|incapacitated|unconscious|prone|dying|suffocating|dies|death|killed|paralyz(?:ed|es)|blinded|deafened|bleeds?|bleeding|drops?|graze|vex|sap|topple|cleave|slow|push(?:ed)?)\b",
+        @"[+-]\s*\d+|\b\d+\s*(?:hits?|rounds?|rnds?|rds?|hours?|feet|foot|ft|')|\bif\s+no\b|\b(?:broken|useless|crushed|stunned|restrained|incapacitated|unconscious|prone|dying|suffocating|exhaustion|injured|stable|dies|death|killed|paralyz(?:ed|es)|blinded|deafened|bleeds?|bleeding|drops?|graze|vex|sap|topple|cleave|slow|push(?:ed)?)\b",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex UnaccountedMechanicRegex();
 }

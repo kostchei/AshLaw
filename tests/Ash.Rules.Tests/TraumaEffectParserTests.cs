@@ -37,6 +37,11 @@ public sealed class TraumaEffectParserTests
             { CriticalTableId.Puncture, 9, "Strike along side of chest. 1 hit per round. Restrained 1 round." },
             { CriticalTableId.Unbalancing, 9, "Blow to shield arm. Graze. Shield torn away. If no shield: Restrained 2 rounds." },
 
+            { CriticalTableId.Crush, 10, "Blow breaks bone in leg. Graze x2. Injured: Disadvantage on one ability score and half Speed until healed. Restrained 2 rounds." },
+            { CriticalTableId.Slash, 10, "Medium thigh wound. Graze. 1 hit per round. Restrained 2 rounds." },
+            { CriticalTableId.Puncture, 10, "Strike to lower leg. Tendons torn. +3 hits. 2 levels of Exhaustion until healed. Restrained 1 round." },
+            { CriticalTableId.Unbalancing, 10, "Elbow strike. Forearm numbed. Graze x2. Drop weapon. Sap." },
+
             { CriticalTableId.Crush, 16, "Neck strike crushes throat. Cannot breathe. Restrained and Suffocating." },
             { CriticalTableId.Slash, 16, "Sever weapon arm. 15 hits per round. Arm useless. Prone and Incapacitated." },
             { CriticalTableId.Puncture, 16, "Nailed in lower back. Prone and Dying." },
@@ -75,40 +80,40 @@ public sealed class TraumaEffectParserTests
     public static TheoryData<CriticalTableId, int, string, string> PhysicalUpperBands =>
         new()
         {
-            { CriticalTableId.Crush, 11, "81-86", "Blow to weapon arm. +8 hits. Restrained 2 rounds. If no arm armor: tendon damaged, arm broken & useless." },
-            { CriticalTableId.Crush, 12, "87-89", "Shatter knee. +9 hits. Prone and Restrained 3 rounds." },
-            { CriticalTableId.Crush, 13, "91-96", "Blow to side of head. +20 hits. Unconscious for 4 hours. If no helm: skull crushed." },
+            { CriticalTableId.Crush, 11, "81-86", "Blow to weapon arm. Graze x2. Restrained 2 rounds. If no arm armor: tendon damaged, arm broken & useless." },
+            { CriticalTableId.Crush, 12, "87-89", "Shatter knee. Graze x2. Prone and Restrained 3 rounds. Injured: Disadvantage on two ability scores and half Speed until healed." },
+            { CriticalTableId.Crush, 13, "91-96", "Blow to side of head. +20 hits. Stable at 0 hit points and 0 wounds. Wakes in 1d4 hours with 1 hit point. Injured: Disadvantage on one ability score and half Speed until healed. If no helm: skull crushed." },
             { CriticalTableId.Crush, 14, "97-99", "Blast to chest sends ribcage through lungs. Prone and Dying." },
             { CriticalTableId.Crush, 15, "101-106", "Blow breaks hip. +15 hits. Prone and Restrained 3 rounds." },
             { CriticalTableId.Crush, 16, "107-109", "Neck strike crushes throat. Cannot breathe. Restrained and Suffocating." },
             { CriticalTableId.Crush, 17, "111-116", "Shatter elbow in weapon arm. Arm useless. Restrained 5 rounds." },
             { CriticalTableId.Crush, 18, "117-119", "Blow to side crushes chest cavity. Prone and Dying." },
 
-            { CriticalTableId.Slash, 11, "81-86", "Slash weapon arm. +10 hits. 1 hit per round. If no arm armor: muscle & tendon damage, arm useless." },
-            { CriticalTableId.Slash, 12, "87-89", "Destroys one eye. +10 hits. Restrained 30 rounds." },
-            { CriticalTableId.Slash, 13, "91-96", "Strike to side of head. +15 hits. Knocked out for 6 hours. If no helm: dies instantly." },
+            { CriticalTableId.Slash, 11, "81-86", "Slash weapon arm. Graze x2. 1 hit per round. If no arm armor: muscle & tendon damage, arm useless." },
+            { CriticalTableId.Slash, 12, "87-89", "Destroys one eye. Graze x2. Restrained 30 rounds." },
+            { CriticalTableId.Slash, 13, "91-96", "Strike to side of head. +15 hits. Stable at 0 hit points and 0 wounds. Wakes in 1d4 hours with 1 hit point. Injured: Disadvantage on two ability scores and half Speed until healed. If no helm: dies instantly." },
             { CriticalTableId.Slash, 14, "97-99", "Sever lower leg. 20 hits per round. Prone and Incapacitated." },
-            { CriticalTableId.Slash, 15, "101-106", "Major abdominal wound. +10 hits. 8 hits per round. Restrained 4 rounds." },
+            { CriticalTableId.Slash, 15, "101-106", "Major abdominal wound. Graze x2. 8 hits per round. Restrained 4 rounds." },
             { CriticalTableId.Slash, 16, "107-109", "Sever weapon arm. 15 hits per round. Arm useless. Prone and Incapacitated." },
             { CriticalTableId.Slash, 17, "111-116", "Sever hand. 12 hits per round. Prone and Restrained 6 rounds." },
             { CriticalTableId.Slash, 18, "117-119", "Sever spine. +20 hits. Prone and Paralyzed from the neck down permanently." },
 
-            { CriticalTableId.Puncture, 11, "81-86", "Strike to weapon arm. +10 hits. If no arm armor: bone broken and Restrained 3 rounds." },
-            { CriticalTableId.Puncture, 12, "87-89", "Strike through lower leg. Sever muscle. Restrained 3 rounds." },
+            { CriticalTableId.Puncture, 11, "81-86", "Strike to weapon arm. Graze x2. If no arm armor: bone broken and Restrained 3 rounds." },
+            { CriticalTableId.Puncture, 12, "87-89", "Strike through lower leg. Sever muscle. Restrained 3 rounds. Injured: Disadvantage on two ability scores and half Speed until healed." },
             { CriticalTableId.Puncture, 13, "91-96", "Strike through both lungs. Prone and Dying." },
-            { CriticalTableId.Puncture, 14, "97-99", "Strike to side of head. +10 hits. Knocked out for 6 hours. If no helm: dies instantly." },
-            { CriticalTableId.Puncture, 15, "101-106", "Major abdominal wound. +10 hits. 6 hits per round. Restrained 4 rounds." },
+            { CriticalTableId.Puncture, 14, "97-99", "Strike to side of head. Graze x2. Stable at 0 hit points and 0 wounds. Wakes in 1d4 hours with 1 hit point. Injured: Disadvantage on two ability scores and half Speed until healed. If no helm: dies instantly." },
+            { CriticalTableId.Puncture, 15, "101-106", "Major abdominal wound. Graze x2. 6 hits per round. Restrained 4 rounds." },
             { CriticalTableId.Puncture, 16, "107-109", "Nailed in lower back. Prone and Dying." },
             { CriticalTableId.Puncture, 17, "111-116", "Strike through leg. Artery severed. 12 hits per round. Prone and Dying." },
-            { CriticalTableId.Puncture, 18, "117-119", "Strike through kidneys. +9 hits. Prone and Dying." },
+            { CriticalTableId.Puncture, 18, "117-119", "Strike through kidneys. Graze x2. Prone and Dying." },
 
-            { CriticalTableId.Unbalancing, 11, "81-86", "Shot to side. Sideways 5 feet. Drop anything carried in hands. Restrained 3 rounds." },
+            { CriticalTableId.Unbalancing, 11, "81-86", "Shot to side. Push. Drop anything carried in hands. Restrained 3 rounds." },
             { CriticalTableId.Unbalancing, 12, "87-89", "Side strike. Prone and Restrained 6 rounds." },
-            { CriticalTableId.Unbalancing, 13, "91-96", "Hard head strike. Push and Restrained 6 rounds. If no helm: Unconscious for 24 hours." },
+            { CriticalTableId.Unbalancing, 13, "91-96", "Hard head strike. Push and Restrained 6 rounds. If no helm: Stable at 0 hit points and 0 wounds. Wakes in 1d4 hours with 1 hit point. Injured: Disadvantage on two ability scores and half Speed until healed." },
             { CriticalTableId.Unbalancing, 14, "97-99", "Brutal strike to belly. Prone. Drop anything carried in hands. Restrained 15 rounds." },
-            { CriticalTableId.Unbalancing, 15, "101-106", "Blow breaks leg. +12 hits. Restrained 1 round." },
+            { CriticalTableId.Unbalancing, 15, "101-106", "Blow breaks leg. Graze x2. Injured: Disadvantage on two ability scores and half Speed until healed. Restrained 1 round." },
             { CriticalTableId.Unbalancing, 16, "107-109", "Head slammed into stone. Prone and Dying." },
-            { CriticalTableId.Unbalancing, 17, "111-116", "Great side shot. Sideways 5 feet. Prone. Lower leg broken. Restrained 7 rounds." },
+            { CriticalTableId.Unbalancing, 17, "111-116", "Great side shot. Push. Prone. Lower leg broken. Restrained 7 rounds. Injured: Disadvantage on one ability score and half Speed until healed." },
             { CriticalTableId.Unbalancing, 18, "117-119", "Shield shoulder struck. Restrained 9 rounds. If no shield: Prone and Incapacitated; arm broken & useless." },
         };
 
@@ -199,6 +204,70 @@ public sealed class TraumaEffectParserTests
             outcomes.SelectMany(outcome => outcome.Effects)
                 .Where(effect => effect.Kind == TraumaEffectKind.Sap),
             effect => Assert.Equal(TraumaDurationUnit.None, effect.DurationUnit));
+    }
+
+    [Fact]
+    public void RevisedDamageInjuryAndRecoveryRulesAreStructured()
+    {
+        var crushTen = Rules.GetCriticalOutcome(CriticalTableId.Crush, 10);
+        Assert.Contains(
+            new TraumaEffect(TraumaEffectKind.Graze, Magnitude: 2),
+            crushTen.Effects);
+        Assert.DoesNotContain(
+            crushTen.Effects,
+            effect => effect.Kind == TraumaEffectKind.AdditionalHits);
+        Assert.Contains(
+            new TraumaEffect(
+                TraumaEffectKind.Injured,
+                Magnitude: 1,
+                DurationUnit: TraumaDurationUnit.UntilHealed),
+            crushTen.Effects);
+
+        var punctureTen = Rules.GetCriticalOutcome(CriticalTableId.Puncture, 10);
+        Assert.Contains(
+            new TraumaEffect(
+                TraumaEffectKind.Exhaustion,
+                Magnitude: 2,
+                DurationUnit: TraumaDurationUnit.UntilHealed),
+            punctureTen.Effects);
+
+        var headStrike = Rules.GetCriticalOutcome(CriticalTableId.Slash, 13);
+        Assert.Contains(
+            new TraumaEffect(
+                TraumaEffectKind.StableAtZero,
+                Magnitude: 1,
+                Duration: 1,
+                DurationUnit: TraumaDurationUnit.D4Hours,
+                Detail: "0 hit points and 0 wounds"),
+            headStrike.Effects);
+        Assert.Contains(
+            new TraumaEffect(
+                TraumaEffectKind.Injured,
+                Magnitude: 2,
+                DurationUnit: TraumaDurationUnit.UntilHealed),
+            headStrike.Effects);
+        Assert.DoesNotContain(
+            headStrike.Effects,
+            effect => effect.Kind == TraumaEffectKind.Unconscious);
+    }
+
+    [Fact]
+    public void PhysicalDisplacementUsesPushRatherThanFreeformMovement()
+    {
+        var displaced = new[]
+        {
+            Rules.GetCriticalOutcome(CriticalTableId.Unbalancing, 8),
+            Rules.GetCriticalOutcome(CriticalTableId.Unbalancing, 11),
+            Rules.GetCriticalOutcome(CriticalTableId.Unbalancing, 13),
+            Rules.GetCriticalOutcome(CriticalTableId.Unbalancing, 17),
+        };
+
+        Assert.All(displaced, outcome =>
+            Assert.Contains(new TraumaEffect(TraumaEffectKind.Push), outcome.Effects));
+        Assert.All(displaced, outcome =>
+            Assert.DoesNotContain(
+                outcome.Effects,
+                effect => effect.Kind == TraumaEffectKind.ForcedMovement));
     }
 
     [Theory]
@@ -293,9 +362,9 @@ public sealed class TraumaEffectParserTests
     [Fact]
     public void BleedIsNotAlsoCountedAsAdditionalHits()
     {
-        // Slash lookup 11: immediate trauma damage plus ongoing bleeding.
-        var outcome = Rules.GetCriticalOutcome(CriticalTableId.Slash, 11);
-        Assert.Contains("1 hit per round", outcome.Text, StringComparison.Ordinal);
+        // Puncture lookup 7: immediate trauma damage plus conditional bleeding.
+        var outcome = Rules.GetCriticalOutcome(CriticalTableId.Puncture, 7);
+        Assert.Contains("3 hits per round", outcome.Text, StringComparison.Ordinal);
 
         var additional = outcome.Effects
             .Where(effect => effect.Kind == TraumaEffectKind.AdditionalHits)
@@ -304,8 +373,8 @@ public sealed class TraumaEffectParserTests
             .Where(effect => effect.Kind == TraumaEffectKind.Bleeding)
             .ToArray();
 
-        Assert.Equal(10, Assert.Single(additional).Magnitude);
-        Assert.Equal(1, Assert.Single(bleeds).Magnitude);
+        Assert.Equal(3, Assert.Single(additional).Magnitude);
+        Assert.Equal(3, Assert.Single(bleeds).Magnitude);
     }
 
     /// <summary>

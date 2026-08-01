@@ -75,6 +75,21 @@ public enum TraumaEffectKind
     /// <summary>The 5.5e suffocation hazard has begun.</summary>
     Suffocating,
 
+    /// <summary>5.5e Exhaustion; Magnitude is the number of levels.</summary>
+    Exhaustion,
+
+    /// <summary>
+    /// Lasting injury: Disadvantage on Magnitude chosen ability scores and half
+    /// Speed until healed.
+    /// </summary>
+    Injured,
+
+    /// <summary>
+    /// Stable at 0 hit points and 0 wounds. Duration is the recovery roll and
+    /// Magnitude is the hit points restored on waking.
+    /// </summary>
+    StableAtZero,
+
     // 5.5e weapon masteries. These are mechanical markers for the combat-state
     // consumer, not presentation tags; each uses the standard mastery rule.
     /// <summary>Graze: damage equal to the attack's STR or DEX modifier.</summary>
@@ -113,6 +128,8 @@ public enum TraumaDurationUnit
     None,
     Rounds,
     Hours,
+    D4Hours,
+    UntilHealed,
     Permanent,
 }
 

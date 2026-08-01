@@ -80,7 +80,10 @@ To translate MERP's percentile activity penalties (`-5 to -75 activity`) and per
 | MERP Activity / Trauma | d20 / D&D Equivalent | Gameplay Rule & Mechanical Effect |
 | :--- | :--- | :--- |
 | **$-5 \text{ to } -15 \text{ Activity}$** | **Flat $-1$ or $-2$ Penalty** | Add a $-1$ (for $-5\%$) or $-2$ (for $-10\%$ to $-15\%$) penalty to attack rolls, AC, or checks. |
-| **$-25 \text{ to } -75 \text{ Activity}$** | **Temporary Disadvantage** | Target suffers **Disadvantage** on attack rolls, physical checks, and DEX/STR saving throws for the specified duration. |
+| **$-25 \text{ Activity}$ with no duration** | **2 Exhaustion levels** | The target has 2 levels of Exhaustion until healed. |
+| **$-40 \text{ Activity}$ with no duration** | **Injured (one ability)** | The target has Disadvantage on one appropriate ability score and half Speed until healed. |
+| **$-50 \text{ to } -60 \text{ Activity}$ with no duration** | **Injured (two abilities)** | The target has Disadvantage on two appropriate ability scores and half Speed until healed. |
+| **Timed activity penalty** | **Short mastery or penalty** | A penalty that explicitly names rounds remains temporary; for example, a one-round attack penalty can become Sap. |
 | **Permanent Bone Fracture / Limb Ruin** | **Stonetop-style Stat Impairment** | Gives permanent **Disadvantage on 1 or 2 relevant Ability Scores**: |
 | • *Severed Tendon / Shattered Leg* | **Impaired DEX & STR (Lower Body)** | Permanent **Disadvantage on DEX & STR checks**, movement speed halved. |
 | • *Shattered Arm / Shoulder Ruin* | **Impaired STR & Attack Rolls** | Permanent **Disadvantage on STR checks & Attacks** using that arm. |
@@ -94,11 +97,11 @@ not loose synonyms for arbitrary penalties:
 
 | Mastery | Critical-table meaning |
 | :--- | :--- |
-| **Graze** | Deal damage equal to the STR or DEX modifier used for the attack rather than the MERP result's small flat hit award. |
+| **Graze** | Deal damage equal to the STR or DEX modifier used for the attack rather than the MERP result's small flat hit award. **Graze x2** deals that modifier damage twice and replaces an 8–12 hit award. |
 | **Vex** | The attacker's next attack against the target has Advantage if made before the end of the attacker's next turn. |
 | **Sap** | The target has Disadvantage on its next attack roll before the start of the attacker's next turn. Sap never carries a multi-round duration. |
 | **Slow** | The target's Speed is reduced by 10 feet until the start of the attacker's next turn. |
-| **Push** | A qualifying target is pushed up to 10 feet straight away from the attacker. Shorter forced movement remains ordinary forced movement, not Push. |
+| **Push** | A qualifying target is pushed up to 10 feet straight away from the attacker. Critical results use Push for their original knockback or forced displacement. |
 | **Topple** | The target makes the mastery saving throw; on a failure it gains the Prone condition. |
 | **Cleave** | The attacker may make the mastery follow-up attack against a second creature within 5 feet of the first. |
 
@@ -111,7 +114,7 @@ particular, MERP's **stunned** result is normally closer to 5.5e
 | **Knocked Down / Fell Down / Stumble** | **`Prone`** | Target falls prone. Melee attacks against have Advantage, ranged have Disadvantage; costs half movement to stand. |
 | **MERP Stunned / physically unable to act freely** | **`Restrained`** | Speed is 0, attacks against the target have Advantage, the target's attacks have Disadvantage, and its Dexterity saves have Disadvantage. |
 | **Down and unable to act** | **`Prone` + `Incapacitated`** | The target falls Prone and cannot take an action, Bonus Action, or Reaction. |
-| **Coma / explicitly unconscious** | **`Unconscious`** | The target is also Prone and Incapacitated, drops held items, has Speed 0, and automatically fails Strength and Dexterity saves. |
+| **Unconscious for hours** | **Stable at zero** | Set the target to 0 hit points and 0 wounds, stable. It wakes in 1d4 hours with 1 hit point, then remains Injured with Disadvantage on one or two appropriate ability scores and half Speed until healed. |
 | **Fatal trauma that permits death saves** | **`Prone` + `Dying`** | The target is at 0 HP and begins Death Saving Throws. Dying is a rules-engine state, not a 5.5e condition. |
 | **Cannot breathe / crushed throat** | **Suffocation hazard** | Once choking begins, the target gains one Exhaustion level at the end of each turn until it can breathe again. |
 | **Bleeding / instant death** | **Bleeding / `Death`** | Bleeding ticks at the start of the target's turn. An explicitly instant death bypasses death saves. |
@@ -150,8 +153,9 @@ adaptation; the surrounding band results are retained.
 
 The outcome text retains the MERP injury while expressing its rules with 5.5e
 terms only where a direct equivalent exists: Graze for suitable small immediate
-damage, Sap for a short attack penalty, Push for actual displacement, and
-conditions such as Restrained, Prone, Incapacitated, Unconscious, and Paralyzed.
+damage, Graze x2 in place of 8–12 immediate hits, Sap for a short attack penalty,
+Push for actual displacement, and conditions or states such as Restrained, Prone,
+Incapacitated, Exhaustion, Injured, Stable at zero, and Paralyzed.
 
 These names are mechanical. The rules loader converts them into structured
 effects; they are not flavor keywords. Extra hits apply immediately, bleeding
@@ -183,11 +187,11 @@ $$\text{Lookup Index} = \text{d20 Sub-Index (1--10)} + \text{Tier Modifier}$$
 | **8** | — | — | Minor chest wound. Graze. 1 hit per round. |
 | **9** | — | — | Minor forearm wound. Graze. 2 hits per round. Restrained 1 round. |
 | **10** | — | — | Medium thigh wound. Graze. 1 hit per round. Restrained 2 rounds. |
-| **11** | — | — | Slash weapon arm. +10 hits. 1 hit per round. If no arm armor: muscle & tendon damage, arm useless. |
-| **12** | — | — | Destroys one eye. +10 hits. Restrained 30 rounds. |
-| **13** | — | — | Strike to side of head. +15 hits. Knocked out for 6 hours. If no helm: dies instantly. |
+| **11** | — | — | Slash weapon arm. Graze x2. 1 hit per round. If no arm armor: muscle & tendon damage, arm useless. |
+| **12** | — | — | Destroys one eye. Graze x2. Restrained 30 rounds. |
+| **13** | — | — | Strike to side of head. +15 hits. Stable at 0 hit points and 0 wounds. Wakes in 1d4 hours with 1 hit point. Injured: Disadvantage on two ability scores and half Speed until healed. If no helm: dies instantly. |
 | **14** | — | — | Sever lower leg. 20 hits per round. Prone and Incapacitated. |
-| **15** | — | — | Major abdominal wound. +10 hits. 8 hits per round. Restrained 4 rounds. |
+| **15** | — | — | Major abdominal wound. Graze x2. 8 hits per round. Restrained 4 rounds. |
 | **16** | — | — | Sever weapon arm. 15 hits per round. Arm useless. Prone and Incapacitated. |
 | **17** | — | — | Sever hand. 12 hits per round. Prone and Restrained 6 rounds. |
 | **18** | — | — | Sever spine. +20 hits. Prone and Paralyzed from the neck down permanently. |
@@ -217,10 +221,10 @@ $$\text{Lookup Index} = \text{d20 Sub-Index (1--10)} + \text{Tier Modifier}$$
 | **7** | — | — | Blow to side. +4 hits. Sap. |
 | **8** | — | — | Blow to forearm. +5 hits. If no arm armor: Restrained 1 round. |
 | **9** | — | — | Blow to shield shoulder breaks shield. If no shield: shoulder broken, arm useless. |
-| **10** | — | — | Blow breaks bone in leg. +12 hits. Restrained 2 rounds. |
-| **11** | — | — | Blow to weapon arm. +8 hits. Restrained 2 rounds. If no arm armor: tendon damaged, arm broken & useless. |
-| **12** | — | — | Shatter knee. +9 hits. Prone and Restrained 3 rounds. |
-| **13** | — | — | Blow to side of head. +20 hits. Unconscious for 4 hours. If no helm: skull crushed. |
+| **10** | — | — | Blow breaks bone in leg. Graze x2. Injured: Disadvantage on one ability score and half Speed until healed. Restrained 2 rounds. |
+| **11** | — | — | Blow to weapon arm. Graze x2. Restrained 2 rounds. If no arm armor: tendon damaged, arm broken & useless. |
+| **12** | — | — | Shatter knee. Graze x2. Prone and Restrained 3 rounds. Injured: Disadvantage on two ability scores and half Speed until healed. |
+| **13** | — | — | Blow to side of head. +20 hits. Stable at 0 hit points and 0 wounds. Wakes in 1d4 hours with 1 hit point. Injured: Disadvantage on one ability score and half Speed until healed. If no helm: skull crushed. |
 | **14** | — | — | Blast to chest sends ribcage through lungs. Prone and Dying. |
 | **15** | — | — | Blow breaks hip. +15 hits. Prone and Restrained 3 rounds. |
 | **16** | — | — | Neck strike crushes throat. Cannot breathe. Restrained and Suffocating. |
@@ -252,15 +256,15 @@ $$\text{Lookup Index} = \text{d20 Sub-Index (1--10)} + \text{Tier Modifier}$$
 | **7** | — | — | Thigh strike. +3 hits. If no leg armor: 3 hits per round. |
 | **8** | — | — | Minor forearm wound. +2 hits. If no arm armor: Restrained 1 round. |
 | **9** | — | — | Strike along side of chest. 1 hit per round. Restrained 1 round. |
-| **10** | — | — | Strike to lower leg. Tendons torn. +3 hits. Restrained 1 round. |
-| **11** | — | — | Strike to weapon arm. +10 hits. If no arm armor: bone broken and Restrained 3 rounds. |
-| **12** | — | — | Strike through lower leg. Sever muscle. Restrained 3 rounds. |
+| **10** | — | — | Strike to lower leg. Tendons torn. +3 hits. 2 levels of Exhaustion until healed. Restrained 1 round. |
+| **11** | — | — | Strike to weapon arm. Graze x2. If no arm armor: bone broken and Restrained 3 rounds. |
+| **12** | — | — | Strike through lower leg. Sever muscle. Restrained 3 rounds. Injured: Disadvantage on two ability scores and half Speed until healed. |
 | **13** | — | — | Strike through both lungs. Prone and Dying. |
-| **14** | — | — | Strike to side of head. +10 hits. Knocked out for 6 hours. If no helm: dies instantly. |
-| **15** | — | — | Major abdominal wound. +10 hits. 6 hits per round. Restrained 4 rounds. |
+| **14** | — | — | Strike to side of head. Graze x2. Stable at 0 hit points and 0 wounds. Wakes in 1d4 hours with 1 hit point. Injured: Disadvantage on two ability scores and half Speed until healed. If no helm: dies instantly. |
+| **15** | — | — | Major abdominal wound. Graze x2. 6 hits per round. Restrained 4 rounds. |
 | **16** | — | — | Nailed in lower back. Prone and Dying. |
 | **17** | — | — | Strike through leg. Artery severed. 12 hits per round. Prone and Dying. |
-| **18** | — | — | Strike through kidneys. +9 hits. Prone and Dying. |
+| **18** | — | — | Strike through kidneys. Graze x2. Prone and Dying. |
 
 ---
 
@@ -287,14 +291,14 @@ $$\text{Lookup Index} = \text{d20 Sub-Index (1--10)} + \text{Tier Modifier}$$
 | **7** | — | — | Leg strike. +4 hits. If no leg armor: Sap. |
 | **8** | — | — | Chest strike. Graze and Push. |
 | **9** | — | — | Blow to shield arm. Graze. Shield torn away. If no shield: Restrained 2 rounds. |
-| **10** | — | — | Elbow strike. Forearm numbed. +8 hits. Drop weapon. Sap. |
-| **11** | — | — | Shot to side. Sideways 5 feet. Drop anything carried in hands. Restrained 3 rounds. |
+| **10** | — | — | Elbow strike. Forearm numbed. Graze x2. Drop weapon. Sap. |
+| **11** | — | — | Shot to side. Push. Drop anything carried in hands. Restrained 3 rounds. |
 | **12** | — | — | Side strike. Prone and Restrained 6 rounds. |
-| **13** | — | — | Hard head strike. Push and Restrained 6 rounds. If no helm: Unconscious for 24 hours. |
+| **13** | — | — | Hard head strike. Push and Restrained 6 rounds. If no helm: Stable at 0 hit points and 0 wounds. Wakes in 1d4 hours with 1 hit point. Injured: Disadvantage on two ability scores and half Speed until healed. |
 | **14** | — | — | Brutal strike to belly. Prone. Drop anything carried in hands. Restrained 15 rounds. |
-| **15** | — | — | Blow breaks leg. +12 hits. Restrained 1 round. |
+| **15** | — | — | Blow breaks leg. Graze x2. Injured: Disadvantage on two ability scores and half Speed until healed. Restrained 1 round. |
 | **16** | — | — | Head slammed into stone. Prone and Dying. |
-| **17** | — | — | Great side shot. Sideways 5 feet. Prone. Lower leg broken. Restrained 7 rounds. |
+| **17** | — | — | Great side shot. Push. Prone. Lower leg broken. Restrained 7 rounds. Injured: Disadvantage on one ability score and half Speed until healed. |
 | **18** | — | — | Shield shoulder struck. Restrained 9 rounds. If no shield: Prone and Incapacitated; arm broken & useless. |
 
 ---

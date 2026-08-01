@@ -134,7 +134,8 @@ The runtime converts the raw d20 to a 1–10 sub-index and adds the critical
 tier's modifier (`A +0`, `B +2`, `C +4`, `D +6`, or `E +8`). Indices 1–4 are
 padding, and index 5 (MERP band 01–05) is also a no-effect result. Structured
 effects begin at index 6. MERP stunned results are represented by Restrained;
-Prone, Incapacitated, Dying, and mastery effects appear only when the source
+Prone, Incapacitated, Dying, Exhaustion, Injured, stable-at-zero recovery, and
+mastery effects appear only when the source
 outcome supplies an equivalent mechanic.
 
 ### 5.3 Spellcasting rules

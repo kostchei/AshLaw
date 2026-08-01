@@ -75,6 +75,17 @@ Regression coverage records the user-specified conversions for indices 5–9 and
 new Restrained, Dying, Suffocating, and Push effects are structured data rather
 than presentation-only words.
 
+The follow-up conversion replaces physical critical awards of 8–12 immediate
+hits with Graze x2 and expresses every physical knockback as Push. Indefinite
+-25 activity becomes 2 Exhaustion levels until healed; indefinite -40 activity
+becomes Injured with one disadvantaged ability and half Speed; indefinite -50
+or -60 activity becomes Injured with two disadvantaged abilities and half
+Speed. Results that originally caused unconsciousness for hours instead leave
+the target stable at 0 hit points and 0 wounds, waking in 1d4 hours with 1 hit
+point and an appropriate one- or two-ability Injury until healed. These replace
+the earlier flat-hit and hour-long Unconscious effects rather than stacking with
+them.
+
 ### 2026-07-31 — physical critical tables restored to MERP bands
 
 The earlier 1–18 refactor used the right lookup shape but populated it with an
