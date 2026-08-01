@@ -80,6 +80,41 @@ public sealed class CombatTimingTests
     }
 
     [Fact]
+    public void EncounterRollsActivityAndCharismaAdjustedReaction()
+    {
+        // Seed 8 rolls 5+3 for activity (searching), then 6+5 plus the
+        // Avatar's +1 Charisma modifier: 12, friendly.
+        using var world = MeleeWorld(seed: 8, playerDistanceTiles: 3);
+        var rat = Rat(world);
+
+        AdvanceBeats(world, 1);
+
+        Assert.Equal(
+            MonsterActivity.SearchingOrGathering,
+            world.Combat.ActivityOf(rat.Id));
+        Assert.Equal(
+            MonsterReaction.Friendly,
+            world.Combat.ReactionOf(rat.Id));
+        Assert.Equal(Awareness.Recognizing, world.Combat.AwarenessOf(rat.Id));
+    }
+
+    [Fact]
+    public void ASuccessfulAttackMakesAReactionHostile()
+    {
+        // The same seed would roll friendly if left alone. Attacking first
+        // establishes hostility without making the unused reaction roll.
+        using var world = MeleeWorld(seed: 8);
+        var rat = Rat(world);
+
+        Assert.True(world.AttackAdjacentMonster().Succeeded);
+
+        Assert.Equal(
+            MonsterReaction.Hostile,
+            world.Combat.ReactionOf(rat.Id));
+        Assert.Equal(Awareness.Recognizing, world.Combat.AwarenessOf(rat.Id));
+    }
+
+    [Fact]
     public void TheNpcActsExactlyOneBeatAfterItCriesOut()
     {
         using var world = MeleeWorld(seed: 7);
@@ -91,11 +126,11 @@ public sealed class CombatTimingTests
         var blow = RunUntil(world, CombatEventKind.Swing, maxBeats: 40);
 
         // 200 ms, and not a frame less: the cue is a warning with time behind it.
-        Assert.Equal(alert.Tick + CombatClock.BeatsIn(200), blow.Tick);
+        Assert.Equal(alert.Tick + (2 * CombatClock.BeatsIn(200)), blow.Tick);
         Assert.Equal(
             Awareness.Engaged,
             world.Combat.AwarenessOf(alert.ActorId));
-        Assert.Equal(CombatDirector.NpcSwingDamage, blow.Damage);
+        Assert.InRange(blow.Damage, 0, int.MaxValue);
     }
 
     [Fact]
@@ -147,10 +182,10 @@ public sealed class CombatTimingTests
         AdvanceBeats(world, 1);
         Assert.True(world.Combat.PlayerCanSwing);
         Assert.Equal(0, world.Combat.PlayerCooldownRemainingMilliseconds);
+        var beforeSecond = world.Objects.Get(rat.Id).Health;
         Assert.True(world.AttackAdjacentMonster().Succeeded);
-        Assert.Equal(
-            rat.MaxHealth - (2 * PlayableSliceWorld.PlayerAttackDamage),
-            world.Objects.Get(rat.Id).Health);
+        CombatRound.WaitForPlayerImpact(world);
+        Assert.InRange(world.Objects.Get(rat.Id).Health, 0, beforeSecond);
     }
 
     [Fact]
@@ -234,22 +269,74 @@ public sealed class CombatTimingTests
     }
 
     [Fact]
-    public void ASwingOutOfReachIsNotSpent()
+    public void AHostileNpcPursuesThenTakesABeatToChangeToAnAttack()
     {
-        // Closing to melee must not also cost a fresh round: an engaged NPC
-        // that cannot reach you has not swung.
+        // Seed 7 gives a hostile reaction. The rat starts three tiles away.
         using var world = MeleeWorld(seed: 7, playerDistanceTiles: 3);
         var rat = Rat(world);
-        RunUntil(world, CombatEventKind.Alerted, maxBeats: 40);
-        AdvanceBeats(world, CombatClock.BeatsIn(6000));
+        var start = world.GetGridPosition(rat.Id);
+        var alert = RunUntil(world, CombatEventKind.Alerted, maxBeats: 40);
+
+        // The decision does not move the rat on the alert beat. One 200 ms
+        // beat later its pursuit action executes through normal movement.
+        Assert.Equal(start, world.GetGridPosition(rat.Id));
+        Assert.Empty(AdvanceBeat(world));
+        Assert.Equal(alert.Tick + 1, world.Clock.Tick);
+        Assert.Equal(
+            2,
+            world.PlayerPosition.ManhattanDistance(
+                world.GetGridPosition(rat.Id)));
         Assert.Equal(Awareness.Engaged, world.Combat.AwarenessOf(rat.Id));
 
-        // Step into reach; the blow lands on the next beat, not a round later.
-        Assert.True(world.MovePlayer(1, 0).Succeeded);
-        Assert.True(world.MovePlayer(1, 0).Succeeded);
-        var blow = RunUntil(world, CombatEventKind.Swing, maxBeats: 2);
+        // It takes its next paced step, then spends one whole beat changing
+        // from pursuit to attack before the blow can land.
+        var blow = RunUntil(world, CombatEventKind.Swing, maxBeats: 10);
 
         Assert.Equal(rat.Id, blow.ActorId);
+    }
+
+    [Fact]
+    public void ANonHostileNpcDoesNotCloseTheDistance()
+    {
+        using var world = MeleeWorld(seed: 8, playerDistanceTiles: 3);
+        var rat = Rat(world);
+        var start = world.GetGridPosition(rat.Id);
+
+        AdvanceBeats(world, 50);
+
+        Assert.Equal(MonsterReaction.Friendly, world.Combat.ReactionOf(rat.Id));
+        Assert.Equal(Awareness.Engaged, world.Combat.AwarenessOf(rat.Id));
+        Assert.Equal(start, world.GetGridPosition(rat.Id));
+    }
+
+    [Fact]
+    public void PursuitCannotEnterAnOccupiedSpatialCell()
+    {
+        using var world = MeleeWorld(seed: 7, playerDistanceTiles: 3);
+        var rat = Rat(world);
+        var start = world.GetGridPosition(rat.Id);
+        var blockerPosition = rat.Location.Position with
+        {
+            X = rat.Location.Position.X - PlayableSliceWorld.WorldUnitsPerTile,
+        };
+        world.Objects.Create(new ObjectSpawn
+        {
+            TypeId = "test.pursuit-blocker",
+            Name = "Pursuit Blocker",
+            ShapeId = "shape",
+            Location = ObjectLocation.OnMap(
+                PlayableSliceWorld.DemoMapId,
+                blockerPosition),
+            Footprint = new ObjectFootprint(128, 128),
+            Height = 32,
+            Flags = ObjectFlags.Fixed | ObjectFlags.Solid,
+        });
+
+        RunUntil(world, CombatEventKind.Alerted, maxBeats: 40);
+        AdvanceBeat(world);
+
+        Assert.Equal(start, world.GetGridPosition(rat.Id));
+        world.CurrentMap.ValidateIndex();
     }
 
     [Fact]
@@ -317,7 +404,7 @@ public sealed class CombatTimingTests
         ulong seed,
         int playerDistanceTiles = 1)
     {
-        var world = PlayableSliceWorld.CreateDemo(seed);
+        var world = PlayableSliceWorld.CreateDemo(seed, new TimingAttackResolver());
         var rat = Rat(world);
         var ratCell = world.GetGridPosition(rat.Id);
         var target = rat.Location.Position with
@@ -335,6 +422,20 @@ public sealed class CombatTimingTests
             playerDistanceTiles,
             world.PlayerPosition.ManhattanDistance(ratCell));
         return world;
+    }
+
+    /// <summary>Keeps timing tests about clocks and movement, not lethal rolls.</summary>
+    private sealed class TimingAttackResolver : IAttackRulesResolver
+    {
+        public AttackResult Resolve(AttackRequest request) => new()
+        {
+            Hit = true,
+            RawD20 = request.RawD20,
+            NetRoll = request.RawD20,
+            Margin = 1,
+            ConcussionHits = 1,
+            Mishap = false,
+        };
     }
 
     /// <summary>

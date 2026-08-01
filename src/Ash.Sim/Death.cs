@@ -12,10 +12,9 @@ public readonly record struct CorpseResult(
 /// <remarks>
 /// A corpse is one container holding everything the body had. Worn gear cost no
 /// gear slots while it was worn, so moving it into the body can overflow: the
-/// excess falls at the body's feet, the same rule a full pack follows. Two
-/// commits are needed — first the gear moves, then the body becomes a corpse —
-/// because a transform is not a transfer. The world is valid in between: a live
-/// actor that happens to be wearing nothing.
+/// excess falls at the body's feet, the same rule a full pack follows. Gear
+/// transfers and transformation are submitted as one combat mutation, so no
+/// observer can see a stripped dead actor between the two operations.
 /// </remarks>
 public static class Death
 {
@@ -43,17 +42,24 @@ public static class Death
                 value.Location.Parent == bodyId)
             .OrderBy(value => value.Id)
             .ToArray();
-        var result = StowOrSpill(objects, body, worn);
-        if (!result.Succeeded)
+        var (result, transfers) = PlanStowOrSpill(objects, body, worn);
+        try
         {
+            objects.CommitCombatMutation(new CombatMutation(
+                bodyId,
+                Transfers: transfers,
+                Transform: new CombatTransform(
+                    bodyId, typeId, name, shapeId, flags, height)));
             return result;
         }
-
-        objects.Transform(bodyId, typeId, name, shapeId, flags, height);
-        return result;
+        catch (ObjectTransferException exception)
+        {
+            return new CorpseResult(false, exception.Message, [], []);
+        }
     }
 
-    private static CorpseResult StowOrSpill(
+    private static (CorpseResult Result, IReadOnlyList<ObjectTransferRequest> Transfers)
+        PlanStowOrSpill(
         ObjectStore objects,
         WorldObject body,
         IReadOnlyList<WorldObject> worn)
@@ -89,21 +95,15 @@ public static class Death
 
         if (requests.Count == 0)
         {
-            return new CorpseResult(true, "The body carried nothing worn.", [], []);
+            return (new CorpseResult(true, "The body carried nothing worn.", [], []), []);
         }
 
-        var transfer = new ObjectTransferService(objects).Execute(requests);
-        if (!transfer.Succeeded)
-        {
-            return new CorpseResult(false, transfer.Message, [], []);
-        }
-
-        return new CorpseResult(
+        return (new CorpseResult(
             true,
             spilled.Count == 0
                 ? $"The body's gear stays with it ({stowed.Count} items)."
                 : $"{spilled.Count} of the body's things spill onto the ground.",
             stowed,
-            spilled);
+            spilled), requests);
     }
 }

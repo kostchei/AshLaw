@@ -1,5 +1,7 @@
 using Ash.Core;
 
+using Ash.Rules;
+
 namespace Ash.Sim.Tests;
 
 public sealed class DeathTests
@@ -86,19 +88,21 @@ public sealed class DeathTests
     [Fact]
     public void AMonsterWearingGearCanBeKilledInTheDemo()
     {
-        var world = PlayableSliceWorld.CreateDemo();
+        var world = PlayableSliceWorld.CreateDemo(attackResolver: new TwoHitResolver());
         var scout = world.Monsters.Single(
             monster => monster.TypeId == "monster.goblin-scout");
         var blade = world.Objects.Enumerate().Single(
             value => value.Name == "Notched Blade");
         Assert.Equal(LocationKind.Equipped, blade.Location.Kind);
 
+        Assert.True(world.ToggleRightHand().Succeeded);
         MoveNextTo(world, world.GetGridPosition(scout.Id));
         for (var swing = 0; swing < 5 && world.Objects.Get(scout.Id).IsAlive; swing++)
         {
             // Each blow costs its own six-second round.
             CombatRound.WaitForPlayerSwing(world);
             Assert.True(world.AttackAdjacentMonster().Succeeded);
+            CombatRound.WaitForPlayerImpact(world);
         }
 
         var corpse = world.Objects.Get(scout.Id);
@@ -172,4 +176,19 @@ public sealed class DeathTests
             Location = ObjectLocation.Equipped(wearer, slot),
             EquipmentSlots = EquipmentSlots.MaskFor((byte)slot),
         };
+
+    private sealed class TwoHitResolver : IAttackRulesResolver
+    {
+        public AttackResult Resolve(AttackRequest request) => new()
+        {
+            Hit = true,
+            RawD20 = request.RawD20,
+            NetRoll = request.RawD20,
+            Margin = 1,
+            ConcussionHits = request.AttackCategory == AttackCategoryId.OneHandedSlashing
+                ? 2
+                : 0,
+            Mishap = false,
+        };
+    }
 }

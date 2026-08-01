@@ -35,17 +35,20 @@ public sealed class ActorVitality
     private readonly VitalityData _data;
     private readonly AbilityBonusTable _bonuses;
     private readonly Dice _dice;
+    private readonly ActorConditionService? _conditions;
 
     public ActorVitality(
         ObjectStore objects,
         VitalityData data,
         AbilityBonusTable bonuses,
-        Dice dice)
+        Dice dice,
+        ActorConditionService? conditions = null)
     {
         _objects = objects ?? throw new ArgumentNullException(nameof(objects));
         _data = data ?? throw new ArgumentNullException(nameof(data));
         _bonuses = bonuses ?? throw new ArgumentNullException(nameof(bonuses));
         _dice = dice ?? throw new ArgumentNullException(nameof(dice));
+        _conditions = conditions;
     }
 
     /// <summary>
@@ -83,10 +86,17 @@ public sealed class ActorVitality
     /// </summary>
     public DamageOutcome Damage(ObjectId actorId, int amount)
     {
-        var outcome = Injury.Damage(_objects.InjuryOf(actorId), amount, _dice);
-        _objects.SetInjury(actorId, outcome.State);
+        var outcome = ResolveDamage(actorId, amount);
+        _objects.CommitCombatMutation(new CombatMutation(actorId, outcome.State));
         return outcome;
     }
+
+    /// <summary>
+    /// Resolves damage without publishing it. Combat can use this pure result
+    /// while assembling a larger mutation in later phases.
+    /// </summary>
+    public DamageOutcome ResolveDamage(ObjectId actorId, int amount) =>
+        Injury.Damage(_objects.InjuryOf(actorId), amount, _dice);
 
     /// <summary>One round of the death clock, for a body that is on it.</summary>
     public DeathSaveOutcome RollDeathSave(ObjectId actorId)
@@ -106,6 +116,10 @@ public sealed class ActorVitality
     {
         var outcome = Injury.Heal(_data, _objects.InjuryOf(actorId), amount);
         _objects.SetInjury(actorId, outcome.State);
+        if (outcome.WoundsRestored > 0 || outcome.ConcussionRestored > 0)
+        {
+            _conditions?.RemoveHealed(actorId);
+        }
         return outcome;
     }
 

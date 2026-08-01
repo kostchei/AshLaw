@@ -17,7 +17,8 @@ public sealed record ObjectWorldSnapshot(
     ushort CurrentMapId,
     ulong DiceState,
     ObjectStoreSnapshot Objects,
-    IReadOnlyList<WorldMapSnapshot> Maps);
+    IReadOnlyList<WorldMapSnapshot> Maps,
+    IReadOnlyList<ActorConditionSnapshot>? Conditions = null);
 
 /// <summary>
 /// A world rebuilt from a save: a store, its maps and the tick they were saved
@@ -28,7 +29,8 @@ public sealed record LoadedObjectWorld(
     IReadOnlyList<WorldMap> Maps,
     long SimulationTick,
     ushort CurrentMapId,
-    ulong DiceState);
+    ulong DiceState,
+    IReadOnlyList<ActorConditionSnapshot>? Conditions = null);
 
 public sealed class ObjectWorldSaveException : InvalidOperationException
 {
@@ -55,11 +57,12 @@ public static class ObjectWorldSave
     /// gear slots, version 5 the actor sheet — ability scores, class, level and
     /// armour — and version 6 the injury state: the wound layer under
     /// concussion hits, the death clock, and which abilities a body has lost
-    /// the reliable use of.
+    /// the reliable use of, and version 7 persistent actor conditions with
+    /// exact expiry and next-periodic ticks.
     /// Version 1 was never written outside this repository's tests, so it has
     /// no migration and is simply refused.
     /// </summary>
-    public const int FormatVersion = 6;
+    public const int FormatVersion = 7;
 
     /// <summary>
     /// The oldest format this build still reads. Version 2 migrates forward
@@ -72,7 +75,7 @@ public static class ObjectWorldSave
     /// The oldest reader that can still make sense of a file this build writes.
     /// A reader below this refuses the file instead of guessing at it.
     /// </summary>
-    public const int MinimumReaderVersion = 6;
+    public const int MinimumReaderVersion = 7;
 
     /// <summary>A sanity bound so a corrupt length cannot ask for a huge buffer.</summary>
     public const int MaximumPayloadBytes = 256 * 1024 * 1024;
@@ -163,14 +166,15 @@ public static class ObjectWorldSave
                 "The save payload does not match its checksum.");
         }
 
-        var (maps, objects) = ReadPayload(payload, formatVersion);
+        var (maps, objects, conditions) = ReadPayload(payload, formatVersion);
         return new ObjectWorldSnapshot(
             fingerprint,
             tick,
             currentMapId,
             diceState,
             objects,
-            maps);
+            maps,
+            conditions);
     }
 
     /// <summary>
@@ -182,7 +186,8 @@ public static class ObjectWorldSave
         string contentFingerprint,
         long simulationTick,
         ushort currentMapId,
-        ulong diceState = 0)
+        ulong diceState = 0,
+        IReadOnlyList<ActorConditionSnapshot>? conditions = null)
     {
         ArgumentNullException.ThrowIfNull(objects);
         ArgumentException.ThrowIfNullOrWhiteSpace(contentFingerprint);
@@ -192,7 +197,8 @@ public static class ObjectWorldSave
             currentMapId,
             diceState,
             objects.Capture(),
-            objects.Maps.All.Select(map => map.Capture()).ToArray());
+            objects.Maps.All.Select(map => map.Capture()).ToArray(),
+            conditions ?? []);
     }
 
     /// <summary>
@@ -235,7 +241,8 @@ public static class ObjectWorldSave
             maps,
             snapshot.SimulationTick,
             snapshot.CurrentMapId,
-            snapshot.DiceState);
+            snapshot.DiceState,
+            snapshot.Conditions ?? []);
     }
 
     public static LoadedObjectWorld RestoreFile(
@@ -331,10 +338,30 @@ public static class ObjectWorldSave
             WriteInt32(buffer, free);
         }
 
+        var conditions = (snapshot.Conditions ?? [])
+            .OrderBy(condition => condition.ActorId)
+            .ThenBy(condition => condition.AppliedTick)
+            .ThenBy(condition => condition.Kind)
+            .ToArray();
+        WriteInt32(buffer, conditions.Length);
+        foreach (var condition in conditions)
+        {
+            WriteUInt32(buffer, condition.ActorId.Value);
+            WriteInt32(buffer, (int)condition.Kind);
+            WriteUInt32(buffer, condition.SourceId.Value);
+            WriteInt32(buffer, condition.Magnitude);
+            WriteInt64(buffer, condition.AppliedTick);
+            WriteNullableInt64(buffer, condition.ExpiresAtTick);
+            WriteNullableInt64(buffer, condition.NextPeriodicTick);
+            WriteText(buffer, condition.Detail ?? string.Empty);
+            WriteText(buffer, condition.PresentationKey);
+        }
+
         return buffer.ToArray();
     }
 
-    private static (IReadOnlyList<WorldMapSnapshot> Maps, ObjectStoreSnapshot Objects)
+    private static (IReadOnlyList<WorldMapSnapshot> Maps, ObjectStoreSnapshot Objects,
+        IReadOnlyList<ActorConditionSnapshot> Conditions)
         ReadPayload(ReadOnlySpan<byte> payload, int formatVersion)
     {
         var reader = new SpanReader(payload);
@@ -387,13 +414,41 @@ public static class ObjectWorldSave
             free.Add(slot);
         }
 
+        var conditions = new List<ActorConditionSnapshot>();
+        if (formatVersion >= 7)
+        {
+            var conditionCount = reader.ReadInt32();
+            if (conditionCount < 0 || conditionCount > 1_000_000)
+            {
+                throw new ObjectWorldSaveException(
+                    $"The save declares an impossible condition count of {conditionCount}.");
+            }
+
+            for (var index = 0; index < conditionCount; index++)
+            {
+                var actorId = ObjectIdFromValue(reader.ReadUInt32());
+                var kind = ReadEnum<TraumaEffectKind>(ref reader, index, nameof(TraumaEffectKind));
+                var sourceId = ObjectIdFromValue(reader.ReadUInt32());
+                conditions.Add(new ActorConditionSnapshot(
+                    actorId,
+                    kind,
+                    sourceId,
+                    reader.ReadInt32(),
+                    reader.ReadInt64(),
+                    ReadNullableInt64(ref reader),
+                    ReadNullableInt64(ref reader),
+                    EmptyToNull(reader.ReadText()),
+                    reader.ReadText()));
+            }
+        }
+
         if (!reader.AtEnd)
         {
             throw new ObjectWorldSaveException(
                 "The payload has trailing bytes after the object store.");
         }
 
-        return (maps, new ObjectStoreSnapshot(slots, free));
+        return (maps, new ObjectStoreSnapshot(slots, free), conditions);
     }
 
     private static IReadOnlyList<WorldMapSnapshot> ReadMaps(ref SpanReader reader)
@@ -848,6 +903,28 @@ public static class ObjectWorldSave
         BinaryPrimitives.WriteInt64LittleEndian(bytes, value);
         buffer.Write(bytes);
     }
+
+    private static void WriteNullableInt64(Stream buffer, long? value)
+    {
+        buffer.WriteByte(value.HasValue ? (byte)1 : (byte)0);
+        if (value.HasValue)
+        {
+            WriteInt64(buffer, value.Value);
+        }
+    }
+
+    private static long? ReadNullableInt64(ref SpanReader reader)
+    {
+        var present = reader.ReadByte();
+        return present switch
+        {
+            0 => null,
+            1 => reader.ReadInt64(),
+            _ => throw new ObjectWorldSaveException("A nullable tick has an invalid presence flag."),
+        };
+    }
+
+    private static string? EmptyToNull(string value) => value.Length == 0 ? null : value;
 
     private static void WriteUInt64(Stream buffer, ulong value)
     {

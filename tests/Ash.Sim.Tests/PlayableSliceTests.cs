@@ -1,3 +1,5 @@
+using Ash.Rules;
+
 namespace Ash.Sim.Tests;
 
 public sealed class PlayableSliceTests
@@ -199,17 +201,19 @@ public sealed class PlayableSliceTests
     [Fact]
     public void PlayerCanKillAMonsterAndLootItsRemains()
     {
-        var world = PlayableSliceWorld.CreateDemo();
+        var world = PlayableSliceWorld.CreateDemo(attackResolver: new TwoHitResolver());
         var rat = world.Monsters.Single(
             monster => monster.TypeId == "monster.cave-rat");
 
-        MoveNextTo(world, world.GetGridPosition(rat.Id));
+        PlaceNextTo(world, rat.Id);
         Assert.True(world.AttackAdjacentMonster().Succeeded);
+        CombatRound.WaitForPlayerImpact(world);
         Assert.True(world.Objects.Get(rat.Id).IsAlive);
 
         // The second blow costs a second round.
         CombatRound.WaitForPlayerSwing(world);
         Assert.True(world.AttackAdjacentMonster().Succeeded);
+        CombatRound.WaitForPlayerImpact(world);
         var corpse = world.Objects.Get(rat.Id);
         Assert.False(corpse.IsAlive);
         Assert.True(corpse.HasFlag(ObjectFlags.Corpse));
@@ -230,7 +234,7 @@ public sealed class PlayableSliceTests
         var world = PlayableSliceWorld.CreateDemo();
         var rat = world.Monsters.Single(
             monster => monster.TypeId == "monster.cave-rat");
-        MoveNextTo(world, world.GetGridPosition(rat.Id));
+        PlaceNextTo(world, rat.Id);
         var before = world.Dice.State;
 
         var result = CombatRound.Step(world, 1, 0);
@@ -654,5 +658,38 @@ public sealed class PlayableSliceTests
         {
             Assert.True(CombatRound.Step(world, 0, -1).Succeeded);
         }
+    }
+
+    private sealed class TwoHitResolver : IAttackRulesResolver
+    {
+        public AttackResult Resolve(AttackRequest request) => new()
+        {
+            Hit = true,
+            RawD20 = request.RawD20,
+            NetRoll = request.RawD20,
+            Margin = 1,
+            ConcussionHits = 2,
+            Mishap = false,
+        };
+    }
+
+    /// <summary>
+    /// Places the player for tests about melee interaction itself. Walking to
+    /// a hostile moving target tests pursuit instead and is covered by the
+    /// combat timing suite.
+    /// </summary>
+    private static void PlaceNextTo(PlayableSliceWorld world, ObjectId targetId)
+    {
+        var target = world.Objects.Get(targetId);
+        var position = target.Location.Position with
+        {
+            X = target.Location.Position.X - PlayableSliceWorld.WorldUnitsPerTile,
+        };
+        var placed = world.Transfers.Execute(
+            new ObjectTransferRequest(
+                world.PlayerId,
+                world.Player.Location,
+                ObjectLocation.OnMap(target.Location.MapId, position)));
+        Assert.True(placed.Succeeded, placed.Message);
     }
 }

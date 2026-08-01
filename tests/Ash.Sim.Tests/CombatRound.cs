@@ -22,6 +22,12 @@ internal static class CombatRound
             () => world.Combat.PlayerCanSwing,
             "the player's swing to come back round");
 
+    public static void WaitForPlayerImpact(PlayableSliceWorld world) =>
+        WaitFor(
+            world,
+            () => world.Combat.ActiveAttackOf(world.PlayerId) is null,
+            "the player's attack to reach impact");
+
     /// <summary>
     /// One step, waiting first for the round's move to allow it. Tests that
     /// walk somewhere are about what is at the far end, not about the six

@@ -29,8 +29,6 @@ public sealed class PlayableSliceWorld : IDisposable
     public const int DemoMapWidth = 41;
     public const int DemoMapHeight = 29;
     public const int WorldUnitsPerTile = WorldMap.WorldUnitsPerTile;
-    public const int PlayerAttackDamage = 2;
-
     /// <summary>Eight world units is one Ultima VIII vertical level.</summary>
     public const int UnitsPerLevel = 8;
 
@@ -55,7 +53,7 @@ public sealed class PlayableSliceWorld : IDisposable
     /// Identifies the content this world's type and shape ids belong to. A save
     /// written for different content is refused rather than reinterpreted.
     /// </summary>
-    public const string ContentFingerprint = "ash.playable-slice.v1";
+    public const string ContentFingerprint = "ash.playable-slice.v2";
 
     private const string AvatarTypeId = "actor.avatar";
     private const string DaggerTypeId = "item.bronze-dagger";
@@ -107,7 +105,8 @@ public sealed class PlayableSliceWorld : IDisposable
         ObjectStore objects,
         ObjectId playerId,
         long startTick,
-        ulong diceState)
+        ulong diceState,
+        IAttackRulesResolver? attackResolver = null)
     {
         Dice = Dice.FromState(diceState);
         Objects = objects;
@@ -120,19 +119,42 @@ public sealed class PlayableSliceWorld : IDisposable
         // The combat beat is read off the physics tick, so a loaded world
         // resumes the fight's pacing on the same beat it was saved on.
         Clock = new CombatClock(startPhysicsTick: startTick);
+        Conditions = new ActorConditionService();
         Vitality = new ActorVitality(
             objects,
             RulesRepository.Vitality,
             RulesRepository.AbilityBonuses,
-            Dice);
-        Combat = new CombatDirector(objects, Clock, Dice, Vitality, playerId);
-        SaveGate = new WorldSaveGate(objects, Physics, Dice, ContentFingerprint);
-        Drag = new DragService(objects);
-        Stacks = new StackService(objects);
+            Dice,
+            Conditions);
         Sheets = new ActorSheets(
             objects,
             RulesRepository.ClassProgression,
             RulesRepository.AbilityBonuses);
+        Trauma = new TraumaEffectDispatcher(
+            objects, Transfers, Vitality, Conditions, Movement, () => Clock.Tick);
+        Attacks = new CombatAttackService(
+            objects,
+            Sheets,
+            Vitality,
+            Dice,
+            attackResolver ?? new RulesAttackRulesResolver(),
+            Conditions,
+            () => Clock.Tick,
+            Trauma);
+        Combat = new CombatDirector(
+            objects,
+            Movement,
+            Transfers,
+            Clock,
+            Dice,
+            Vitality,
+            Attacks,
+            Conditions,
+            playerId);
+        SaveGate = new WorldSaveGate(
+            objects, Physics, Dice, ContentFingerprint, Conditions);
+        Drag = new DragService(objects);
+        Stacks = new StackService(objects);
         LastMessage = "Explore. Open a chest or fight a monster.";
     }
 
@@ -154,6 +176,14 @@ public sealed class PlayableSliceWorld : IDisposable
 
     /// <summary>Who has noticed whom, and when anyone may next swing.</summary>
     public CombatDirector Combat { get; }
+
+    /// <summary>The shared player and NPC melee-resolution path.</summary>
+    public CombatAttackService Attacks { get; }
+
+    /// <summary>Persistent combat effects currently active on actors.</summary>
+    public ActorConditionService Conditions { get; }
+
+    public TraumaEffectDispatcher Trauma { get; }
 
     /// <summary>
     /// What the last advanced beat produced — alerts to sound, blows to draw.
@@ -287,7 +317,9 @@ public sealed class PlayableSliceWorld : IDisposable
     /// always plays the same, which is what lets a test pin a 1d6 recognition
     /// delay to a number instead of a range it hopes for.
     /// </summary>
-    public static PlayableSliceWorld CreateDemo(ulong seed = DefaultSeed)
+    public static PlayableSliceWorld CreateDemo(
+        ulong seed = DefaultSeed,
+        IAttackRulesResolver? attackResolver = null)
     {
         var objects = new ObjectStore();
         var player = SpawnAvatar(
@@ -367,7 +399,8 @@ public sealed class PlayableSliceWorld : IDisposable
                 objects,
                 player,
                 startTick: 0,
-                seed);
+                seed,
+                attackResolver);
             world.Settle();
             return world;
         }
@@ -489,11 +522,23 @@ public sealed class PlayableSliceWorld : IDisposable
                 $"{AvatarTypeId} is at {avatar.Location}.");
         }
 
-        return new PlayableSliceWorld(
+        var world = new PlayableSliceWorld(
             loaded.Objects,
             avatar.Id,
             loaded.SimulationTick,
             loaded.DiceState);
+        foreach (var condition in loaded.Conditions ?? [])
+        {
+            if (!loaded.Objects.TryGet(condition.ActorId, out var actor) ||
+                !actor.HasFlag(ObjectFlags.Actor))
+            {
+                world.Dispose();
+                throw new ObjectWorldSaveException(
+                    $"Condition {condition.Kind} targets absent actor {condition.ActorId}.");
+            }
+        }
+        world.Conditions.Restore(loaded.Conditions ?? []);
+        return world;
     }
 
     /// <summary>
@@ -607,7 +652,9 @@ public sealed class PlayableSliceWorld : IDisposable
             "item.rusty-sword",
             "Rusty Sword",
             "loot.shortsword",
-            EquipmentSlotMask.RightHand);
+            EquipmentSlotMask.RightHand,
+            ObjectFlags.Weapon,
+            quality: -1);
         SpawnItem(objects, player, "item.apple", "Apple");
         return player;
     }
@@ -632,9 +679,11 @@ public sealed class PlayableSliceWorld : IDisposable
                 ObjectFlags.Item |
                 ObjectFlags.Movable |
                 ObjectFlags.Finesse |
+                ObjectFlags.Weapon |
                 ObjectFlags.Visible,
             EquipmentSlots =
                 EquipmentSlotMask.EitherHand | EquipmentSlotMask.Scabbard,
+            Quality = -1,
         });
     }
 
@@ -759,9 +808,26 @@ public sealed class PlayableSliceWorld : IDisposable
         // Combat is scheduled on the coarser 200 ms beat: recognition, alerts
         // and swings all land on one, so a fight paces the same on any machine
         // whatever the frame rate happens to be.
-        LastCombatEvents = Clock.Advance(Physics.Tick)
-            ? Combat.Advance()
-            : [];
+        if (Clock.Advance(Physics.Tick))
+        {
+            foreach (var periodic in Conditions.AdvanceTo(Clock.Tick))
+            {
+                if (Objects.TryGet(periodic.ActorId, out var actor) &&
+                    actor.IsAlive && actor.Injury.IsUpright && periodic.Damage > 0)
+                {
+                    _ = Vitality.Damage(periodic.ActorId, periodic.Damage);
+                    if (periodic.ActorId == PlayerId)
+                    {
+                        LastMessage = $"You bleed for {periodic.Damage} damage.";
+                    }
+                }
+            }
+            LastCombatEvents = Combat.Advance();
+        }
+        else
+        {
+            LastCombatEvents = [];
+        }
         foreach (var combat in LastCombatEvents)
         {
             LastMessage = combat.Message;
@@ -831,6 +897,11 @@ public sealed class PlayableSliceWorld : IDisposable
 
     public SliceActionResult MovePlayer(int deltaX, int deltaY)
     {
+        if (Conditions.PreventsMovement(PlayerId))
+        {
+            return Finish(false, "You cannot move while incapacitated.");
+        }
+
         if (Math.Abs(deltaX) + Math.Abs(deltaY) != 1)
         {
             throw new ArgumentException(
@@ -1261,6 +1332,11 @@ public sealed class PlayableSliceWorld : IDisposable
 
     public SliceActionResult AttackAdjacentMonster()
     {
+        if (Conditions.PreventsAction(PlayerId))
+        {
+            return Finish(false, "You cannot attack while incapacitated.");
+        }
+
         var playerPosition = PlayerPosition;
         var target = QueryNearPlayer(1, ObjectFlags.Monster)
             .Where(candidate => candidate.IsAlive)
@@ -1281,50 +1357,16 @@ public sealed class PlayableSliceWorld : IDisposable
         // when it actually falls on something. Walking is free inside the round
         // — MovePlayer is deliberately not gated — so the six seconds are a
         // window to move and strike in, not a window of standing still.
-        var swing = Combat.TryPlayerSwing();
+        var monster = target.Value;
+        var swing = Combat.TryPlayerAttack(monster.Id);
         if (!swing.Swung)
         {
             return Finish(false, swing.Message);
         }
 
-        var monster = target.Value;
-        var blow = Vitality.Damage(monster.Id, PlayerAttackDamage);
-        if (!blow.State.IsDead)
-        {
-            return Finish(
-                true,
-                $"Hit {monster.Name} for {PlayerAttackDamage} damage " +
-                $"({blow.State.Concussion}/{monster.MaxHealth} HP).");
-        }
-
-        // The body becomes one container holding everything it had, worn gear
-        // included; anything that will not fit spills onto the ground.
-        var corpse = Death.MakeCorpse(
-            Objects,
-            monster.Id,
-            $"remains.{monster.TypeId}",
-            $"Remains of {monster.Name}",
-            "container.corpse",
-            ObjectFlags.Container |
-            ObjectFlags.Corpse |
-            ObjectFlags.Usable |
-            ObjectFlags.Visible,
-            height: 24);
-        if (!corpse.Succeeded)
-        {
-            return Finish(false, corpse.Message);
-        }
-
-        // A corpse has no awareness. Dropping the state also keeps the director
-        // from holding a handle whose slot will be reused.
-        Combat.Forget(monster.Id);
-
-        return Finish(
-            true,
-            corpse.Spilled.Count == 0
-                ? $"{monster.Name} dies. Its remains can be looted."
-                : $"{monster.Name} dies, scattering " +
-                  $"{corpse.Spilled.Count} of its things.");
+        Combat.Provoke(monster.Id);
+        LastCombatEvents = Combat.DrainImmediateEvents();
+        return Finish(true, swing.Message);
     }
 
     public SliceActionResult ClosePanels()
@@ -1477,8 +1519,12 @@ public sealed class PlayableSliceWorld : IDisposable
                     EquipmentSlot.RightHand),
                 Footprint = new ObjectFootprint(32, 32),
                 Height = 8,
-                Flags = ObjectFlags.Item | ObjectFlags.Movable,
+                Flags =
+                    ObjectFlags.Item |
+                    ObjectFlags.Movable |
+                    ObjectFlags.Weapon,
                 EquipmentSlots = EquipmentSlotMask.RightHand,
+                Quality = -1,
             });
         }
     }
@@ -1544,7 +1590,9 @@ public sealed class PlayableSliceWorld : IDisposable
         string typeId,
         string name,
         string shapeId = "loot.generic",
-        EquipmentSlotMask equipmentSlots = EquipmentSlotMask.None)
+        EquipmentSlotMask equipmentSlots = EquipmentSlotMask.None,
+        ObjectFlags extraFlags = ObjectFlags.None,
+        int quality = 0)
     {
         objects.Create(new ObjectSpawn
         {
@@ -1557,8 +1605,10 @@ public sealed class PlayableSliceWorld : IDisposable
             Flags =
                 ObjectFlags.Item |
                 ObjectFlags.Movable |
+                extraFlags |
                 ObjectFlags.Visible,
             EquipmentSlots = equipmentSlots,
+            Quality = quality,
         });
     }
 

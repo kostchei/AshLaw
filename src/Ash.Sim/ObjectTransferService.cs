@@ -101,7 +101,7 @@ public sealed class ObjectTransferService
         // without the object moving.
         if (requests.Count > 0)
         {
-            var validation = Validate(requests);
+            var validation = ValidateForCommit(requests);
             if (!validation.Succeeded)
             {
                 return validation;
@@ -128,7 +128,7 @@ public sealed class ObjectTransferService
         }
     }
 
-    private ObjectTransferResult Validate(
+    internal ObjectTransferResult ValidateForCommit(
         IReadOnlyList<ObjectTransferRequest> requests)
     {
         if (requests.Count == 0)

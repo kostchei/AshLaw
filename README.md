@@ -32,6 +32,9 @@ The main scene now boots directly into a small playable room:
 - stand next to a chest and press **E** to open it;
 - click items to transfer them between an open chest and the backpack;
 - stand next to a monster and press **F** or **Space** to attack;
+- encountered monsters roll an activity and Charisma-adjusted reaction;
+- hostile monsters pursue through the same collision and spatial system as the
+  player;
 - dead monsters leave lootable remains;
 - press **F3** to show exact footprints, sprite origins, and painter sort order;
 - press **R** to reset the demo.
@@ -57,6 +60,12 @@ Each map now has an authoritative `WorldMap` terrain container and deterministic
 uniform spatial index. Gameplay collision candidates, nearby interactions,
 melee targets, ground pickup, and the visible object set query that index. Store
 commits synchronously publish one complete new index revision.
+
+Monster encounters are paced by the simulation's 200 ms combat beat. Monsters
+take 1d6 seconds to react, spend a further beat before acting or changing
+actions, and hostile monsters move at six tiles per six-second round. See
+[Monster encounter states](docs/monster-encounters.md) for the roll tables,
+state lifecycle, persistence policy, and current limitations.
 
 ## Layout
 

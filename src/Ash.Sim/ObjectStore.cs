@@ -231,6 +231,16 @@ public enum ObjectFlags
     /// whip — when that serves the wielder better than strength.
     /// </summary>
     Finesse = 1 << 15,
+
+    /// <summary>
+    /// An equippable attack source. Its immutable rules profile is selected by
+    /// type id; this flag prevents food, tools and other hand items from being
+    /// mistaken for weapons.
+    /// </summary>
+    Weapon = 1 << 16,
+
+    /// <summary>An item destroyed by a combat effect and no longer usable.</summary>
+    Broken = 1 << 17,
 }
 
 /// <summary>
@@ -808,6 +818,29 @@ public sealed record ObjectStoreCommit(
     IReadOnlyList<ObjectId> ObjectIds);
 
 /// <summary>
+/// The state this combat slice can change in one authoritative commit. Later
+/// phases extend this value with conditions, displacement and equipment
+/// effects; keeping injury as a value now prevents callers from publishing a
+/// half-resolved body.
+/// </summary>
+public sealed record CombatTransform(
+    ObjectId ObjectId,
+    string TypeId,
+    string Name,
+    string ShapeId,
+    ObjectFlags Flags,
+    int? Height = null);
+
+public sealed record CombatMutation(
+    ObjectId TargetId,
+    InjuryState? Injury = null,
+    IReadOnlyList<ObjectTransferRequest>? Transfers = null,
+    IReadOnlyList<ObjectId>? BreakItems = null,
+    CombatTransform? Transform = null,
+    IReadOnlyList<ActorConditionMutation>? Conditions = null,
+    IReadOnlyList<ObjectPhysicsUpdate>? Physics = null);
+
+/// <summary>
 /// One object slot exactly as the store holds it. A dead slot still carries its
 /// generation, which is what makes a handle from before its destruction stale
 /// after a save and load.
@@ -1114,6 +1147,19 @@ public sealed class ObjectStore
         }
     }
 
+    public void BreakItem(ObjectId id)
+    {
+        var index = ResolveSlot(id);
+        if (!_flags[index].HasFlag(ObjectFlags.Item))
+        {
+            throw new InvalidOperationException($"Object {id} is not an item.");
+        }
+
+        _flags[index] |= ObjectFlags.Broken;
+        _conditions[index] = 0;
+        Publish(ObjectStoreChangeKind.Updated, id);
+    }
+
     /// <summary>
     /// Writes a body's whole injury state back in one go.
     /// </summary>
@@ -1126,40 +1172,212 @@ public sealed class ObjectStore
     /// </remarks>
     public void SetInjury(ObjectId id, InjuryState injury)
     {
-        var index = ResolveSlot(id);
-        if (_maxHealth[index] <= 0)
+        CommitCombatMutation(new CombatMutation(id, injury));
+    }
+
+    /// <summary>
+    /// Validates then applies the complete current combat mutation under one
+    /// commit boundary and publishes only after the store is coherent.
+    /// </summary>
+    public void CommitCombatMutation(CombatMutation mutation, Action? beforePublish = null)
+    {
+        var index = ResolveSlot(mutation.TargetId);
+        var injury = mutation.Injury;
+        if (injury is not null && _maxHealth[index] <= 0)
         {
             throw new InvalidOperationException(
-                $"Object {id} has no health component.");
+                $"Object {mutation.TargetId} has no health component.");
         }
 
-        if (injury.MaximumConcussion != _maxHealth[index] ||
-            injury.MaximumWounds != _maxWounds[index])
+        if (injury is not null &&
+            (injury.Value.MaximumConcussion != _maxHealth[index] ||
+             injury.Value.MaximumWounds != _maxWounds[index]))
         {
             throw new InvalidOperationException(
-                $"Object {id} was given an injury state built for a different " +
+                $"Object {mutation.TargetId} was given an injury state built for a different " +
                 "body. Its maximums change when the character does, not when " +
                 "it is hurt.");
         }
 
-        if (injury.Concussion < 0 ||
-            injury.Concussion > injury.MaximumConcussion ||
-            injury.Wounds < 0 ||
-            injury.Wounds > injury.MaximumWounds ||
-            injury.DeathSaveSuccesses < 0 ||
-            injury.DeathSaveFailures < 0)
+        if (injury is not null &&
+            (injury.Value.Concussion < 0 ||
+             injury.Value.Concussion > injury.Value.MaximumConcussion ||
+             injury.Value.Wounds < 0 ||
+             injury.Value.Wounds > injury.Value.MaximumWounds ||
+             injury.Value.DeathSaveSuccesses < 0 ||
+             injury.Value.DeathSaveFailures < 0))
         {
             throw new InvalidOperationException(
-                $"Object {id} was given an out-of-range injury state.");
+                $"Object {mutation.TargetId} was given an out-of-range injury state.");
         }
 
-        _health[index] = injury.Concussion;
-        _wounds[index] = injury.Wounds;
-        _deathSaveSuccesses[index] = injury.DeathSaveSuccesses;
-        _deathSaveFailures[index] = injury.DeathSaveFailures;
-        _impairments[index] = injury.Impairments;
-        _vitality[index] = injury.State;
-        Publish(ObjectStoreChangeKind.Updated, id);
+        var transfers = mutation.Transfers ?? [];
+        if (transfers.Count > 0)
+        {
+            var validation = new ObjectTransferService(this).ValidateForCommit(transfers);
+            if (!validation.Succeeded)
+            {
+                throw new ObjectTransferException(validation);
+            }
+        }
+
+        var breakItems = mutation.BreakItems ?? [];
+        foreach (var itemId in breakItems.Distinct())
+        {
+            var itemIndex = ResolveSlot(itemId);
+            RequireFlag(itemIndex, ObjectFlags.Item);
+        }
+
+        var physics = mutation.Physics ?? [];
+        foreach (var update in physics)
+        {
+            update.Validate();
+            _ = ResolveSlot(update.ObjectId);
+        }
+
+        if (mutation.Transform is { } transform)
+        {
+            ValidateCombatTransform(transform, transfers);
+        }
+
+        foreach (var condition in mutation.Conditions ?? [])
+        {
+            var actorIndex = ResolveSlot(condition.ActorId);
+            RequireFlag(actorIndex, ObjectFlags.Actor);
+            if (!ActorConditionService.CanStore(condition.Effect.Kind))
+            {
+                throw new InvalidOperationException(
+                    $"{condition.Effect.Kind} is not a persistent actor condition.");
+            }
+
+            _ = ConditionTiming.ExpiryTick(condition.AppliedTick, condition.Effect);
+        }
+
+        IsCommitting = true;
+        try
+        {
+            if (injury is not null)
+            {
+                _health[index] = injury.Value.Concussion;
+                _wounds[index] = injury.Value.Wounds;
+                _deathSaveSuccesses[index] = injury.Value.DeathSaveSuccesses;
+                _deathSaveFailures[index] = injury.Value.DeathSaveFailures;
+                _impairments[index] = injury.Value.Impairments;
+                _vitality[index] = injury.Value.State;
+            }
+
+            ApplyTransfersWithoutPublishing(transfers);
+            foreach (var update in physics)
+            {
+                var physicsIndex = ResolveSlot(update.ObjectId);
+                _motionStates[physicsIndex] = update.Motion;
+                _verticalVelocities[physicsIndex] = update.VerticalVelocity;
+                _supports[physicsIndex] = update.Support;
+            }
+            foreach (var itemId in breakItems.Distinct())
+            {
+                var itemIndex = ResolveSlot(itemId);
+                _flags[itemIndex] |= ObjectFlags.Broken;
+                _conditions[itemIndex] = 0;
+            }
+
+            if (mutation.Transform is { } appliedTransform)
+            {
+                ApplyCombatTransform(appliedTransform);
+            }
+
+            beforePublish?.Invoke();
+            AssertInvariants();
+            var touched = new[] { mutation.TargetId }
+                .Concat(transfers.Select(transfer => transfer.ObjectId))
+                .Concat(breakItems)
+                .Concat(physics.Select(update => update.ObjectId))
+                .Concat(mutation.Transform is null ? [] : [mutation.Transform.ObjectId])
+                .Distinct()
+                .Order()
+                .ToArray();
+            Committed?.Invoke(new ObjectStoreCommit(
+                ObjectStoreChangeKind.Updated,
+                touched));
+        }
+        finally
+        {
+            IsCommitting = false;
+        }
+    }
+
+    private void ValidateCombatTransform(
+        CombatTransform transform,
+        IReadOnlyList<ObjectTransferRequest> transfers)
+    {
+        ValidateText(transform.TypeId, nameof(transform.TypeId));
+        ValidateText(transform.Name, nameof(transform.Name));
+        ValidateText(transform.ShapeId, nameof(transform.ShapeId));
+        var transformIndex = ResolveSlot(transform.ObjectId);
+        if (transform.Flags.HasFlag(ObjectFlags.Container) !=
+            (CarryCapacityAt(transformIndex) > 0))
+        {
+            throw new InvalidOperationException(
+                $"Object {transform.ObjectId} cannot change its container capability.");
+        }
+
+        var projected = transfers.ToDictionary(
+            transfer => transfer.ObjectId,
+            transfer => transfer.Destination);
+        bool HasProjectedChildren(LocationKind kind) => Enumerate().Any(value =>
+            (projected.TryGetValue(value.Id, out var location) ? location : value.Location) is var current &&
+            current.Kind == kind && current.Parent == transform.ObjectId);
+        if (!transform.Flags.HasFlag(ObjectFlags.Container) &&
+            HasProjectedChildren(LocationKind.InContainer))
+        {
+            throw new InvalidOperationException("The transform would orphan contained objects.");
+        }
+
+        if (!transform.Flags.HasFlag(ObjectFlags.Actor) &&
+            HasProjectedChildren(LocationKind.Equipped))
+        {
+            throw new InvalidOperationException("The transform would orphan equipped objects.");
+        }
+
+        if (transform.Height is < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(transform.Height));
+        }
+    }
+
+    private void ApplyCombatTransform(CombatTransform transform)
+    {
+        var index = ResolveSlot(transform.ObjectId);
+        _typeIds[index] = transform.TypeId;
+        _names[index] = transform.Name;
+        _shapeIds[index] = transform.ShapeId;
+        _flags[index] = transform.Flags;
+        if (transform.Height is { } height)
+        {
+            _heights[index] = height;
+        }
+    }
+
+    private void ApplyTransfersWithoutPublishing(
+        IReadOnlyList<ObjectTransferRequest> requests)
+    {
+        foreach (var request in requests)
+        {
+            var movedIndex = ResolveSlot(request.ObjectId);
+            _locations[movedIndex] = request.Destination;
+            if (request.Destination.Kind != LocationKind.OnMap)
+            {
+                _motionStates[movedIndex] = MotionState.Resting;
+                _verticalVelocities[movedIndex] = 0;
+                _supports[movedIndex] = SupportRef.None;
+            }
+            else if (_flags[movedIndex].HasFlag(ObjectFlags.AffectedByGravity))
+            {
+                _motionStates[movedIndex] = MotionState.Falling;
+                _verticalVelocities[movedIndex] = 0;
+                _supports[movedIndex] = SupportRef.None;
+            }
+        }
     }
 
     /// <summary>How hurt a body is right now.</summary>

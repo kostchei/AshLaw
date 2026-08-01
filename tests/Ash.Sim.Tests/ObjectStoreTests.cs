@@ -151,6 +151,41 @@ public sealed class ObjectStoreTests
         store.ValidateInvariants();
     }
 
+    [Fact]
+    public void CombatMutationPublishesOnlyAfterTheWholeInjuryStateIsCommitted()
+    {
+        var store = new ObjectStore();
+        var actor = store.Create(new ObjectSpawn
+        {
+            TypeId = "actor.test",
+            Name = "Test Actor",
+            ShapeId = "actor.test",
+            Location = ObjectLocation.OnMap(0, new Vec3i(0, 0, 0)),
+            Flags = ObjectFlags.Actor | ObjectFlags.Solid | ObjectFlags.Visible,
+            Footprint = new ObjectFootprint(64, 64),
+            Height = 56,
+            Health = 4,
+            MaxHealth = 4,
+            MaxWounds = 2,
+        });
+        var next = Injury.Damage(store.InjuryOf(actor), 4, new Dice(1));
+        ObjectStoreCommit? observed = null;
+        var committingDuringNotification = false;
+        store.Committed += commit =>
+        {
+            observed = commit;
+            committingDuringNotification = store.IsCommitting;
+            Assert.Equal(next.State, store.InjuryOf(actor));
+        };
+
+        store.CommitCombatMutation(new CombatMutation(actor, next.State));
+
+        Assert.True(committingDuringNotification);
+        Assert.Equal(ObjectStoreChangeKind.Updated, observed?.Kind);
+        Assert.Equal([actor], observed?.ObjectIds);
+        store.ValidateInvariants();
+    }
+
     private static ObjectSpawn Item(
         string name,
         ObjectLocation? location = null) =>
