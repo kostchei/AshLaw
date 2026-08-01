@@ -838,7 +838,23 @@ public sealed record CombatMutation(
     IReadOnlyList<ObjectId>? BreakItems = null,
     CombatTransform? Transform = null,
     IReadOnlyList<ActorConditionMutation>? Conditions = null,
-    IReadOnlyList<ObjectPhysicsUpdate>? Physics = null);
+    IReadOnlyList<ObjectPhysicsUpdate>? Physics = null,
+    IReadOnlyList<ActorConditionConsumption>? ConditionConsumptions = null,
+    IReadOnlyList<ObjectId>? ClearConditions = null);
+
+/// <summary>
+/// Post-mutation checkpoints exposed solely as a deterministic fault-injection
+/// seam. A failure at any checkpoint must restore every earlier stage.
+/// </summary>
+public enum CombatMutationStage : byte
+{
+    Injury,
+    Transfers,
+    Physics,
+    Items,
+    Transform,
+    Conditions,
+}
 
 /// <summary>
 /// One object slot exactly as the store holds it. A dead slot still carries its
@@ -1179,7 +1195,10 @@ public sealed class ObjectStore
     /// Validates then applies the complete current combat mutation under one
     /// commit boundary and publishes only after the store is coherent.
     /// </summary>
-    public void CommitCombatMutation(CombatMutation mutation, Action? beforePublish = null)
+    public void CommitCombatMutation(
+        CombatMutation mutation,
+        ActorConditionService? actorConditions = null,
+        Action<CombatMutationStage>? afterStage = null)
     {
         var index = ResolveSlot(mutation.TargetId);
         var injury = mutation.Injury;
@@ -1253,52 +1272,162 @@ public sealed class ObjectStore
             _ = ConditionTiming.ExpiryTick(condition.AppliedTick, condition.Effect);
         }
 
+        var conditionConsumptions = mutation.ConditionConsumptions ?? [];
+        var clearConditions = mutation.ClearConditions ?? [];
+        if ((mutation.Conditions?.Count ?? 0) > 0 ||
+            conditionConsumptions.Count > 0 || clearConditions.Count > 0)
+        {
+            ArgumentNullException.ThrowIfNull(actorConditions);
+        }
+
+        foreach (var consumption in conditionConsumptions)
+        {
+            var actorIndex = ResolveSlot(consumption.ActorId);
+            RequireFlag(actorIndex, ObjectFlags.Actor);
+            if (!ActorConditionService.CanStore(consumption.Kind))
+            {
+                throw new InvalidOperationException(
+                    $"{consumption.Kind} is not a persistent actor condition.");
+            }
+
+            var scheduled = (mutation.Conditions ?? []).Any(condition =>
+                condition.ActorId == consumption.ActorId &&
+                condition.Effect.Kind == consumption.Kind &&
+                (!consumption.SourceId.HasValue ||
+                 condition.SourceId == consumption.SourceId.Value));
+            if (!scheduled && !actorConditions!.Has(
+                    consumption.ActorId,
+                    consumption.Kind,
+                    consumption.SourceId))
+            {
+                throw new InvalidOperationException(
+                    $"The {consumption.Kind} condition to consume is no longer present.");
+            }
+        }
+
+        foreach (var actorId in clearConditions.Distinct())
+        {
+            var actorIndex = ResolveSlot(actorId);
+            RequireFlag(actorIndex, ObjectFlags.Actor);
+        }
+
+        var touchedIds = new[] { mutation.TargetId }
+            .Concat(transfers.Select(transfer => transfer.ObjectId))
+            .Concat(breakItems)
+            .Concat(physics.Select(update => update.ObjectId))
+            .Concat(mutation.Transform is null ? [] : [mutation.Transform.ObjectId])
+            .Concat((mutation.Conditions ?? []).Select(change => change.ActorId))
+            .Concat(conditionConsumptions.Select(change => change.ActorId))
+            .Concat(clearConditions)
+            .Distinct()
+            .Order()
+            .ToArray();
+        var objectRollback = touchedIds.ToDictionary(
+            id => id.Index,
+            id => Get(id));
+        var conditionRollback = actorConditions?.Capture();
+
         IsCommitting = true;
         try
         {
-            if (injury is not null)
+            try
             {
-                _health[index] = injury.Value.Concussion;
-                _wounds[index] = injury.Value.Wounds;
-                _deathSaveSuccesses[index] = injury.Value.DeathSaveSuccesses;
-                _deathSaveFailures[index] = injury.Value.DeathSaveFailures;
-                _impairments[index] = injury.Value.Impairments;
-                _vitality[index] = injury.Value.State;
+                if (injury is not null)
+                {
+                    _health[index] = injury.Value.Concussion;
+                    _wounds[index] = injury.Value.Wounds;
+                    _deathSaveSuccesses[index] = injury.Value.DeathSaveSuccesses;
+                    _deathSaveFailures[index] = injury.Value.DeathSaveFailures;
+                    _impairments[index] = injury.Value.Impairments;
+                    _vitality[index] = injury.Value.State;
+                    afterStage?.Invoke(CombatMutationStage.Injury);
+                }
+
+                ApplyTransfersWithoutPublishing(transfers);
+                if (transfers.Count > 0)
+                {
+                    afterStage?.Invoke(CombatMutationStage.Transfers);
+                }
+                foreach (var update in physics)
+                {
+                    var physicsIndex = ResolveSlot(update.ObjectId);
+                    _motionStates[physicsIndex] = update.Motion;
+                    _verticalVelocities[physicsIndex] = update.VerticalVelocity;
+                    _supports[physicsIndex] = update.Support;
+                }
+                if (physics.Count > 0)
+                {
+                    afterStage?.Invoke(CombatMutationStage.Physics);
+                }
+                foreach (var itemId in breakItems.Distinct())
+                {
+                    var itemIndex = ResolveSlot(itemId);
+                    _flags[itemIndex] |= ObjectFlags.Broken;
+                    _conditions[itemIndex] = 0;
+                }
+                if (breakItems.Count > 0)
+                {
+                    afterStage?.Invoke(CombatMutationStage.Items);
+                }
+
+                if (mutation.Transform is { } appliedTransform)
+                {
+                    ApplyCombatTransform(appliedTransform);
+                    afterStage?.Invoke(CombatMutationStage.Transform);
+                }
+
+                foreach (var change in mutation.Conditions ?? [])
+                {
+                    actorConditions!.Apply(
+                        change.ActorId,
+                        change.SourceId,
+                        change.Effect,
+                        change.AppliedTick);
+                }
+                foreach (var consumption in conditionConsumptions)
+                {
+                    if (!actorConditions!.Consume(
+                            consumption.ActorId,
+                            consumption.Kind,
+                            consumption.SourceId))
+                    {
+                        throw new InvalidOperationException(
+                            $"The {consumption.Kind} condition could not be consumed.");
+                    }
+                }
+                foreach (var actorId in clearConditions.Distinct())
+                {
+                    actorConditions!.RemoveAll(actorId);
+                }
+                if ((mutation.Conditions?.Count ?? 0) > 0 ||
+                    conditionConsumptions.Count > 0 || clearConditions.Count > 0)
+                {
+                    afterStage?.Invoke(CombatMutationStage.Conditions);
+                }
+
+                AssertInvariants();
+            }
+            catch
+            {
+                foreach (var (slot, value) in objectRollback)
+                {
+                    WriteSlot(slot, value);
+                }
+
+                if (actorConditions is not null && conditionRollback is not null)
+                {
+                    actorConditions.Restore(conditionRollback);
+                }
+
+                AssertInvariants();
+                throw;
             }
 
-            ApplyTransfersWithoutPublishing(transfers);
-            foreach (var update in physics)
-            {
-                var physicsIndex = ResolveSlot(update.ObjectId);
-                _motionStates[physicsIndex] = update.Motion;
-                _verticalVelocities[physicsIndex] = update.VerticalVelocity;
-                _supports[physicsIndex] = update.Support;
-            }
-            foreach (var itemId in breakItems.Distinct())
-            {
-                var itemIndex = ResolveSlot(itemId);
-                _flags[itemIndex] |= ObjectFlags.Broken;
-                _conditions[itemIndex] = 0;
-            }
-
-            if (mutation.Transform is { } appliedTransform)
-            {
-                ApplyCombatTransform(appliedTransform);
-            }
-
-            beforePublish?.Invoke();
-            AssertInvariants();
-            var touched = new[] { mutation.TargetId }
-                .Concat(transfers.Select(transfer => transfer.ObjectId))
-                .Concat(breakItems)
-                .Concat(physics.Select(update => update.ObjectId))
-                .Concat(mutation.Transform is null ? [] : [mutation.Transform.ObjectId])
-                .Distinct()
-                .Order()
-                .ToArray();
+            // Publication begins only after rollback-capable mutation has
+            // succeeded. Observers therefore see exactly one final state.
             Committed?.Invoke(new ObjectStoreCommit(
                 ObjectStoreChangeKind.Updated,
-                touched));
+                touchedIds));
         }
         finally
         {

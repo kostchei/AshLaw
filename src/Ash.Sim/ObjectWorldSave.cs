@@ -58,11 +58,12 @@ public static class ObjectWorldSave
     /// armour — and version 6 the injury state: the wound layer under
     /// concussion hits, the death clock, and which abilities a body has lost
     /// the reliable use of, and version 7 persistent actor conditions with
-    /// exact expiry and next-periodic ticks.
+    /// exact expiry and next-periodic ticks, and version 8 explicit condition
+    /// removal and stacking policies.
     /// Version 1 was never written outside this repository's tests, so it has
     /// no migration and is simply refused.
     /// </summary>
-    public const int FormatVersion = 7;
+    public const int FormatVersion = 8;
 
     /// <summary>
     /// The oldest format this build still reads. Version 2 migrates forward
@@ -75,7 +76,7 @@ public static class ObjectWorldSave
     /// The oldest reader that can still make sense of a file this build writes.
     /// A reader below this refuses the file instead of guessing at it.
     /// </summary>
-    public const int MinimumReaderVersion = 7;
+    public const int MinimumReaderVersion = 8;
 
     /// <summary>A sanity bound so a corrupt length cannot ask for a huge buffer.</summary>
     public const int MaximumPayloadBytes = 256 * 1024 * 1024;
@@ -353,6 +354,8 @@ public static class ObjectWorldSave
             WriteInt64(buffer, condition.AppliedTick);
             WriteNullableInt64(buffer, condition.ExpiresAtTick);
             WriteNullableInt64(buffer, condition.NextPeriodicTick);
+            WriteInt32(buffer, (int)condition.RemovalPolicy);
+            WriteInt32(buffer, (int)condition.StackingPolicy);
             WriteText(buffer, condition.Detail ?? string.Empty);
             WriteText(buffer, condition.PresentationKey);
         }
@@ -429,14 +432,34 @@ public static class ObjectWorldSave
                 var actorId = ObjectIdFromValue(reader.ReadUInt32());
                 var kind = ReadEnum<TraumaEffectKind>(ref reader, index, nameof(TraumaEffectKind));
                 var sourceId = ObjectIdFromValue(reader.ReadUInt32());
+                var magnitude = reader.ReadInt32();
+                var appliedTick = reader.ReadInt64();
+                var expiresAtTick = ReadNullableInt64(ref reader);
+                var nextPeriodicTick = ReadNullableInt64(ref reader);
+                var removal = formatVersion >= 8
+                    ? ReadEnum<ActorConditionRemovalPolicy>(
+                        ref reader, index, nameof(ActorConditionRemovalPolicy))
+                    : ActorConditionService.RemovalPolicyFor(new TraumaEffect(
+                        kind,
+                        DurationUnit: expiresAtTick.HasValue
+                            ? TraumaDurationUnit.Rounds
+                            : TraumaDurationUnit.None));
+                var stacking = formatVersion >= 8
+                    ? ReadEnum<ActorConditionStackingPolicy>(
+                        ref reader, index, nameof(ActorConditionStackingPolicy))
+                    : ActorConditionService.StackingPolicyFor(kind);
                 conditions.Add(new ActorConditionSnapshot(
                     actorId,
                     kind,
                     sourceId,
-                    reader.ReadInt32(),
-                    reader.ReadInt64(),
-                    ReadNullableInt64(ref reader),
-                    ReadNullableInt64(ref reader),
+                    magnitude,
+                    appliedTick,
+                    expiresAtTick,
+                    nextPeriodicTick,
+                    kind == TraumaEffectKind.StableAtZero
+                        ? ActorConditionRemovalPolicy.RecoverAtExpiry
+                        : removal,
+                    stacking,
                     EmptyToNull(reader.ReadText()),
                     reader.ReadText()));
             }

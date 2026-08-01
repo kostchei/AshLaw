@@ -24,6 +24,14 @@ public sealed class Dice
 
     public static Dice FromState(ulong state) => new(state);
 
+    /// <summary>
+    /// Restores a previously captured state when an authoritative transaction
+    /// rolls back. Callers must only pass a state read from <see cref="State"/>.
+    /// </summary>
+    public void RestoreState(ulong state) => _state = state == 0
+        ? 0x9E3779B97F4A7C15UL
+        : state;
+
     /// <summary>One die of <paramref name="sides"/>, numbered from one.</summary>
     public int Roll(int sides)
     {

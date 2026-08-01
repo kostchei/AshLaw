@@ -139,6 +139,111 @@ public sealed class CombatAttackServiceTests
             resolver.Requests[1].CriticalTable);
     }
 
+    [Fact]
+    public void FailedImpactRestoresDamageConditionsOneUseTokensAndDice()
+    {
+        var objects = new ObjectStore();
+        using var map = new WorldMap(objects, MapId, width: 8, depth: 8);
+        var attacker = objects.Create(Actor(
+            "Transactional Fighter",
+            new Vec3i(256, 256, 0),
+            strength: 16,
+            dexterity: 12));
+        objects.Create(Sword(attacker));
+        var target = objects.Create(Actor(
+            "Transactional Target",
+            new Vec3i(384, 256, 0),
+            strength: 14,
+            dexterity: 14));
+        _ = objects.Create(Actor(
+            "Cleave Bystander",
+            new Vec3i(384, 384, 0),
+            strength: 10,
+            dexterity: 10));
+        var dice = new Dice(AttackSeed);
+        var conditions = new ActorConditionService();
+        conditions.Apply(
+            attacker,
+            target,
+            new TraumaEffect(TraumaEffectKind.Sap),
+            0);
+        conditions.Apply(
+            target,
+            attacker,
+            new TraumaEffect(TraumaEffectKind.Vex),
+            0);
+        var vitality = new ActorVitality(
+            objects,
+            RulesRepository.Vitality,
+            RulesRepository.AbilityBonuses,
+            dice,
+            conditions);
+        var sheets = new ActorSheets(
+            objects,
+            RulesRepository.ClassProgression,
+            RulesRepository.AbilityBonuses);
+        var trauma = new TraumaEffectDispatcher(
+            objects,
+            new ObjectTransferService(objects),
+            vitality,
+            conditions,
+            new MovementSolver(objects),
+            () => 0);
+        var resolver = new TransactionalResolver();
+        var service = new CombatAttackService(
+            objects,
+            sheets,
+            vitality,
+            dice,
+            resolver,
+            conditions,
+            () => 0,
+            trauma,
+            stage =>
+            {
+                if (stage == CombatMutationStage.Conditions)
+                {
+                    throw new InjectedImpactException();
+                }
+            });
+        var beforeObjects = objects.Enumerate().ToArray();
+        var beforeConditions = conditions.Capture();
+        var beforeDice = dice.State;
+        var beforeRevision = map.Revision;
+        var commits = 0;
+        objects.Committed += _ => commits++;
+
+        Assert.Throws<InjectedImpactException>(() =>
+            service.ResolveMelee(attacker, target));
+
+        Assert.Equal(beforeObjects, objects.Enumerate());
+        Assert.Equal(beforeConditions, conditions.Capture());
+        Assert.Equal(beforeDice, dice.State);
+        Assert.Equal(beforeRevision, map.Revision);
+        Assert.Equal(0, commits);
+        map.ValidateIndex();
+        objects.ValidateInvariants();
+
+        var successful = new CombatAttackService(
+            objects,
+            sheets,
+            vitality,
+            dice,
+            resolver,
+            conditions,
+            () => 0,
+            trauma).ResolveMelee(attacker, target);
+
+        Assert.True(successful.Trauma.CleaveGranted);
+        Assert.False(conditions.Has(attacker, TraumaEffectKind.Sap));
+        Assert.False(conditions.Has(target, TraumaEffectKind.Vex));
+        Assert.True(conditions.Has(attacker, TraumaEffectKind.Cleave, target));
+        Assert.True(conditions.Has(target, TraumaEffectKind.Stun));
+        Assert.NotEqual(beforeDice, dice.State);
+        Assert.Equal(99, objects.Get(target).Health);
+        Assert.Equal(1, commits);
+    }
+
     private static PlayableSliceWorld AdjacentDemoWorld(
         ulong seed = AttackSeed,
         IAttackRulesResolver? attackResolver = null)
@@ -266,4 +371,27 @@ public sealed class CombatAttackServiceTests
             };
         }
     }
+
+    private sealed class TransactionalResolver : IAttackRulesResolver
+    {
+        public AttackResult Resolve(AttackRequest request) => new()
+        {
+            Hit = true,
+            RawD20 = request.RawD20,
+            NetRoll = request.RawD20,
+            Margin = 1,
+            ConcussionHits = 1,
+            TraumaEffects =
+            [
+                new TraumaEffect(
+                    TraumaEffectKind.Stun,
+                    Duration: 1,
+                    DurationUnit: TraumaDurationUnit.Rounds),
+                new TraumaEffect(TraumaEffectKind.Cleave),
+            ],
+            Mishap = false,
+        };
+    }
+
+    private sealed class InjectedImpactException : Exception;
 }

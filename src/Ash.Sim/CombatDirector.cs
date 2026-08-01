@@ -266,8 +266,12 @@ public sealed class CombatDirector
             WieldingMasteryWeapon: false);
     }
 
-    /// <summary>Whether the player's weapon has come back round.</summary>
-    public bool PlayerCanSwing => _clock.Tick >= _playerReadyAtTick;
+    /// <summary>
+    /// Whether the player's weapon has come back round or a legal one-use
+    /// Cleave follow-up is waiting for a target choice.
+    /// </summary>
+    public bool PlayerCanSwing => _clock.Tick >= _playerReadyAtTick ||
+        _conditions.Has(_playerId, TraumaEffectKind.Cleave);
 
     /// <summary>
     /// How long the player must wait, for the HUD to draw. Zero when ready.
@@ -356,7 +360,9 @@ public sealed class CombatDirector
     /// </summary>
     public SwingAttempt TryPlayerAttack(ObjectId targetId)
     {
-        if (!PlayerCanSwing)
+        var recovering = _clock.Tick < _playerReadyAtTick;
+        var hasCleave = _conditions.Has(_playerId, TraumaEffectKind.Cleave);
+        if (recovering && !hasCleave)
         {
             var remaining = PlayerCooldownRemainingMilliseconds;
             return new SwingAttempt(
@@ -366,10 +372,21 @@ public sealed class CombatDirector
                 $"({remaining / 1000.0:0.0}s).");
         }
 
+        if (recovering && !_attacks.IsLegalCleaveFollowUp(_playerId, targetId))
+        {
+            return new SwingAttempt(
+                false,
+                PlayerCooldownRemainingMilliseconds,
+                "Cleave must strike a different creature beside the first target.");
+        }
+
         var interval = AttackSpeed.SwingIntervalMilliseconds(
             SpeedInputsFor(_playerId));
-        _playerReadyAtTick = checked(
-            _clock.Tick + CombatClock.BeatsIn(interval));
+        if (!recovering)
+        {
+            _playerReadyAtTick = checked(
+                _clock.Tick + CombatClock.BeatsIn(interval));
+        }
         ScheduleAttack(_playerId, targetId, _playerReadyAtTick, _immediateEvents);
         return new SwingAttempt(
             true,
@@ -733,7 +750,8 @@ public sealed class CombatDirector
             return;
         }
 
-        if (TileDistance(attacker, target) > _attacks.MeleeRangeOf(action.AttackerId))
+        if (TileDistance(attacker, target) > _attacks.MeleeRangeOf(action.AttackerId) &&
+            !_attacks.IsLegalCleaveFollowUp(action.AttackerId, action.TargetId))
         {
             FinishAction(action, AttackActionPhase.Whiffed,
                 $"{attacker.Name} swings where {target.Name} was.", events,
@@ -742,20 +760,11 @@ public sealed class CombatDirector
         }
 
         var attack = _attacks.ResolveMelee(action.AttackerId, action.TargetId);
-        if (_conditions.Consume(action.AttackerId, TraumaEffectKind.Cleave))
-        {
-            if (action.AttackerId == _playerId)
-            {
-                _playerReadyAtTick = _clock.Tick;
-            }
-            else if (_npcs.TryGetValue(action.AttackerId, out var npcState))
-            {
-                _npcs[action.AttackerId] = npcState with
-                {
-                    SwingReadyAtTick = _clock.Tick,
-                };
-            }
-        }
+        // A Cleave token itself makes the player ready. The ordinary recovery
+        // tick remains intact, so declining or losing the follow-up cannot
+        // erase the original swing cooldown. NPC target selection does not yet
+        // choose among multiple creatures, so it never spends a token on the
+        // original target.
         var completed = action with
         {
             Phase = AttackActionPhase.Resolved,

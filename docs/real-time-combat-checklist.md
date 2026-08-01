@@ -32,17 +32,16 @@ checkboxes in the phases below remain authoritative.
 - **Phase 2:** complete. Player and AI impacts share one resolver boundary;
   seeded armour, Cave Rat natural-attack, and live unequip behavior are covered
   by `AttackActionTests` and `CombatAttackServiceTests`.
-- **Phase 3:** implement actual post-mutation rollback, including external actor
-  conditions and one-use condition consumption, then inject failures after each
-  mutation stage rather than only during prevalidation.
-- **Phase 4:** define stacking/removal policies, implement mechanical persistent
-  injuries, calculate Graze from the governing ability modifier, implement the
-  full Stable-at-zero recovery lifecycle including the d4-hour roll, constrain
-  Cleave to a legal follow-up target, and replace no-throw coverage with
-  effect-specific assertions.
-- **Phase 5:** no independent timing gap was found in this review. Re-run all
-  timing and deterministic-order proofs after the Phase 3 and Phase 4 repairs,
-  because impact resolution currently depends on those incomplete semantics.
+- **Phase 3:** complete. Post-mutation rollback covers object state, external
+  actor conditions, one-use condition consumption, and deterministic dice;
+  injected failures after every mutation stage preserve the spatial revision.
+- **Phase 4:** complete. Condition stacking/removal policies are explicit and
+  saved; persistent injuries affect rolls and movement; Graze uses the
+  governing ability; Stable-at-zero rolls and resumes its exact recovery beat;
+  Cleave requires a legal second target; effect-specific runtime proofs replace
+  the former no-throw smoke test.
+- **Phase 5:** complete. The timing and deterministic-order proofs pass again
+  after the Phase 3 atomicity and Phase 4 condition-semantics repairs.
 
 ## Existing prerequisites
 
@@ -206,37 +205,43 @@ checkboxes in the phases below remain authoritative.
   the combat commit.
 - [x] **RTC-306 — Integrate item effects:** dropping, damaging, or breaking a
   held item must use authoritative equipment and transfer rules.
-- [ ] **RTC-307 — Integrate death transformation:** death, corpse conversion,
+- [x] **RTC-307 — Integrate death transformation:** death, corpse conversion,
   contained equipment, and spills must not leave a dead non-corpse if a later
-  step fails.
+  step fails. Evidence: `FailureAfterEveryMutationStageRestoresTheWholeWorld`.
 - [x] **RTC-308 — Publish after commit:** combat events and messages must describe
   committed state only.
-- [ ] **RTC-309 — Rollback tests:** inject a failure into each mutation class and
+- [x] **RTC-309 — Rollback tests:** inject a failure into each mutation class and
   prove injury, positions, equipment, conditions, corpses, and spatial-index
-  revision remain unchanged.
-- [ ] **RTC-310 — Transactional external combat state:** condition application
+  revision remain unchanged. Evidence:
+  `FailureAfterEveryMutationStageRestoresTheWholeWorld`.
+- [x] **RTC-310 — Transactional external combat state:** condition application
   and one-use Sap, Vex, and Cleave consumption must commit or roll back with the
-  object mutation and deterministic dice result.
+  object mutation and deterministic dice result. Evidence:
+  `FailedImpactRestoresDamageConditionsOneUseTokensAndDice`.
 
 ### Phase 3 exit proof
 
-- [ ] A critical that damages, moves, disarms, conditions, and kills a target is
-  observed as one coherent commit.
-- [ ] No failure can leave partial damage, orphaned equipment, overlapping
-  bodies, or an invalid corpse/container graph.
+- [x] A critical that damages, moves, disarms, conditions, and kills a target is
+  observed as one coherent commit. Evidence:
+  `LethalMultiEffectTraumaPublishesOneCoherentCorpseCommit`.
+- [x] No failure can leave partial damage, orphaned equipment, overlapping
+  bodies, or an invalid corpse/container graph. Evidence:
+  `FailureAfterEveryMutationStageRestoresTheWholeWorld`.
 
 ## Phase 4 — Persistent actor conditions and trauma application
 
-- [ ] **RTC-401 — Define actor condition state:** include kind, source ID,
+- [x] **RTC-401 — Define actor condition state:** include kind, source ID,
   magnitude, applied tick, expiry/removal policy, next periodic tick, stacking
-  policy, and presentation key.
+  policy, and presentation key. Evidence: `ActorCondition`, save format v8, and
+  `TimedReplacementAndAnatomicalInjuriesFollowExplicitPolicies`.
 - [x] **RTC-402 — Keep item durability separate:** do not reuse
   `WorldObject.Condition`, which currently means an item's physical condition.
 - [x] **RTC-403 — Centralize duration conversion:** expose one named conversion
   where one six-second round equals 30 combat beats; individual effects must not
   embed their own milliseconds.
-- [ ] **RTC-404 — Add `ActorConditionService`:** query, add, stack, replace,
-  consume, expire, and remove conditions deterministically.
+- [x] **RTC-404 — Add `ActorConditionService`:** query, add, stack, replace,
+  consume, expire, and remove conditions deterministically. Evidence:
+  `ActorConditionTests`.
 - [x] **RTC-405 — Persist conditions:** include their exact remaining/next ticks
   in object-world snapshots and save/load migration.
 - [x] **RTC-406 — Implement immediate effects:** `AdditionalHits`, `Death`,
@@ -245,12 +250,19 @@ checkboxes in the phases below remain authoritative.
   `Restrained`, `Incapacitated`, and `Slow`.
 - [x] **RTC-408 — Implement positional effects:** `Prone`, `ForcedMovement`,
   `Push`, and `Topple`, all through shared placement/collision.
-- [ ] **RTC-409 — Implement persistent injuries:** `BreakBone`, `DisableLimb`,
-  `DestroyEye`, `Paralyzed`, `Injured`, and `Exhaustion`.
-- [ ] **RTC-410 — Implement one-use mastery effects:** `Sap`, `Vex`, `Graze`,
-  and `Cleave`, including deterministic consumption rules.
-- [ ] **RTC-411 — Implement special body states:** `Unconscious`, `Dying`,
+- [x] **RTC-409 — Implement persistent injuries:** `BreakBone`, `DisableLimb`,
+  `DestroyEye`, `Paralyzed`, `Injured`, and `Exhaustion`. Evidence:
+  `PersistentInjuriesCommitDistinctMechanicalPenalties`.
+- [x] **RTC-410 — Implement one-use mastery effects:** `Sap`, `Vex`, `Graze`,
+  and `Cleave`, including deterministic consumption rules. Evidence:
+  `GrazeUsesTheGoverningAbilityModifierAndMultiplier`,
+  `CleaveOnlyGrantsAndConsumesAgainstALegalSecondTarget`, and
+  `CombatAttackServiceTests`.
+- [x] **RTC-411 — Implement special body states:** `Unconscious`, `Dying`,
   `Suffocating`, and `StableAtZero` without contradicting `ActorVitality`.
+  Evidence: `DyingAndUnconsciousDoNotContradictAuthoritativeVitality`,
+  `SuffocationTicksAsExhaustionWhileBleedingTicksAsDamage`, and
+  `StableAtZeroRollsD4HoursRecoversOnTheExactBeatAndStaysInjured`.
 - [x] **RTC-412 — Make action legality condition-aware:** stunned,
   incapacitated, unconscious, dying, stable, and dead actors cannot start
   forbidden attacks or movement.
@@ -259,23 +271,26 @@ checkboxes in the phases below remain authoritative.
   the attack roll in one documented layer.
 - [x] **RTC-414 — Make movement condition-aware:** prone, restrained, slow,
   paralysis, and injury must affect movement without bypassing collision.
-- [ ] **RTC-415 — Exhaustive effect dispatcher:** a switch or registered mapping
+- [x] **RTC-415 — Exhaustive effect dispatcher:** a switch or registered mapping
   covers every `TraumaEffectKind`; adding a new enum member breaks a test until
-  its runtime policy is defined.
-- [ ] **RTC-416 — Condition timing tests:** verify application, stacking,
+  its runtime policy is defined. Evidence: `TraumaEffectDispatcher.SupportedKinds`
+  and `DispatcherPolicyListMatchesEveryStructuredTraumaKind`.
+- [x] **RTC-416 — Condition timing tests:** verify application, stacking,
   periodic damage, expiration, one-use consumption, healing/removal, and save
-  resumption on exact combat beats.
-- [ ] **RTC-417 — Effect-specific runtime proofs:** replace the current
+  resumption on exact combat beats. Evidence: `ActorConditionTests` and the
+  exact-beat/save tests in `TraumaPhaseTests`.
+- [x] **RTC-417 — Effect-specific runtime proofs:** replace the current
   every-enum no-throw smoke test with assertions for each effect's committed
   mechanical result, including Graze, Stable-at-zero, persistent injuries, and
-  Cleave eligibility.
+  Cleave eligibility. Evidence: `TraumaPhaseTests`.
 
 ### Phase 4 exit proof
 
-- [ ] Every structured trauma effect has an implemented runtime policy or an
+- [x] Every structured trauma effect has an implemented runtime policy or an
   explicit refusal that prevents affected content from shipping.
-- [ ] A critical result produces immediate damage, persistent conditions, and
-  matching narrative text from one rules result.
+- [x] A critical result produces immediate damage, persistent conditions, and
+  matching narrative text from one rules result. Evidence:
+  `CriticalNarrativeImmediateDamageAndPersistentStateShareOneResult`.
 - [x] Conditions change subsequent player and AI decisions rather than existing
   only as log entries.
 

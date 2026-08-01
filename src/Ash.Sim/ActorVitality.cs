@@ -123,6 +123,36 @@ public sealed class ActorVitality
         return outcome;
     }
 
+    /// <summary>
+    /// Completes Stable-at-zero recovery: the body wakes with the authored hit
+    /// amount but no restored wounds. This is distinct from magical healing,
+    /// which restores the wound layer first.
+    /// </summary>
+    public InjuryState RecoverStableAtZero(ObjectId actorId, int restoredHits)
+    {
+        if (restoredHits <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(restoredHits));
+        }
+
+        var state = _objects.InjuryOf(actorId);
+        if (state.State != VitalityState.Stable || state.Wounds != 0 || state.Concussion != 0)
+        {
+            throw new InvalidOperationException(
+                "Stable-at-zero recovery requires a stable body at zero hits and zero wounds.");
+        }
+
+        var recovered = state with
+        {
+            Concussion = Math.Min(restoredHits, state.MaximumConcussion),
+            DeathSaveSuccesses = 0,
+            DeathSaveFailures = 0,
+            State = VitalityState.Standing,
+        };
+        _objects.CommitCombatMutation(new CombatMutation(actorId, recovered));
+        return recovered;
+    }
+
     /// <summary>A day's recovery, and the complication it might bring.</summary>
     public DayOutcome PassDay(
         ObjectId actorId,

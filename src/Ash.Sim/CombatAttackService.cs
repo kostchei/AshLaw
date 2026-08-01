@@ -46,6 +46,7 @@ public sealed class CombatAttackService
     private readonly ActorConditionService? _conditions;
     private readonly Func<long>? _currentTick;
     private readonly TraumaEffectDispatcher? _trauma;
+    private readonly Action<CombatMutationStage>? _afterMutationStage;
 
     public CombatAttackService(
         ObjectStore objects,
@@ -55,7 +56,8 @@ public sealed class CombatAttackService
         IAttackRulesResolver resolver,
         ActorConditionService? conditions = null,
         Func<long>? currentTick = null,
-        TraumaEffectDispatcher? trauma = null)
+        TraumaEffectDispatcher? trauma = null,
+        Action<CombatMutationStage>? afterMutationStage = null)
     {
         _objects = objects ?? throw new ArgumentNullException(nameof(objects));
         _sheets = sheets ?? throw new ArgumentNullException(nameof(sheets));
@@ -65,6 +67,7 @@ public sealed class CombatAttackService
         _conditions = conditions;
         _currentTick = currentTick;
         _trauma = trauma;
+        _afterMutationStage = afterMutationStage;
     }
 
     public CombatAttackOutcome ResolveMelee(ObjectId attackerId, ObjectId targetId)
@@ -79,79 +82,142 @@ public sealed class CombatAttackService
         var targetSheet = _sheets.For(targetId);
         var profile = attackerSheet.AttackProfile ?? throw new InvalidOperationException(
             $"{attacker.Name} has no attack profile for its equipped weapon.");
-        RequireMeleeReach(attacker, target, profile);
+        RequireMeleeReach(attacker, target, profile, IsLegalCleaveFollowUp(attackerId, targetId));
 
-        var rawD20 = _dice.D20();
-        if (_conditions is not null &&
-            _conditions.Consume(attackerId, TraumaEffectKind.Sap))
+        var diceRollback = _dice.State;
+        var conditionRollback = _conditions?.Capture();
+        try
         {
-            rawD20 = Math.Min(rawD20, _dice.D20());
-        }
-
-        if (_conditions is not null &&
-            _conditions.Consume(targetId, TraumaEffectKind.Vex, attackerId))
-        {
-            rawD20 = Math.Max(rawD20, _dice.D20());
-        }
-
-        var attackPenalty = ConditionPenalty(attackerId);
-        var defensePenalty = ConditionPenalty(targetId);
-        var request = new AttackRequest(
-            rawD20,
-            profile.Category,
-            checked(attackerSheet.AttackModifier - attackPenalty),
-            checked(targetSheet.DefenseModifier - defensePenalty),
-            targetSheet.Armor,
-            profile.CriticalTable,
-            AttackSize: profile.Size,
-            MaximumCriticalTier: profile.MaximumCriticalTier);
-        var result = _resolver.Resolve(request);
-        var applicable = result.TraumaEffects
-            .Where(effect => Applies(effect.AppliesWhen, targetId, targetSheet))
-            .ToArray();
-        var immediateHits = result.Hit
-            ? checked(result.ConcussionHits + applicable
-                .Where(effect => effect.Kind == TraumaEffectKind.AdditionalHits)
-                .Sum(effect => effect.Magnitude))
-            : applicable
-                .Where(effect => effect.Kind == TraumaEffectKind.Graze)
-                .Sum(effect => Math.Max(0, effect.Magnitude));
-        DamageOutcome? damage = null;
-        if (immediateHits > 0)
-        {
-            var resolvedDamage = _vitality.ResolveDamage(targetId, immediateHits);
-            damage = resolvedDamage;
-        }
-        TraumaDispatchResult trauma = default;
-        if ((result.Hit || immediateHits > 0) && _trauma is not null)
-        {
-            trauma = _trauma.Apply(
-                attackerId,
-                targetId,
-                applicable,
-                damage?.State);
-        }
-        else
-        {
-            if (damage is not null)
+            var consumptions = new List<ActorConditionConsumption>();
+            if (IsLegalCleaveFollowUp(attackerId, targetId))
             {
-                _objects.CommitCombatMutation(
-                    new CombatMutation(targetId, damage.Value.State));
+                var cleave = _conditions!.Of(attackerId)
+                    .Where(condition => condition.Kind == TraumaEffectKind.Cleave &&
+                                        condition.SourceId != targetId)
+                    .OrderBy(condition => condition.AppliedTick)
+                    .ThenBy(condition => condition.SourceId)
+                    .First();
+                consumptions.Add(new ActorConditionConsumption(
+                    attackerId,
+                    TraumaEffectKind.Cleave,
+                    cleave.SourceId));
             }
 
-            if (result.Hit && _conditions is not null)
+            var rawD20 = _dice.D20();
+            if (_conditions?.Has(attackerId, TraumaEffectKind.Sap) == true)
             {
-                foreach (var effect in applicable.Where(effect =>
-                             ActorConditionService.CanStore(effect.Kind)))
+                rawD20 = Math.Min(rawD20, _dice.D20());
+                consumptions.Add(new ActorConditionConsumption(
+                    attackerId,
+                    TraumaEffectKind.Sap));
+            }
+
+            if (_conditions?.Has(targetId, TraumaEffectKind.Vex, attackerId) == true)
+            {
+                rawD20 = Math.Max(rawD20, _dice.D20());
+                consumptions.Add(new ActorConditionConsumption(
+                    targetId,
+                    TraumaEffectKind.Vex,
+                    attackerId));
+            }
+
+            var attackPenalty = ConditionPenalty(attackerId);
+            var defensePenalty = ConditionPenalty(targetId);
+            var request = new AttackRequest(
+                rawD20,
+                profile.Category,
+                checked(attackerSheet.AttackModifier - attackPenalty),
+                checked(targetSheet.DefenseModifier - defensePenalty),
+                targetSheet.Armor,
+                profile.CriticalTable,
+                AttackSize: profile.Size,
+                MaximumCriticalTier: profile.MaximumCriticalTier);
+            var result = _resolver.Resolve(request);
+            var governingModifier = Math.Max(0, RulesRepository.AbilityBonuses.BonusOf(
+                attackerSheet.Abilities,
+                attackerSheet.GoverningAbility));
+            var applicable = result.TraumaEffects
+                .Where(effect => Applies(effect.AppliesWhen, targetId, targetSheet))
+                .Select(effect => effect.Kind == TraumaEffectKind.Graze
+                    ? effect with
+                    {
+                        Magnitude = checked(
+                            Math.Max(1, effect.Magnitude) * governingModifier),
+                    }
+                    : effect)
+                .ToArray();
+            var immediateHits = result.Hit
+                ? checked(result.ConcussionHits + applicable
+                    .Where(effect => effect.Kind == TraumaEffectKind.AdditionalHits)
+                    .Sum(effect => effect.Magnitude))
+                : applicable
+                    .Where(effect => effect.Kind == TraumaEffectKind.Graze)
+                    .Sum(effect => Math.Max(0, effect.Magnitude));
+            DamageOutcome? damage = null;
+            if (immediateHits > 0)
+            {
+                damage = _vitality.ResolveDamage(targetId, immediateHits);
+            }
+
+            TraumaDispatchResult trauma = default;
+            if ((result.Hit || immediateHits > 0) && _trauma is not null)
+            {
+                trauma = _trauma.Apply(
+                    attackerId,
+                    targetId,
+                    applicable,
+                    damage?.State,
+                    consumptions,
+                    _afterMutationStage);
+            }
+            else
+            {
+                var conditionMutations = result.Hit && _conditions is not null
+                    ? applicable
+                        .Where(effect => ActorConditionService.CanStore(effect.Kind))
+                        .Select(effect => new ActorConditionMutation(
+                            targetId,
+                            attackerId,
+                            effect,
+                            _currentTick?.Invoke() ?? 0))
+                        .ToArray()
+                    : [];
+                if (damage is not null || conditionMutations.Length > 0 ||
+                    consumptions.Count > 0)
                 {
-                    _conditions.Apply(
-                        targetId, attackerId, effect, _currentTick?.Invoke() ?? 0);
+                    _objects.CommitCombatMutation(
+                        new CombatMutation(
+                            targetId,
+                            damage?.State,
+                            Conditions: conditionMutations,
+                            ConditionConsumptions: consumptions),
+                        _conditions,
+                        _afterMutationStage);
                 }
             }
+
+            return new CombatAttackOutcome(
+                attackerId,
+                targetId,
+                profile,
+                request,
+                result,
+                applicable,
+                immediateHits,
+                damage,
+                trauma,
+                _objects.InjuryOf(targetId));
         }
-        return new CombatAttackOutcome(
-            attackerId, targetId, profile, request, result, applicable, immediateHits, damage,
-            trauma, _objects.InjuryOf(targetId));
+        catch
+        {
+            _dice.RestoreState(diceRollback);
+            if (_conditions is not null && conditionRollback is not null)
+            {
+                _conditions.Restore(conditionRollback);
+            }
+
+            throw;
+        }
     }
 
     public ObjectId WeaponOf(ObjectId actorId) => _sheets.For(actorId).Weapon;
@@ -159,10 +225,48 @@ public sealed class CombatAttackService
     public int MeleeRangeOf(ObjectId actorId) =>
         _sheets.For(actorId).AttackProfile?.MeleeRangeTiles ?? 1;
 
+    /// <summary>
+    /// A Cleave token names the first target. Its one follow-up must choose a
+    /// different living creature adjacent to that target and within the
+    /// attacker's diagonal melee reach.
+    /// </summary>
+    public bool IsLegalCleaveFollowUp(ObjectId attackerId, ObjectId targetId)
+    {
+        if (_conditions is null ||
+            !_objects.TryGet(attackerId, out var attacker) ||
+            !_objects.TryGet(targetId, out var target) ||
+            !target.HasFlag(ObjectFlags.Actor) || !target.IsAlive ||
+            attacker.Location.Kind != LocationKind.OnMap ||
+            target.Location.Kind != LocationKind.OnMap ||
+            attacker.Location.MapId != target.Location.MapId)
+        {
+            return false;
+        }
+
+        return _conditions.Of(attackerId)
+            .Where(condition => condition.Kind == TraumaEffectKind.Cleave &&
+                                condition.SourceId != targetId)
+            .Any(condition =>
+                _objects.TryGet(condition.SourceId, out var first) &&
+                first.Location.Kind == LocationKind.OnMap &&
+                first.Location.MapId == target.Location.MapId &&
+                TileDistance(first, target) <= 1 &&
+                ChebyshevDistance(attacker, target) <= MeleeRangeOf(attackerId));
+    }
+
     private int ConditionPenalty(ObjectId actorId) => _conditions?.Of(actorId)
         .Where(condition => condition.Kind is TraumaEffectKind.ActivityPenalty or
-            TraumaEffectKind.Exhaustion or TraumaEffectKind.Injured)
-        .Sum(condition => Math.Max(1, condition.Magnitude)) ?? 0;
+            TraumaEffectKind.Exhaustion or TraumaEffectKind.Injured or
+            TraumaEffectKind.BreakBone or TraumaEffectKind.DisableLimb or
+            TraumaEffectKind.DestroyEye)
+        .Sum(condition => condition.Kind switch
+        {
+            TraumaEffectKind.Exhaustion or TraumaEffectKind.Injured =>
+                2 * Math.Max(1, condition.Magnitude),
+            TraumaEffectKind.DisableLimb => 4,
+            TraumaEffectKind.DestroyEye => 2 * Math.Max(1, condition.Magnitude),
+            _ => Math.Max(1, condition.Magnitude),
+        }) ?? 0;
 
     private WorldObject LivingActor(ObjectId id, string parameter)
     {
@@ -178,7 +282,8 @@ public sealed class CombatAttackService
     private static void RequireMeleeReach(
         WorldObject attacker,
         WorldObject target,
-        AttackProfile profile)
+        AttackProfile profile,
+        bool legalCleaveFollowUp)
     {
         if (attacker.Location.Kind != LocationKind.OnMap ||
             target.Location.Kind != LocationKind.OnMap ||
@@ -190,11 +295,22 @@ public sealed class CombatAttackService
         var distance = (Math.Abs(attacker.Location.Position.X - target.Location.Position.X) +
                         Math.Abs(attacker.Location.Position.Y - target.Location.Position.Y)) /
                        WorldMap.WorldUnitsPerTile;
-        if (distance > profile.MeleeRangeTiles)
+        if (distance > profile.MeleeRangeTiles && !legalCleaveFollowUp)
         {
             throw new InvalidOperationException("Target is outside melee reach.");
         }
     }
+
+    private static int TileDistance(WorldObject left, WorldObject right) =>
+        (Math.Abs(left.Location.Position.X - right.Location.Position.X) +
+         Math.Abs(left.Location.Position.Y - right.Location.Position.Y)) /
+        WorldMap.WorldUnitsPerTile;
+
+    private static int ChebyshevDistance(WorldObject left, WorldObject right) =>
+        Math.Max(
+            Math.Abs(left.Location.Position.X - right.Location.Position.X),
+            Math.Abs(left.Location.Position.Y - right.Location.Position.Y)) /
+        WorldMap.WorldUnitsPerTile;
 
     private bool Applies(
         TraumaEffectCondition condition,

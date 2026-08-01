@@ -9,7 +9,8 @@ public readonly record struct TraumaDispatchResult(
     bool Moved,
     IReadOnlyList<ObjectId> DroppedItems,
     IReadOnlyList<ObjectId> BrokenItems,
-    bool CorpseCreated = false);
+    bool CorpseCreated = false,
+    bool CleaveGranted = false);
 
 /// <summary>
 /// Exhaustive runtime policy for every structured trauma kind. Effects which
@@ -18,12 +19,50 @@ public readonly record struct TraumaDispatchResult(
 /// </summary>
 public sealed class TraumaEffectDispatcher
 {
+    /// <summary>
+    /// The reviewed runtime policy surface. The phase proof compares this
+    /// explicit list with the enum so a newly parsed effect cannot silently
+    /// ship through the dispatcher's default branch.
+    /// </summary>
+    public static IReadOnlyList<TraumaEffectKind> SupportedKinds { get; } =
+    [
+        TraumaEffectKind.AdditionalHits,
+        TraumaEffectKind.Bleeding,
+        TraumaEffectKind.ActivityPenalty,
+        TraumaEffectKind.Stun,
+        TraumaEffectKind.Prone,
+        TraumaEffectKind.Unconscious,
+        TraumaEffectKind.Death,
+        TraumaEffectKind.ForcedMovement,
+        TraumaEffectKind.DropHeldItem,
+        TraumaEffectKind.BreakItem,
+        TraumaEffectKind.BreakBone,
+        TraumaEffectKind.DisableLimb,
+        TraumaEffectKind.DestroyEye,
+        TraumaEffectKind.Paralyzed,
+        TraumaEffectKind.Restrained,
+        TraumaEffectKind.Incapacitated,
+        TraumaEffectKind.Dying,
+        TraumaEffectKind.Suffocating,
+        TraumaEffectKind.Exhaustion,
+        TraumaEffectKind.Injured,
+        TraumaEffectKind.StableAtZero,
+        TraumaEffectKind.Graze,
+        TraumaEffectKind.Vex,
+        TraumaEffectKind.Sap,
+        TraumaEffectKind.Topple,
+        TraumaEffectKind.Cleave,
+        TraumaEffectKind.Slow,
+        TraumaEffectKind.Push,
+    ];
+
     private readonly ObjectStore _objects;
     private readonly ObjectTransferService _transfers;
     private readonly ActorVitality _vitality;
     private readonly ActorConditionService _conditions;
     private readonly MovementSolver _movement;
     private readonly Func<long> _currentTick;
+    private readonly Dice? _dice;
 
     public TraumaEffectDispatcher(
         ObjectStore objects,
@@ -31,7 +70,8 @@ public sealed class TraumaEffectDispatcher
         ActorVitality vitality,
         ActorConditionService conditions,
         MovementSolver movement,
-        Func<long> currentTick)
+        Func<long> currentTick,
+        Dice? dice = null)
     {
         _objects = objects ?? throw new ArgumentNullException(nameof(objects));
         _transfers = transfers ?? throw new ArgumentNullException(nameof(transfers));
@@ -39,13 +79,46 @@ public sealed class TraumaEffectDispatcher
         _conditions = conditions ?? throw new ArgumentNullException(nameof(conditions));
         _movement = movement ?? throw new ArgumentNullException(nameof(movement));
         _currentTick = currentTick ?? throw new ArgumentNullException(nameof(currentTick));
+        _dice = dice;
     }
 
     public TraumaDispatchResult Apply(
         ObjectId attackerId,
         ObjectId targetId,
         IEnumerable<TraumaEffect> effects,
-        InjuryState? baseInjury = null)
+        InjuryState? baseInjury = null,
+        IReadOnlyList<ActorConditionConsumption>? conditionConsumptions = null,
+        Action<CombatMutationStage>? afterStage = null)
+    {
+        var diceRollback = _dice?.State;
+        try
+        {
+            return ApplyCore(
+                attackerId,
+                targetId,
+                effects,
+                baseInjury,
+                conditionConsumptions,
+                afterStage);
+        }
+        catch
+        {
+            if (_dice is not null && diceRollback.HasValue)
+            {
+                _dice.RestoreState(diceRollback.Value);
+            }
+
+            throw;
+        }
+    }
+
+    private TraumaDispatchResult ApplyCore(
+        ObjectId attackerId,
+        ObjectId targetId,
+        IEnumerable<TraumaEffect> effects,
+        InjuryState? baseInjury,
+        IReadOnlyList<ActorConditionConsumption>? conditionConsumptions,
+        Action<CombatMutationStage>? afterStage)
     {
         var additionalDamage = 0;
         var moved = false;
@@ -55,8 +128,11 @@ public sealed class TraumaEffectDispatcher
         var transfers = new List<ObjectTransferRequest>();
         var physics = new List<ObjectPhysicsUpdate>();
         var conditionChanges = new List<(ObjectId Actor, ObjectId Source, TraumaEffect Effect)>();
-        foreach (var effect in effects)
+        var consumptions = conditionConsumptions?.ToList() ?? [];
+        var cleaveGranted = false;
+        foreach (var unresolvedEffect in effects)
         {
+            var effect = ResolveDuration(unresolvedEffect);
             switch (effect.Kind)
             {
                 case TraumaEffectKind.AdditionalHits:
@@ -100,7 +176,20 @@ public sealed class TraumaEffectDispatcher
                         effect with { Kind = TraumaEffectKind.Prone }));
                     break;
                 case TraumaEffectKind.Cleave:
-                    conditionChanges.Add((attackerId, attackerId, effect));
+                    if (HasLegalCleaveTarget(attackerId, targetId))
+                    {
+                        conditionChanges.Add((
+                            attackerId,
+                            targetId,
+                            effect.DurationUnit == TraumaDurationUnit.None
+                                ? effect with
+                                {
+                                    Duration = 1,
+                                    DurationUnit = TraumaDurationUnit.Rounds,
+                                }
+                                : effect));
+                        cleaveGranted = true;
+                    }
                     break;
                 case TraumaEffectKind.Bleeding:
                 case TraumaEffectKind.ActivityPenalty:
@@ -144,7 +233,7 @@ public sealed class TraumaEffectDispatcher
         }
 
         if (injury is not null || transfers.Count > 0 || broken.Count > 0 ||
-            conditionChanges.Count > 0)
+            conditionChanges.Count > 0 || consumptions.Count > 0)
         {
             var conditionMutations = conditionChanges.Select(change =>
                 new ActorConditionMutation(
@@ -160,28 +249,75 @@ public sealed class TraumaEffectDispatcher
                     broken,
                     transform,
                     conditionMutations,
-                    physics),
-                () =>
-                {
-                    foreach (var change in conditionMutations)
-                    {
-                        _conditions.Apply(
-                            change.ActorId,
-                            change.SourceId,
-                            change.Effect,
-                            change.AppliedTick);
-                    }
-
-                    if (transform is not null)
-                    {
-                        _conditions.RemoveAll(targetId);
-                    }
-                });
+                    physics,
+                    consumptions,
+                    transform is null ? [] : [targetId]),
+                _conditions,
+                afterStage);
         }
 
         return new TraumaDispatchResult(
-            additionalDamage, moved, dropped, broken, transform is not null);
+            additionalDamage,
+            moved,
+            dropped,
+            broken,
+            transform is not null,
+            cleaveGranted);
     }
+
+    private TraumaEffect ResolveDuration(TraumaEffect effect)
+    {
+        if (effect.DurationUnit != TraumaDurationUnit.D4Hours)
+        {
+            return effect;
+        }
+
+        if (_dice is null)
+        {
+            throw new InvalidOperationException(
+                $"{effect.Kind} requires a saved world die to resolve its d4-hour duration.");
+        }
+
+        var diceCount = Math.Max(1, effect.Duration);
+        var hours = 0;
+        for (var die = 0; die < diceCount; die++)
+        {
+            hours = checked(hours + _dice.Roll(4));
+        }
+
+        return effect with { Duration = hours, DurationUnit = TraumaDurationUnit.Hours };
+    }
+
+    private bool HasLegalCleaveTarget(ObjectId attackerId, ObjectId firstTargetId)
+    {
+        var attacker = _objects.Get(attackerId);
+        var first = _objects.Get(firstTargetId);
+        if (attacker.Location.Kind != LocationKind.OnMap ||
+            first.Location.Kind != LocationKind.OnMap ||
+            attacker.Location.MapId != first.Location.MapId)
+        {
+            return false;
+        }
+
+        return _objects.Enumerate().Any(candidate =>
+            candidate.Id != attackerId && candidate.Id != firstTargetId &&
+            candidate.HasFlag(ObjectFlags.Actor) && candidate.IsAlive &&
+            candidate.Location.Kind == LocationKind.OnMap &&
+            candidate.Location.MapId == first.Location.MapId &&
+            TileDistance(candidate, first) <= 1 &&
+            ChebyshevDistance(candidate, attacker) <= 1);
+    }
+
+    private static int TileDistance(WorldObject left, WorldObject right) =>
+        (Math.Abs(left.Location.Position.X - right.Location.Position.X) +
+         Math.Abs(left.Location.Position.Y - right.Location.Position.Y)) /
+        WorldMap.WorldUnitsPerTile;
+
+    private static int ChebyshevDistance(WorldObject left, WorldObject right) =>
+        Math.Max(
+            Math.Abs(left.Location.Position.X - right.Location.Position.X),
+            Math.Abs(left.Location.Position.Y - right.Location.Position.Y)) /
+        WorldMap.WorldUnitsPerTile;
 
     private void PlanCorpseTransfers(
         WorldObject body,

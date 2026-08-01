@@ -131,7 +131,7 @@ public sealed class PlayableSliceWorld : IDisposable
             RulesRepository.ClassProgression,
             RulesRepository.AbilityBonuses);
         Trauma = new TraumaEffectDispatcher(
-            objects, Transfers, Vitality, Conditions, Movement, () => Clock.Tick);
+            objects, Transfers, Vitality, Conditions, Movement, () => Clock.Tick, Dice);
         Attacks = new CombatAttackService(
             objects,
             Sheets,
@@ -831,15 +831,44 @@ public sealed class PlayableSliceWorld : IDisposable
         // whatever the frame rate happens to be.
         if (Clock.Advance(Physics.Tick))
         {
-            foreach (var periodic in Conditions.AdvanceTo(Clock.Tick))
+            var conditionAdvance = Conditions.AdvanceTo(Clock.Tick);
+            foreach (var periodic in conditionAdvance.PeriodicEffects)
             {
                 if (Objects.TryGet(periodic.ActorId, out var actor) &&
-                    actor.IsAlive && actor.Injury.IsUpright && periodic.Damage > 0)
+                    actor.IsAlive && periodic.Magnitude > 0)
                 {
-                    _ = Vitality.Damage(periodic.ActorId, periodic.Damage);
-                    if (periodic.ActorId == PlayerId)
+                    if (periodic.Kind == TraumaEffectKind.Bleeding && actor.Injury.IsUpright)
                     {
-                        LastMessage = $"You bleed for {periodic.Damage} damage.";
+                        _ = Vitality.Damage(periodic.ActorId, periodic.Magnitude);
+                        if (periodic.ActorId == PlayerId)
+                        {
+                            LastMessage = $"You bleed for {periodic.Magnitude} damage.";
+                        }
+                    }
+                    else if (periodic.Kind == TraumaEffectKind.Suffocating)
+                    {
+                        Conditions.Apply(
+                            periodic.ActorId,
+                            periodic.ActorId,
+                            new TraumaEffect(
+                                TraumaEffectKind.Exhaustion,
+                                Magnitude: periodic.Magnitude,
+                                DurationUnit: TraumaDurationUnit.UntilHealed),
+                            Clock.Tick);
+                    }
+                }
+            }
+
+            foreach (var recovery in conditionAdvance.Recoveries)
+            {
+                if (Objects.TryGet(recovery.ActorId, out var actor) &&
+                    actor.IsAlive && actor.Injury.State == VitalityState.Stable)
+                {
+                    _ = Vitality.RecoverStableAtZero(
+                        recovery.ActorId, recovery.RestoredHits);
+                    if (recovery.ActorId == PlayerId)
+                    {
+                        LastMessage = "You wake with 1 hit point, still injured.";
                     }
                 }
             }
