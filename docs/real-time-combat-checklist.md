@@ -26,12 +26,12 @@ end to end and establishes the shared pipeline those later attack types use.
 Review date: 2026-08-01. This is the short execution queue; the numbered
 checkboxes in the phases below remain authoritative.
 
-- **Phase 1:** author demo body armour, shield, and helmet; prove live equipment
-  changes without rebuilding sheets; cover every playable monster; and ensure
-  broken defensive gear contributes neither armour category nor defence bonus.
-- **Phase 2:** add shared player/AI resolver-spy proof, direct seeded armour
-  fixtures, a Cave Rat tooth-and-claw fixture, and an unequip-before-next-impact
-  fixture.
+- **Phase 1:** complete. Demo body armour, shield, and helmet are authored; live
+  equipment changes, every playable monster attack, and broken defensive gear
+  behavior are covered by `ActorSheetTests`.
+- **Phase 2:** complete. Player and AI impacts share one resolver boundary;
+  seeded armour, Cave Rat natural-attack, and live unequip behavior are covered
+  by `AttackActionTests` and `CombatAttackServiceTests`.
 - **Phase 3:** implement actual post-mutation rollback, including external actor
   conditions and one-use condition consumption, then inject failures after each
   mutation stage rather than only during prevalidation.
@@ -96,8 +96,10 @@ checkboxes in the phases below remain authoritative.
 - [x] **RTC-109 — Author unarmed fallback:** an actor without a weapon must have
   a defined attack or receive a clear refusal; it must not silently borrow sword
   rules.
-- [ ] **RTC-110 — Author defensive equipment:** add at least one body armour,
+- [x] **RTC-110 — Author defensive equipment:** add at least one body armour,
   shield, and helmet object suitable for end-to-end and conditional-effect tests.
+  Evidence: `PlayableSliceWorld.SpawnAvatar` authors a Leather Jerkin, Wooden
+  Shield, and Iron Helm; `DemoDefensiveGearChangesTheLiveSheetWithoutRebuildingIt`.
 - [x] **RTC-111 — Correct weapon selection:** update `ActorSheets` so it selects
   only an equipped object with an attack profile, not any hand item whose
   defence bonus is zero.
@@ -113,17 +115,22 @@ checkboxes in the phases below remain authoritative.
 - [x] **RTC-115 — Implement critical caps:** enforce both size-derived and
   attack-specific maximum critical tiers. Bronze Dagger caps at C, Cave Rat
   Small bite at B, and unarmed at A.
-- [ ] **RTC-116 — Broken defensive equipment stops defending:** broken body
+- [x] **RTC-116 — Broken defensive equipment stops defending:** broken body
   armour supplies neither its armour category nor its defence bonus, and a
-  broken shield supplies no shield bonus or conditional protection.
+  broken shield supplies no shield bonus or conditional protection. Evidence:
+  `BrokenDefensiveGearSuppliesNoArmourOrDefence` and
+  `BreakingAnEquippedShieldEnablesNoShieldTrauma`.
 
 ### Phase 1 exit proof
 
-- [ ] Equipping or removing a weapon changes the selected attack profile and
-  governing ability without rebuilding or caching the actor sheet.
-- [ ] Equipping body armour and a shield changes armour category and defence.
-- [ ] Every playable monster has either a valid natural attack or a valid
-  equipped weapon profile.
+- [x] Equipping or removing a weapon changes the selected attack profile and
+  governing ability without rebuilding or caching the actor sheet. Evidence:
+  `EquippingDifferentWeaponsChangesTheLiveProfileAndAbility`.
+- [x] Equipping body armour and a shield changes armour category and defence.
+  Evidence: `DemoDefensiveGearChangesTheLiveSheetWithoutRebuildingIt`.
+- [x] Every playable monster has either a valid natural attack or a valid
+  equipped weapon profile. Evidence:
+  `EveryDemoMonsterHasAValidatedNaturalOrEquippedAttack`.
 
 ## Phase 2 — One shared attack-resolution service
 
@@ -169,14 +176,18 @@ checkboxes in the phases below remain authoritative.
 
 ### Phase 2 exit proof
 
-- [ ] A test spy proves player and AI attacks use the same simulation service
-  and enter the rules resolver once per impact.
-- [ ] A seeded sword attack against each armour category matches a direct
-  `AttackResolver` fixture.
-- [ ] A seeded Cave Rat natural attack resolves through tooth-and-claw rather
-  than the sword table.
-- [ ] Unequipping the player's weapon changes the next attack without restarting
-  the world.
+- [x] A test spy proves player and AI attacks use the same simulation service
+  and enter the rules resolver once per impact. Evidence:
+  `PlayerAndAiImpactsUseTheSameInjectedRulesBoundaryOnceEach`.
+- [x] A seeded sword attack against each armour category matches a direct
+  `AttackResolver` fixture. Evidence:
+  `SeededSwordAttackMatchesDirectResolverForEveryArmourCategory`.
+- [x] A seeded Cave Rat natural attack resolves through tooth-and-claw rather
+  than the sword table. Evidence:
+  `SeededCaveRatAttackUsesToothAndClawAndPunctureRules`.
+- [x] Unequipping the player's weapon changes the next attack without restarting
+  the world. Evidence:
+  `UnequippingPlayerWeaponChangesTheNextResolutionInTheSameWorld`.
 
 ## Phase 3 — Atomic combat mutation
 

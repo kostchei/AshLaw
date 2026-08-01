@@ -156,6 +156,114 @@ public sealed class ActorSheetTests
     }
 
     [Fact]
+    public void DemoDefensiveGearChangesTheLiveSheetWithoutRebuildingIt()
+    {
+        using var world = PlayableSliceWorld.CreateDemo();
+        var sheets = world.Sheets;
+        var jerkin = world.BackpackItems.Single(
+            item => item.TypeId == "item.leather-jerkin");
+        var shield = world.BackpackItems.Single(
+            item => item.TypeId == "item.wooden-shield");
+        var helmet = world.BackpackItems.Single(
+            item => item.TypeId == "item.iron-helm");
+
+        Assert.Equal(EquipmentSlotMask.Body, jerkin.EquipmentSlots);
+        Assert.Equal(ArmorType.Leather, jerkin.ArmorType);
+        Assert.Equal(2, jerkin.DefenseBonus);
+        Assert.Equal(EquipmentSlotMask.LeftHand, shield.EquipmentSlots);
+        Assert.Equal(2, shield.DefenseBonus);
+        Assert.Equal(EquipmentSlotMask.Head, helmet.EquipmentSlots);
+
+        var unarmoured = sheets.For(world.PlayerId);
+        Assert.Equal(ArmorType.None, unarmoured.Armor);
+        Assert.Equal(0, unarmoured.ShieldModifier);
+
+        Assert.True(world.EquipFromBackpack(jerkin.Id).Succeeded);
+        var armoured = sheets.For(world.PlayerId);
+        Assert.Equal(ArmorType.Leather, armoured.Armor);
+        Assert.Equal(unarmoured.DefenseModifier + 2, armoured.DefenseModifier);
+
+        Assert.True(world.EquipFromBackpack(shield.Id).Succeeded);
+        Assert.True(world.EquipFromBackpack(helmet.Id).Succeeded);
+        var fullyEquipped = sheets.For(world.PlayerId);
+        Assert.Equal(2, fullyEquipped.ShieldModifier);
+        Assert.Equal(armoured.DefenseModifier + 2, fullyEquipped.DefenseModifier);
+        Assert.Equal(helmet.Id, world.EquippedIn(EquipmentSlot.Head)?.Id);
+    }
+
+    [Fact]
+    public void BrokenDefensiveGearSuppliesNoArmourOrDefence()
+    {
+        var store = new ObjectStore();
+        using var map = new WorldMap(store, 0, width: 8, depth: 8);
+        var actor = store.Create(Actor("Guard", strength: 14, dexterity: 16));
+        var armour = store.Create(
+            Weapon("Chain Hauberk", actor, finesse: false) with
+            {
+                Location = ObjectLocation.Equipped(actor, EquipmentSlot.Body),
+                EquipmentSlots = EquipmentSlotMask.Body,
+                ArmorType = ArmorType.Chain,
+                DefenseBonus = 4,
+                Flags = ObjectFlags.Item | ObjectFlags.Movable,
+            });
+        var shield = store.Create(
+            Weapon("Buckler", actor, finesse: false) with
+            {
+                Location = ObjectLocation.Equipped(actor, EquipmentSlot.LeftHand),
+                EquipmentSlots = EquipmentSlotMask.LeftHand,
+                DefenseBonus = 2,
+                Flags = ObjectFlags.Item | ObjectFlags.Movable,
+            });
+        var sheets = new ActorSheets(
+            store,
+            RulesRepository.ClassProgression,
+            RulesRepository.AbilityBonuses);
+
+        Assert.Equal(ArmorType.Chain, sheets.For(actor).Armor);
+        Assert.Equal(7, sheets.For(actor).DefenseModifier);
+
+        store.BreakItem(armour);
+        var brokenArmour = sheets.For(actor);
+        Assert.Equal(ArmorType.None, brokenArmour.Armor);
+        Assert.Equal(5, brokenArmour.DefenseModifier);
+
+        store.BreakItem(shield);
+        var brokenShield = sheets.For(actor);
+        Assert.Equal(0, brokenShield.ShieldModifier);
+        Assert.Equal(3, brokenShield.DefenseModifier);
+    }
+
+    [Fact]
+    public void BreakingAnEquippedShieldEnablesNoShieldTrauma()
+    {
+        using var world = PlayableSliceWorld.CreateDemo(
+            attackResolver: new NoShieldTraumaResolver());
+        var shield = world.BackpackItems.Single(
+            item => item.TypeId == "item.wooden-shield");
+        Assert.True(world.EquipFromBackpack(shield.Id).Succeeded);
+        var rat = world.Monsters.Single(
+            monster => monster.TypeId == CombatProfileCatalog.CaveRatTypeId);
+        var adjacent = rat.Location.Position with
+        {
+            X = rat.Location.Position.X - PlayableSliceWorld.WorldUnitsPerTile,
+        };
+        var moved = world.Transfers.Execute(new ObjectTransferRequest(
+            world.PlayerId,
+            world.Player.Location,
+            ObjectLocation.OnMap(rat.Location.MapId, adjacent)));
+        Assert.True(moved.Succeeded, moved.Message);
+
+        var protectedOutcome = world.Attacks.ResolveMelee(rat.Id, world.PlayerId);
+        Assert.Empty(protectedOutcome.ApplicableTraumaEffects);
+
+        world.Objects.BreakItem(shield.Id);
+        var exposedOutcome = world.Attacks.ResolveMelee(rat.Id, world.PlayerId);
+        Assert.Contains(
+            exposedOutcome.ApplicableTraumaEffects,
+            effect => effect.AppliesWhen == TraumaEffectCondition.NoShield);
+    }
+
+    [Fact]
     public void AnUnlevelledCreatureHasNoClassProgression()
     {
         var store = new ObjectStore();
@@ -177,28 +285,43 @@ public sealed class ActorSheetTests
     }
 
     [Fact]
-    public void TheDemoAvatarHasARealSheet()
+    public void EquippingDifferentWeaponsChangesTheLiveProfileAndAbility()
     {
-        using var world = PlayableSliceWorld.CreateDemo();
+        var store = new ObjectStore();
+        using var map = new WorldMap(store, 0, width: 8, depth: 8);
+        var actor = store.Create(Actor("Rogue", strength: 10, dexterity: 18));
+        var sword = store.Create(Weapon("Rusty Sword", actor, finesse: false));
+        var dagger = store.Create(new ObjectSpawn
+        {
+            TypeId = CombatProfileCatalog.BronzeDaggerTypeId,
+            Name = "Bronze Dagger",
+            ShapeId = "loot.shortsword",
+            Location = ObjectLocation.InContainer(actor),
+            Flags =
+                ObjectFlags.Item |
+                ObjectFlags.Movable |
+                ObjectFlags.Weapon |
+                ObjectFlags.Finesse,
+            EquipmentSlots = EquipmentSlotMask.EitherHand,
+            Quality = -1,
+        });
+        var sheets = new ActorSheets(
+            store,
+            RulesRepository.ClassProgression,
+            RulesRepository.AbilityBonuses);
 
-        var sheet = world.PlayerSheet;
+        var slashing = sheets.For(actor);
+        Assert.Equal(sword, slashing.Weapon);
+        Assert.Equal(CombatProfileCatalog.RustySword, slashing.AttackProfile);
+        Assert.Equal(Ability.Strength, slashing.GoverningAbility);
 
-        Assert.Equal(CharacterClass.Fighter, sheet.Class);
-        Assert.Equal(1, sheet.Level);
-        Assert.Equal(1, sheet.ClassAttackModifier);
-        Assert.Equal(12, sheet.Abilities.Strength);
-        Assert.Equal(2, sheet.AttackModifier);
-        Assert.True(sheet.IsUnarmed);
+        store.Move(sword, ObjectLocation.InContainer(actor));
+        store.Move(dagger, ObjectLocation.Equipped(actor, EquipmentSlot.RightHand));
 
-        // Wearing the sword changes the sheet, because the sheet is a reading
-        // of the world rather than a copy of it.
-        Assert.True(world.ToggleRightHand().Succeeded);
-        var armed = world.PlayerSheet;
-        Assert.False(armed.IsUnarmed);
-        Assert.Equal("Rusty Sword", world.Objects.Get(armed.Weapon).Name);
-        Assert.Equal(CombatProfileCatalog.RustySword, armed.AttackProfile);
-        Assert.Equal(-1, armed.WeaponQualityModifier);
-        Assert.Equal(1, armed.AttackModifier);
+        var puncturing = sheets.For(actor);
+        Assert.Equal(dagger, puncturing.Weapon);
+        Assert.Equal(CombatProfileCatalog.BronzeDagger, puncturing.AttackProfile);
+        Assert.Equal(Ability.Dexterity, puncturing.GoverningAbility);
     }
 
     [Fact]
@@ -242,7 +365,7 @@ public sealed class ActorSheetTests
     }
 
     [Fact]
-    public void CaveRatUsesASmallPunctureBiteAndOthersFallBackToUnarmed()
+    public void EveryDemoMonsterHasAValidatedNaturalOrEquippedAttack()
     {
         using var world = PlayableSliceWorld.CreateDemo();
         var rat = world.Monsters.Single(
@@ -251,10 +374,13 @@ public sealed class ActorSheetTests
             monster => monster.TypeId == "monster.goblin-guard");
         var goblinScout = world.Monsters.Single(
             monster => monster.TypeId == "monster.goblin-scout");
+        var tyrant = world.Monsters.Single(
+            monster => monster.TypeId == "monster.many-eyed-tyrant");
 
         var bite = world.Sheets.For(rat.Id).AttackProfile;
         var unarmed = world.Sheets.For(goblinGuard.Id).AttackProfile;
         var goblin = world.Sheets.For(goblinScout.Id);
+        var tyrantAttack = world.Sheets.For(tyrant.Id).AttackProfile;
 
         Assert.Equal(CombatProfileCatalog.CaveRatBite, bite);
         Assert.Equal(AttackCategoryId.ToothAndClaw, bite!.Category);
@@ -263,8 +389,28 @@ public sealed class ActorSheetTests
         Assert.Equal(CriticalTier.B, bite.MaximumCriticalTier);
         Assert.Equal(CombatProfileCatalog.Unarmed, unarmed);
         Assert.Equal(CriticalTier.A, unarmed!.MaximumCriticalTier);
+        Assert.Equal(CombatProfileCatalog.Unarmed, tyrantAttack);
         Assert.Equal(CombatProfileCatalog.GoblinBlade, goblin.AttackProfile);
         Assert.Equal(-1, goblin.WeaponQualityModifier);
+
+        Assert.All(world.Monsters, monster =>
+        {
+            var sheet = world.Sheets.For(monster.Id);
+            var profile = Assert.IsType<AttackProfile>(sheet.AttackProfile);
+            profile.Validate();
+            if (sheet.Weapon.IsNone)
+            {
+                Assert.True(profile.IsNatural);
+            }
+            else
+            {
+                Assert.False(profile.IsNatural);
+                Assert.True(CombatProfileCatalog.Default.TryWeapon(
+                    world.Objects.Get(sheet.Weapon).TypeId,
+                    out var equipped));
+                Assert.Equal(profile, equipped);
+            }
+        });
     }
 
     [Fact]
@@ -376,4 +522,24 @@ public sealed class ActorSheetTests
                 EquipmentSlotMask.Body |
                 EquipmentSlotMask.LeftHand,
         };
+
+    private sealed class NoShieldTraumaResolver : IAttackRulesResolver
+    {
+        public AttackResult Resolve(AttackRequest request) => new()
+        {
+            Hit = true,
+            RawD20 = request.RawD20,
+            NetRoll = request.RawD20,
+            Margin = 1,
+            ConcussionHits = 0,
+            Mishap = false,
+            TraumaEffects =
+            [
+                new TraumaEffect(
+                    TraumaEffectKind.AdditionalHits,
+                    Magnitude: 1,
+                    AppliesWhen: TraumaEffectCondition.NoShield),
+            ],
+        };
+    }
 }

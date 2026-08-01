@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "description": "U8_Ash character creation rules: ability bonuses, ancestries, and the two ways to roll a character.",
+  "ability_bonuses": {
+    "description": "floor((score - 10) / 2), written out so the curve is tunable. Generation never exceeds 18; talents carry a score to 20.",
+    "minimum_score": 3,
+    "maximum_score": 20,
+    "rows": [
+      { "score": 3, "bonus": -4 },
+      { "score": 4, "bonus": -3 },
+      { "score": 5, "bonus": -3 },
+      { "score": 6, "bonus": -2 },
+      { "score": 7, "bonus": -2 },
+      { "score": 8, "bonus": -1 },
+      { "score": 9, "bonus": -1 },
+      { "score": 10, "bonus": 0 },
+      { "score": 11, "bonus": 0 },
+      { "score": 12, "bonus": 1 },
+      { "score": 13, "bonus": 1 },
+      { "score": 14, "bonus": 2 },
+      { "score": 15, "bonus": 2 },
+      { "score": 16, "bonus": 3 },
+      { "score": 17, "bonus": 3 },
+      { "score": 18, "bonus": 4 },
+      { "score": 19, "bonus": 4 },
+      { "score": 20, "bonus": 5 }
+    ]
+  },
+  "ancestries": [
+    {
+      "id": "human",
+      "name": "Human",
+      "talent_rolls": 2,
+      "description": "Humans take two rolls on their class talent table where another ancestry takes one."
+    }
+  ],
+  "ironman": {
+    "description": "3d6 in order. A set is kept only if it is playable; otherwise the whole set is rolled again.",
+    "dice_per_score": 3,
+    "die_sides": 6,
+    "keep_highest": 3,
+    "score_order": [
+      "strength",
+      "dexterity",
+      "constitution",
+      "intelligence",
+      "wisdom",
+      "charisma"
+    ],
+    "playable": {
+      "high_score": 15,
+      "high_scores_required": 2,
+      "low_score": 6,
+      "low_scores_allowed": 1
+    },
+    "maximum_attempts": 1000
+  },
+  "unearthed_arcana": {
+    "description": "Choose the class first; its priority order takes the pools in turn, each keeping its three highest dice.",
+    "die_sides": 6,
+    "keep_highest": 3,
+    "pools": [8, 7, 6, 5, 4, 3],
+    "class_priorities": {
+      "fighter": [
+        "strength",
+        "dexterity",
+        "constitution",
+        "charisma",
+        "wisdom",
+        "intelligence"
+      ],
+      "rogue": [
+        "dexterity",
+        "intelligence",
+        "charisma",
+        "constitution",
+        "strength",
+        "wisdom"
+      ],
+      "cleric": [
+        "wisdom",
+        "charisma",
+        "strength",
+        "intelligence",
+        "constitution",
+        "dexterity"
+      ],
+      "wizard": [
+        "intelligence",
+        "wisdom",
+        "dexterity",
+        "constitution",
+        "charisma",
+        "strength"
+      ]
+    }
+  }
+}

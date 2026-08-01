@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AshLaw Character Sheet - Ironman & Unearthed Arcana</title>
+  
+  <!-- Fonts: Gothic Blackletter, Serif Title, Body, and Handwritten Values -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=Cinzel:wght@600;700;800&family=Inter:wght@400;600;700;800&family=Caveat:wght@600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  
+  <!-- App Stylesheet -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="app-wrapper">
+    
+    <!-- Top Control Bar -->
+    <header class="toolbar-card">
+      <nav class="method-switch" role="tablist">
+        <button class="btn-tab active" id="tab-ironman" data-method="ironman" role="tab" aria-selected="true">
+          ⚔️ Ironman Method
+        </button>
+        <button class="btn-tab" id="tab-unearthed" data-method="unearthed_arcana" role="tab" aria-selected="false">
+          🔮 Unearthed Arcana Method
+        </button>
+      </nav>
+
+      <div class="control-bar">
+        <div class="form-group" style="margin: 0;">
+          <select id="select-class" class="select-box">
+            <option value="auto">⚡ Auto (Highest Stat)</option>
+            <option value="fighter">Fighter (High STR)</option>
+            <option value="rogue">Thief (High DEX)</option>
+            <option value="cleric">Priest (High WIS)</option>
+            <option value="wizard">Wizard (High INT)</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <input type="number" id="input-seed" class="input-box" style="width: 140px;" placeholder="Seed (Optional)" />
+        </div>
+
+        <button id="btn-generate" class="btn-generate">Roll Character</button>
+        <button id="btn-copy-character" class="btn-secondary">📋 Copy Sheet</button>
+      </div>
+    </header>
+
+    <!-- AshLaw Character Sheet -->
+    <main class="sheet-container" id="character-sheet">
+      
+      <!-- Top Row: Logo Title & Identity -->
+      <section class="sheet-header-row">
+        <div class="logo-title">AshLaw</div>
+        
+        <div class="header-fields-grid">
+          <div class="ink-box">
+            <div class="ink-label">NAME</div>
+            <div class="ink-val" id="val-name">Valerius</div>
+          </div>
+
+          <div class="ink-box">
+            <div class="ink-label">ANCESTRY</div>
+            <div class="ink-val" id="val-ancestry">Human</div>
+          </div>
+
+          <div class="ink-box">
+            <div class="ink-label">CLASS</div>
+            <div class="ink-val" id="val-class">Fighter</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Main Sheet Grid -->
+      <div class="sheet-main-grid">
+        
+        <!-- Left Column: Ability Scores + HP/AC + Attacks -->
+        <div class="left-column">
+          
+          <!-- 2-Column Ability Scores Grid (STR|INT, DEX|WIS, CON|CHA) -->
+          <div class="stats-grid-2col">
+            <div class="stat-box">
+              <div class="stat-box-label">STR</div>
+              <div class="stat-box-values">
+                <span id="score-str">15</span>
+                <span class="stat-mod-slash">/</span>
+                <span id="mod-str">+2</span>
+              </div>
+            </div>
+
+            <div class="stat-box">
+              <div class="stat-box-label">INT</div>
+              <div class="stat-box-values">
+                <span id="score-int">15</span>
+                <span class="stat-mod-slash">/</span>
+                <span id="mod-int">+2</span>
+              </div>
+            </div>
+
+            <div class="stat-box">
+              <div class="stat-box-label">DEX</div>
+              <div class="stat-box-values">
+                <span id="score-dex">12</span>
+                <span class="stat-mod-slash">/</span>
+                <span id="mod-dex">+1</span>
+              </div>
+            </div>
+
+            <div class="stat-box">
+              <div class="stat-box-label">WIS</div>
+              <div class="stat-box-values">
+                <span id="score-wis">14</span>
+                <span class="stat-mod-slash">/</span>
+                <span id="mod-wis">+2</span>
+              </div>
+            </div>
+
+            <div class="stat-box">
+              <div class="stat-box-label">CON</div>
+              <div class="stat-box-values">
+                <span id="score-con">12</span>
+                <span class="stat-mod-slash">/</span>
+                <span id="mod-con">+1</span>
+              </div>
+            </div>
+
+            <div class="stat-box">
+              <div class="stat-box-label">CHA</div>
+              <div class="stat-box-values">
+                <span id="score-cha">11</span>
+                <span class="stat-mod-slash">/</span>
+                <span id="mod-cha">+0</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- HP & AC Row -->
+          <div class="hp-ac-row">
+            <div class="combat-box">
+              <div class="ink-box-header">HP</div>
+              <div class="ink-val" id="val-hp">8</div>
+            </div>
+
+            <div class="combat-box">
+              <div class="ink-box-header">AC</div>
+              <div class="ink-val" id="val-ac">13</div>
+            </div>
+          </div>
+
+          <!-- ATTACKS Box -->
+          <div class="attacks-box">
+            <div class="ink-box-header">ATTACKS</div>
+            <div class="attacks-content" id="val-attacks">
+              • Longsword (1d8 + STR mod)<br>
+              • Dagger (1d4 + DEX/STR mod)
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Middle Column: Additional Identity Fields -->
+        <div class="middle-column">
+          
+          <div class="row-2col">
+            <div class="ink-box">
+              <div class="ink-label">LEVEL</div>
+              <div class="ink-val" id="val-level">1</div>
+            </div>
+
+            <div class="ink-box">
+              <div class="ink-label">XP</div>
+              <div class="ink-val" id="val-xp">0 / 10</div>
+            </div>
+          </div>
+
+          <div class="ink-box">
+            <div class="ink-label">TITLE</div>
+            <div class="ink-val" id="val-title">Squire</div>
+          </div>
+
+          <div class="ink-box">
+            <div class="ink-label">ALIGNMENT</div>
+            <div class="ink-val" id="val-alignment">Lawful</div>
+          </div>
+
+          <div class="ink-box">
+            <div class="ink-label">BACKGROUND</div>
+            <div class="ink-val" id="val-background">Soldier</div>
+          </div>
+
+          <div class="ink-box">
+            <div class="ink-label">DEITY</div>
+            <div class="ink-val" id="val-deity">Saint Solor</div>
+          </div>
+
+          <div class="auto-class-badge" id="class-recommend-notice">
+            <span>💡</span> <span id="recommend-text">Ironman auto-assigned Fighter based on highest stat STR (15).</span>
+          </div>
+
+          <div class="ink-box" style="margin-top: auto;">
+            <div class="ink-label">METHOD & SEED</div>
+            <div class="ink-val" style="font-size: 0.95rem; font-family: var(--font-mono);" id="val-method-seed">
+              Ironman (Attempts: 3, Seed: 20260731)
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Right Column: Talents / Spells & Gear -->
+        <div class="right-column">
+          
+          <div class="talents-box">
+            <div class="ink-box-header">TALENTS / SPELLS</div>
+            <div class="talents-content" id="val-talents">
+              <div class="talent-item"><span class="talent-bullet">•</span> <strong>Human Ancestry:</strong> 2 rolls on Class Talent Table</div>
+              <div class="talent-item"><span class="talent-bullet">•</span> <strong>Class Feature:</strong> Weapon Master (+1 hit/dmg with chosen weapon)</div>
+              <div class="talent-item"><span class="talent-bullet">•</span> <strong>Grit:</strong> Advantage on CON checks</div>
+            </div>
+          </div>
+
+          <div class="gear-section">
+            <div class="gear-box">
+              <div class="ink-box-header">
+                <span>GEAR</span>
+                <span class="gear-header-coins">GP: 10 | SP: 5 | CP: 0</span>
+              </div>
+              <div class="gear-list" id="val-gear-list">
+                <div class="gear-slot">1. Chainmail</div>
+                <div class="gear-slot">2. Shield</div>
+                <div class="gear-slot">3. Longsword</div>
+                <div class="gear-slot">4. Torch (3)</div>
+                <div class="gear-slot">5. Rations (3)</div>
+                <div class="gear-slot">6. Flint & Steel</div>
+                <div class="gear-slot">7. Backpack</div>
+                <div class="gear-slot">8. Rope (50ft)</div>
+                <div class="gear-slot">9. --</div>
+                <div class="gear-slot">10. --</div>
+              </div>
+            </div>
+
+            <div class="free-carry-box">
+              <div class="ink-box-header">FREE TO CARRY</div>
+              <div class="attacks-content" style="font-family: var(--font-hand); font-size: 1rem;">
+                • Dagger<br>
+                • Cloak<br>
+                • Pouch
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </main>
+
+  </div>
+
+  <!-- Scripts -->
+  <script src="dice.js"></script>
+  <script src="rules.js"></script>
+  <script src="character-generator.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

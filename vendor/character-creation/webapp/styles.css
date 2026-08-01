@@ -1,0 +1,389 @@
+/* ShadowDark PDF Character Sheet Design System */
+:root {
+  --bg-page: #f2eee5;
+  --bg-paper: #ffffff;
+  --border-ink: #000000;
+  --text-ink: #000000;
+  --text-muted: #555555;
+  --accent-gold: #c89616;
+  
+  --font-gothic: 'UnifrakturMaguntia', 'Cinzel', serif;
+  --font-title: 'Cinzel', serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-hand: 'Caveat', cursive, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  
+  --shadow-ink: 3px 3px 0px #000000;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-page);
+  background-image: radial-gradient(#d6cebe 1px, transparent 1px);
+  background-size: 20px 20px;
+  color: var(--text-ink);
+  font-family: var(--font-body);
+  line-height: 1.4;
+  padding: 1.5rem 1rem;
+  min-height: 100vh;
+}
+
+.app-wrapper {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Control Header & Floating Toolbar */
+.toolbar-card {
+  background: var(--bg-paper);
+  border: 2px solid var(--border-ink);
+  box-shadow: var(--shadow-ink);
+  padding: 1rem 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.method-switch {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.btn-tab {
+  background: #ffffff;
+  border: 2px solid var(--border-ink);
+  color: var(--text-ink);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 0.9rem;
+  padding: 0.5rem 1.25rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-tab.active {
+  background: var(--border-ink);
+  color: #ffffff;
+  box-shadow: 2px 2px 0px var(--accent-gold);
+}
+
+.control-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.select-box, .input-box {
+  border: 2px solid var(--border-ink);
+  padding: 0.4rem 0.75rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  background: #ffffff;
+  font-family: var(--font-body);
+  outline: none;
+}
+
+.btn-generate {
+  background: var(--border-ink);
+  color: #ffffff;
+  border: 2px solid var(--border-ink);
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 1px;
+  padding: 0.5rem 1.5rem;
+  cursor: pointer;
+  box-shadow: var(--shadow-ink);
+  transition: all 0.15s ease;
+}
+
+.btn-generate:hover {
+  background: #222222;
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0px #000000;
+}
+
+.btn-secondary {
+  background: #ffffff;
+  color: var(--text-ink);
+  border: 2px solid var(--border-ink);
+  font-weight: 700;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.85rem;
+  cursor: pointer;
+  box-shadow: 2px 2px 0px #000000;
+}
+
+.btn-secondary:hover {
+  background: #f0f0f0;
+}
+
+/* ==========================================================================
+   ShadowDark Character Sheet PDF Layout Replica
+   ========================================================================== */
+.sheet-container {
+  background: var(--bg-paper);
+  border: 3px solid var(--border-ink);
+  box-shadow: 6px 6px 0px #000000;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  position: relative;
+}
+
+/* Header Row: Title & Top Identity Boxes */
+.sheet-header-row {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.logo-title {
+  font-family: var(--font-gothic);
+  font-size: 3.2rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -1px;
+  color: var(--text-ink);
+}
+
+.header-fields-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 1rem;
+}
+
+/* Inked Box Styling */
+.ink-box {
+  border: 2px solid var(--border-ink);
+  background: #ffffff;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.ink-box-header {
+  background: var(--border-ink);
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 0.25rem 0.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ink-label {
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 0.35rem 0.5rem 0 0.5rem;
+  color: var(--text-ink);
+}
+
+.ink-val {
+  font-family: var(--font-hand);
+  font-size: 1.5rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem 0.35rem 0.5rem;
+  color: #0b1a30;
+  line-height: 1.2;
+}
+
+/* Sheet Main Grid: Left Column, Middle Column, Right Column */
+.sheet-main-grid {
+  display: grid;
+  grid-template-columns: 240px 1.1fr 1.4fr;
+  gap: 1.5rem;
+}
+
+/* Left Column: Ability Scores + HP/AC + Attacks */
+.left-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.stats-grid-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.stat-box {
+  border: 2px solid var(--border-ink);
+  padding: 0.4rem 0.5rem;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 65px;
+}
+
+.stat-box-label {
+  font-weight: 900;
+  font-size: 0.85rem;
+  letter-spacing: 1px;
+}
+
+.stat-box-values {
+  font-family: var(--font-hand);
+  font-size: 1.6rem;
+  font-weight: 700;
+  align-self: flex-end;
+  color: #0b1a30;
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
+.stat-mod-slash {
+  font-size: 1rem;
+  color: #777;
+  font-family: var(--font-body);
+}
+
+/* HP and AC Row */
+.hp-ac-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.combat-box {
+  border: 2px solid var(--border-ink);
+  height: 90px;
+}
+
+.combat-box .ink-val {
+  font-size: 2.2rem;
+  text-align: center;
+  margin-top: 0.25rem;
+}
+
+.attacks-box {
+  border: 2px solid var(--border-ink);
+  min-height: 180px;
+  flex: 1;
+}
+
+.attacks-content {
+  padding: 0.75rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+/* Middle Column: Identity Fields */
+.middle-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.row-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+/* Right Column: Talents/Spells & Gear */
+.right-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.talents-box {
+  border: 2px solid var(--border-ink);
+  min-height: 200px;
+}
+
+.talents-content {
+  padding: 0.75rem 1rem;
+}
+
+.talent-item {
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.talent-bullet {
+  font-weight: 900;
+}
+
+.gear-section {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 0.75rem;
+}
+
+.gear-box {
+  border: 2px solid var(--border-ink);
+}
+
+.gear-header-coins {
+  font-size: 0.7rem;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.gear-list {
+  padding: 0.5rem 0.75rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem 0.75rem;
+  font-size: 0.8rem;
+  font-family: var(--font-hand);
+}
+
+.gear-slot {
+  border-bottom: 1px dashed #ccc;
+  padding-bottom: 2px;
+}
+
+.free-carry-box {
+  border: 2px solid var(--border-ink);
+}
+
+/* Notice Badge */
+.auto-class-badge {
+  background: #fff8e7;
+  border: 1px solid var(--accent-gold);
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  color: #8a6200;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 900px) {
+  .sheet-header-row {
+    grid-template-columns: 1fr;
+  }
+  .sheet-main-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -84,7 +84,9 @@ public sealed class ActorSheets
             : 0;
         var shieldModifier = shield.Id.IsNone ? 0 : shield.DefenseBonus;
         var baseDefense = worn
-            .Where(item => item.Id != shield.Id)
+            .Where(item =>
+                item.Id != shield.Id &&
+                !item.HasFlag(ObjectFlags.Broken))
             .Sum(item => item.DefenseBonus);
 
         return new ActorSheet(

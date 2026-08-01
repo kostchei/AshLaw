@@ -42,6 +42,38 @@ public sealed class AttackActionTests
     }
 
     [Fact]
+    public void PlayerAndAiImpactsUseTheSameInjectedRulesBoundaryOnceEach()
+    {
+        var resolver = new RecordingResolver();
+        using var world = MeleeWorld(resolver, seed: 7);
+        var rat = Rat(world);
+        Assert.True(world.ToggleRightHand().Succeeded);
+
+        var aiImpact = AdvanceUntilSwing(world, rat.Id, maxBeats: 40);
+
+        Assert.Equal(rat.Id, aiImpact.ActorId);
+        Assert.Single(resolver.Requests);
+        Assert.Equal(
+            AttackCategoryId.ToothAndClaw,
+            resolver.Requests[0].AttackCategory);
+        Assert.Equal(
+            AttackActionPhase.Resolved,
+            world.Combat.LastAttackOf(rat.Id)?.Phase);
+
+        Assert.True(world.AttackAdjacentMonster().Succeeded);
+        var playerImpact = AdvanceUntilSwing(world, world.PlayerId, maxBeats: 2);
+
+        Assert.Equal(world.PlayerId, playerImpact.ActorId);
+        Assert.Equal(2, resolver.Requests.Count);
+        Assert.Equal(
+            AttackCategoryId.OneHandedSlashing,
+            resolver.Requests[1].AttackCategory);
+        Assert.Equal(
+            AttackActionPhase.Resolved,
+            world.Combat.LastAttackOf(world.PlayerId)?.Phase);
+    }
+
+    [Fact]
     public void LeavingReachWhiffsAndNeverCallsTheResolver()
     {
         var resolver = new CountingResolver(damage: 1);
@@ -118,9 +150,11 @@ public sealed class AttackActionTests
         Assert.Equal(leftEvents, rightEvents);
     }
 
-    private static PlayableSliceWorld MeleeWorld(IAttackRulesResolver resolver)
+    private static PlayableSliceWorld MeleeWorld(
+        IAttackRulesResolver resolver,
+        ulong seed = 20260731)
     {
-        var world = PlayableSliceWorld.CreateDemo(attackResolver: resolver);
+        var world = PlayableSliceWorld.CreateDemo(seed, resolver);
         var rat = Rat(world);
         var destination = rat.Location.Position with
         {
@@ -150,6 +184,27 @@ public sealed class AttackActionTests
         return events;
     }
 
+    private static CombatEvent AdvanceUntilSwing(
+        PlayableSliceWorld world,
+        ObjectId attackerId,
+        int maxBeats)
+    {
+        for (var beat = 0; beat < maxBeats; beat++)
+        {
+            var impact = AdvanceOneBeat(world)
+                .FirstOrDefault(value =>
+                    value.Kind == CombatEventKind.Swing &&
+                    value.ActorId == attackerId);
+            if (impact.Kind == CombatEventKind.Swing)
+            {
+                return impact;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"No impact from {attackerId} occurred within {maxBeats} beats.");
+    }
+
     private sealed class CountingResolver(int damage) : IAttackRulesResolver
     {
         public int Calls { get; private set; }
@@ -164,6 +219,25 @@ public sealed class AttackActionTests
                 NetRoll = request.RawD20,
                 Margin = 1,
                 ConcussionHits = damage,
+                Mishap = false,
+            };
+        }
+    }
+
+    private sealed class RecordingResolver : IAttackRulesResolver
+    {
+        public List<AttackRequest> Requests { get; } = [];
+
+        public AttackResult Resolve(AttackRequest request)
+        {
+            Requests.Add(request);
+            return new AttackResult
+            {
+                Hit = true,
+                RawD20 = request.RawD20,
+                NetRoll = request.RawD20,
+                Margin = 1,
+                ConcussionHits = 0,
                 Mishap = false,
             };
         }

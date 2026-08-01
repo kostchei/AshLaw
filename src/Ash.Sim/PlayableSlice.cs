@@ -655,6 +655,27 @@ public sealed class PlayableSliceWorld : IDisposable
             EquipmentSlotMask.RightHand,
             ObjectFlags.Weapon,
             quality: -1);
+        SpawnItem(
+            objects,
+            player,
+            "item.leather-jerkin",
+            "Leather Jerkin",
+            equipmentSlots: EquipmentSlotMask.Body,
+            armorType: ArmorType.Leather,
+            defenseBonus: 2);
+        SpawnItem(
+            objects,
+            player,
+            "item.wooden-shield",
+            "Wooden Shield",
+            equipmentSlots: EquipmentSlotMask.LeftHand,
+            defenseBonus: 2);
+        SpawnItem(
+            objects,
+            player,
+            "item.iron-helm",
+            "Iron Helm",
+            equipmentSlots: EquipmentSlotMask.Head);
         SpawnItem(objects, player, "item.apple", "Apple");
         return player;
     }
@@ -1592,7 +1613,9 @@ public sealed class PlayableSliceWorld : IDisposable
         string shapeId = "loot.generic",
         EquipmentSlotMask equipmentSlots = EquipmentSlotMask.None,
         ObjectFlags extraFlags = ObjectFlags.None,
-        int quality = 0)
+        int quality = 0,
+        ArmorType armorType = ArmorType.None,
+        int defenseBonus = 0)
     {
         objects.Create(new ObjectSpawn
         {
@@ -1609,6 +1632,8 @@ public sealed class PlayableSliceWorld : IDisposable
                 ObjectFlags.Visible,
             EquipmentSlots = equipmentSlots,
             Quality = quality,
+            ArmorType = armorType,
+            DefenseBonus = defenseBonus,
         });
     }
 
