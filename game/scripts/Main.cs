@@ -77,6 +77,25 @@ public partial class Main : Node2D
 
     private PlayableSliceWorld _world = null!;
     private ulong _worldSeed = DefaultWorldSeed;
+    private const ulong CharacterCreationSalt = 0xA0761D6478BD642FUL;
+
+    private static readonly CharacterClass[] PlayableCreationClasses =
+    [
+        CharacterClass.Fighter,
+        CharacterClass.Rogue,
+    ];
+
+    private Dice _creationDice = null!;
+    private CreatedCharacter _draftCharacter = null!;
+    private CreatedCharacter _rolledDraftCharacter = null!;
+    private RolledScores? _ironmanScores;
+    private CharacterCreationMethod _creationMethod =
+        CharacterCreationMethod.Ironman;
+    private int _creationClassIndex;
+    private int _creationTalentResolutionIndex = -1;
+    private int _creationTalentChoiceIndex;
+    private int _advancementChoiceIndex;
+    private bool _characterCreationOpen;
 
     /// <summary>
     /// Play the hand-built acceptance map instead of a generated world. It
@@ -212,11 +231,17 @@ public partial class Main : Node2D
         }
 
         ConfigureRuntimeRules();
+        _smoke = ParseSmokeRun(userArguments);
+        ResetCharacterCreation();
         _world = CreateConfiguredWorld();
+        _characterCreationOpen =
+            !_demoWorld &&
+            ((_smoke is null &&
+              !userArguments.Contains("--skip-character-creation", StringComparer.Ordinal)) ||
+             userArguments.Contains("--character-creation-open", StringComparer.Ordinal));
         _debugOverlayVisible = userArguments.Contains(
             "--debug-overlay",
             StringComparer.Ordinal);
-        _smoke = ParseSmokeRun(userArguments);
         _helpVisible = userArguments.Contains(
             "--help-open",
             StringComparer.Ordinal);
@@ -255,7 +280,54 @@ public partial class Main : Node2D
     private PlayableSliceWorld CreateConfiguredWorld() =>
         _demoWorld
             ? PlayableSliceWorld.CreateDemo()
-            : PlayableSliceWorld.CreateGenerated(_worldSeed);
+            : PlayableSliceWorld.CreateGenerated(
+                _worldSeed,
+                CharacterCreation.ResolveTalentsWithFirstLegalChoices(
+                    _draftCharacter));
+
+    private void ResetCharacterCreation()
+    {
+        _creationDice = new Dice(_worldSeed ^ CharacterCreationSalt);
+        _ironmanScores = null;
+        RollCharacterDraft(newScores: true);
+    }
+
+    private void RollCharacterDraft(bool newScores)
+    {
+        var data = RulesRepository.CharacterCreation;
+        var characterClass = PlayableCreationClasses[_creationClassIndex];
+        CreatedCharacter rolled;
+        if (_creationMethod == CharacterCreationMethod.Ironman)
+        {
+            if (newScores || _ironmanScores is null)
+            {
+                _ironmanScores = CharacterCreation.RollIronman(
+                    data,
+                    _creationDice,
+                    Ancestry.Human);
+            }
+            rolled = CharacterCreation.Choose(
+                data,
+                _ironmanScores,
+                characterClass);
+        }
+        else
+        {
+            rolled = CharacterCreation.RollUnearthedArcana(
+                data,
+                _creationDice,
+                characterClass,
+                Ancestry.Human);
+        }
+
+        _draftCharacter = CharacterCreation.RollTalents(
+            data,
+            _creationDice,
+            rolled);
+        _rolledDraftCharacter = _draftCharacter;
+        _creationTalentResolutionIndex = -1;
+        _creationTalentChoiceIndex = 0;
+    }
 
     private static void ConfigureRuntimeRules()
     {
@@ -582,6 +654,13 @@ public partial class Main : Node2D
             $"player_world={position.X},{position.Y},{position.Z}",
             $"player_motion={player.Motion}",
             $"player_support={DescribeSupport(player.Support)}",
+            $"character_creation_open={_characterCreationOpen}",
+            $"character_method={_world.Character.Method}",
+            $"character_class={player.Class}",
+            $"character_level={player.Level}",
+            $"character_talents={_world.Character.Talents.Count}",
+            $"experience={_world.Experience}",
+            $"dungeon_completed={_world.DungeonCompleted}",
             $"map_revision={_world.CurrentMap.Revision}",
             $"map_objects={_world.CurrentMap.IndexedObjectCount}",
             $"draw_items={drawItems.Count}",
@@ -661,6 +740,11 @@ public partial class Main : Node2D
 
     public override void _PhysicsProcess(double _delta)
     {
+        if (_characterCreationOpen || _world.DungeonCompleted)
+        {
+            return;
+        }
+
         // The Godot physics step is the simulation's fixed tick: gravity,
         // support maintenance and landings all advance here, never in _Draw.
         // Combat rides the same tick at a twelfth of the rate — one 200 ms beat
@@ -775,8 +859,20 @@ public partial class Main : Node2D
             Vector2.Zero,
             rotation: 0,
             scale: new Vector2(RenderScale, RenderScale));
+        if (_characterCreationOpen)
+        {
+            DrawCharacterCreation();
+            return;
+        }
+
         DrawWorld();
         DrawHud();
+
+        if (_world.DungeonCompleted)
+        {
+            DrawAdvancement();
+            return;
+        }
 
         if (_world.ActiveChest is not null)
         {
@@ -810,11 +906,10 @@ public partial class Main : Node2D
             ("MOUSE DRAG", "pick up and place"),
             ("RIGHT CLICK", "let go"),
             ("I / B", "carried gear"),
-            ("E", "open, or take the way on"),
+            ("E", "use, inspect, open, or exit"),
             ("F / SPACE", "attack (6s round)"),
             ("Q", "hand the top weapon"),
             ("G / X", "grab / drop"),
-            ("T", "collapse the trestle"),
             ("F5 / F9", "save / load"),
             ("R", "restart"),
             ("F3 / C", "debug / combat math"),
@@ -856,6 +951,16 @@ public partial class Main : Node2D
 
     private bool HandleKey(Key key)
     {
+        if (_characterCreationOpen)
+        {
+            return HandleCharacterCreationKey(key);
+        }
+
+        if (_world.DungeonCompleted)
+        {
+            return HandleAdvancementKey(key);
+        }
+
         switch (key)
         {
             case Key.W:
@@ -914,7 +1019,15 @@ public partial class Main : Node2D
                 _world.ClosePanels();
                 return true;
             case Key.R:
-                Adopt(CreateConfiguredWorld());
+                if (_demoWorld)
+                {
+                    Adopt(CreateConfiguredWorld());
+                }
+                else
+                {
+                    ResetCharacterCreation();
+                    _characterCreationOpen = true;
+                }
                 return true;
             case Key.F5:
                 _world.RequestSave(SavePath);
@@ -931,11 +1044,181 @@ public partial class Main : Node2D
             case Key.C:
                 _combatDetailVisible = !_combatDetailVisible;
                 return true;
-            case Key.T:
-                _world.RemoveTrestleSupport();
+            default:
+                return false;
+        }
+    }
+
+    private bool HandleCharacterCreationKey(Key key)
+    {
+        if (_creationTalentResolutionIndex >= 0 &&
+            _creationTalentResolutionIndex < _draftCharacter.TalentRolls)
+        {
+            return HandleCreationTalentChoiceKey(key);
+        }
+        if (_creationTalentResolutionIndex == _draftCharacter.TalentRolls)
+        {
+            switch (key)
+            {
+                case Key.Enter:
+                    Adopt(PlayableSliceWorld.CreateGenerated(
+                        _worldSeed,
+                        _draftCharacter));
+                    _characterCreationOpen = false;
+                    return true;
+                case Key.Escape:
+                    _draftCharacter = _rolledDraftCharacter;
+                    _creationTalentResolutionIndex = -1;
+                    _creationTalentChoiceIndex = 0;
+                    return true;
+                case Key.R:
+                case Key.Space:
+                    RollCharacterDraft(newScores: true);
+                    return true;
+                case Key.F9:
+                    LoadSavedWorld();
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        switch (key)
+        {
+            case Key.Left:
+            case Key.Right:
+                _creationMethod = _creationMethod == CharacterCreationMethod.Ironman
+                    ? CharacterCreationMethod.UnearthedArcana
+                    : CharacterCreationMethod.Ironman;
+                _ironmanScores = null;
+                RollCharacterDraft(newScores: true);
+                return true;
+            case Key.Up:
+            case Key.Down:
+                _creationClassIndex =
+                    (_creationClassIndex + 1) % PlayableCreationClasses.Length;
+                RollCharacterDraft(
+                    newScores: _creationMethod ==
+                        CharacterCreationMethod.UnearthedArcana);
+                return true;
+            case Key.R:
+            case Key.Space:
+                RollCharacterDraft(newScores: true);
+                return true;
+            case Key.Enter:
+                _creationTalentResolutionIndex = 0;
+                _creationTalentChoiceIndex = 0;
+                return true;
+            case Key.F9:
+                LoadSavedWorld();
                 return true;
             default:
                 return false;
+        }
+    }
+
+    private bool HandleCreationTalentChoiceKey(Key key)
+    {
+        var talent = _draftCharacter.Talents[_creationTalentResolutionIndex];
+        var choices = CharacterCreation.LegalTalentChoices(
+            _draftCharacter.Class,
+            _draftCharacter.Scores,
+            talent);
+        if (choices.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"Rolled talent '{talent.Name}' has no legal full-value choice.");
+        }
+
+        switch (key)
+        {
+            case Key.Up:
+            case Key.Left:
+                _creationTalentChoiceIndex =
+                    (_creationTalentChoiceIndex + choices.Count - 1) % choices.Count;
+                return true;
+            case Key.Down:
+            case Key.Right:
+                _creationTalentChoiceIndex =
+                    (_creationTalentChoiceIndex + 1) % choices.Count;
+                return true;
+            case Key.Enter:
+            case Key.Space:
+                _draftCharacter = CharacterCreation.ResolveTalent(
+                    _draftCharacter,
+                    _creationTalentResolutionIndex,
+                    choices[_creationTalentChoiceIndex]);
+                _creationTalentResolutionIndex++;
+                _creationTalentChoiceIndex = 0;
+                return true;
+            case Key.Escape:
+                _draftCharacter = _rolledDraftCharacter;
+                _creationTalentResolutionIndex = -1;
+                _creationTalentChoiceIndex = 0;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private bool HandleAdvancementKey(Key key)
+    {
+        if (_world.AdvancementChoicePending)
+        {
+            var choices = _world.LegalAdvancementChoices;
+            if (choices.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    "The rolled advancement talent has no legal full-value choice.");
+            }
+            _advancementChoiceIndex = Math.Clamp(
+                _advancementChoiceIndex,
+                0,
+                choices.Count - 1);
+            switch (key)
+            {
+                case Key.Up:
+                case Key.Left:
+                    _advancementChoiceIndex =
+                        (_advancementChoiceIndex + choices.Count - 1) % choices.Count;
+                    return true;
+                case Key.Down:
+                case Key.Right:
+                    _advancementChoiceIndex =
+                        (_advancementChoiceIndex + 1) % choices.Count;
+                    return true;
+                case Key.Enter:
+                case Key.Space:
+                    _world.ResolveAdvancementTalent(
+                        choices[_advancementChoiceIndex]);
+                    _advancementChoiceIndex = 0;
+                    return true;
+                case Key.F5:
+                    _world.RequestSave(SavePath);
+                    return true;
+                case Key.F9:
+                    LoadSavedWorld();
+                    return true;
+                default:
+                    return true;
+            }
+        }
+
+        switch (key)
+        {
+            case Key.F5:
+                _world.RequestSave(SavePath);
+                return true;
+            case Key.F9:
+                LoadSavedWorld();
+                return true;
+            case Key.R:
+            case Key.Enter:
+                ResetCharacterCreation();
+                _characterCreationOpen = true;
+                return true;
+            default:
+                return true;
         }
     }
 
@@ -986,6 +1269,7 @@ public partial class Main : Node2D
         }
 
         Adopt(loaded);
+        _characterCreationOpen = false;
         _world.Report($"Loaded the world at tick {loaded.Physics.Tick}.");
     }
 
@@ -1001,6 +1285,11 @@ public partial class Main : Node2D
     /// </summary>
     private bool HandleLeftButton(Vector2 nativePosition, bool pressed)
     {
+        if (_characterCreationOpen || _world.DungeonCompleted)
+        {
+            return true;
+        }
+
         _cursor = nativePosition / RenderScale;
         if (_world.Drag.IsDragging)
         {
@@ -3122,6 +3411,241 @@ public partial class Main : Node2D
                 6,
                 index < 4 ? Text : MutedText);
         }
+    }
+
+    private void DrawCharacterCreation()
+    {
+        if (_creationTalentResolutionIndex >= 0 &&
+            _creationTalentResolutionIndex < _draftCharacter.TalentRolls)
+        {
+            DrawCreationTalentChoice();
+            return;
+        }
+
+        DrawRect(new Rect2(0, 0, 320, 200), Void);
+        DrawRect(new Rect2(12, 10, 296, 180), Panel);
+        DrawRect(new Rect2(15, 13, 290, 174), PanelInset);
+        DrawRect(new Rect2(12, 10, 296, 180), PanelEdge, filled: false, width: 1);
+        DrawText(new Vector2(24, 29), "CREATE A HUMAN ADVENTURER", 11, Highlight);
+        DrawText(new Vector2(24, 43), "HUMAN  •  TWO ROLLED TALENTS", 7, MutedText);
+
+        var method = _draftCharacter.Method == CharacterCreationMethod.Ironman
+            ? "IRONMAN — 3D6 IN ORDER"
+            : "UNEARTHED ARCANA — CLASS POOLS";
+        DrawText(new Vector2(24, 59), $"METHOD  {method}", 7, Text);
+        DrawText(
+            new Vector2(24, 70),
+            $"CLASS   {_draftCharacter.Class.ToString().ToUpperInvariant()}",
+            8,
+            Text);
+
+        var scores = _draftCharacter.Scores;
+        var abilityLines = new[]
+        {
+            $"STR {scores.Strength,2}    INT {scores.Intelligence,2}",
+            $"DEX {scores.Dexterity,2}    WIS {scores.Wisdom,2}",
+            $"CON {scores.Constitution,2}    CHA {scores.Charisma,2}",
+        };
+        for (var index = 0; index < abilityLines.Length; index++)
+        {
+            DrawText(new Vector2(24, 86 + (index * 11)), abilityLines[index], 8, Text);
+        }
+
+        var body = PlayableSliceWorld.RollStartingBody(
+            _worldSeed,
+            _draftCharacter);
+        DrawText(
+            new Vector2(24, 123),
+            $"START  HP {body.MaximumConcussion}  WOUNDS {body.MaximumWounds}",
+            7,
+            Text);
+        DrawText(
+            new Vector2(24, 135),
+            "GEAR   " + Shorten(
+                string.Join(", ", PlayableSliceWorld.StartingEquipmentFor(
+                    _draftCharacter.Class)),
+                38),
+            6,
+            MutedText);
+
+        DrawText(new Vector2(142, 82), "ROLLED TALENTS", 8, Highlight);
+        for (var index = 0; index < _draftCharacter.Talents.Count; index++)
+        {
+            var talent = _draftCharacter.Talents[index];
+            DrawText(
+                new Vector2(142, 95 + (index * 25)),
+                $"{index + 1}. 2D6={talent.Roll} {Shorten(talent.Name, 24)}",
+                7,
+                Text);
+            DrawText(
+                new Vector2(151, 105 + (index * 25)),
+                Shorten(talent.Choice?.Description ?? talent.Description, 31),
+                6,
+                talent.Choice is null ? MutedText : Highlight);
+        }
+
+        if (_draftCharacter.Method == CharacterCreationMethod.Ironman)
+        {
+            DrawText(
+                new Vector2(24, 146),
+                $"IRONMAN SET: {_draftCharacter.Attempts} ATTEMPT(S)",
+                6,
+                MutedText);
+        }
+        DrawText(new Vector2(24, 157), "←/→ METHOD    ↑/↓ CLASS", 7, MutedText);
+        if (_draftCharacter.TalentsResolved)
+        {
+            DrawRect(new Rect2(20, 151, 280, 25), PanelInset);
+            DrawText(new Vector2(24, 157), "ESC CHANGE BUILD", 7, MutedText);
+            DrawText(new Vector2(24, 169), "ENTER BEGIN    R REROLL", 7, Highlight);
+        }
+        else
+        {
+            DrawText(new Vector2(24, 169), "ENTER RESOLVE TALENTS", 7, Highlight);
+        }
+        DrawText(new Vector2(24, 181), "F9 LOAD SAVED DUNGEON", 6, MutedText);
+    }
+
+    private void DrawCreationTalentChoice()
+    {
+        DrawRect(new Rect2(0, 0, 320, 200), Void);
+        DrawRect(new Rect2(12, 10, 296, 180), Panel);
+        DrawRect(new Rect2(15, 13, 290, 174), PanelInset);
+        DrawRect(new Rect2(12, 10, 296, 180), PanelEdge, filled: false, width: 1);
+
+        var talent = _draftCharacter.Talents[_creationTalentResolutionIndex];
+        var choices = CharacterCreation.LegalTalentChoices(
+            _draftCharacter.Class,
+            _draftCharacter.Scores,
+            talent);
+        _creationTalentChoiceIndex = Math.Clamp(
+            _creationTalentChoiceIndex,
+            0,
+            choices.Count - 1);
+        DrawText(
+            new Vector2(24, 30),
+            $"RESOLVE TALENT {_creationTalentResolutionIndex + 1}/{_draftCharacter.TalentRolls}",
+            11,
+            Highlight);
+        DrawText(
+            new Vector2(24, 47),
+            $"2D6={talent.Roll}  {Shorten(talent.Name, 31)}",
+            8,
+            Text);
+        DrawText(new Vector2(24, 60), "THE ROLL IS FIXED. CHOOSE ITS BENEFIT.", 6, MutedText);
+
+        var scores = _draftCharacter.Scores;
+        DrawText(
+            new Vector2(24, 76),
+            $"STR {scores.Strength,2} DEX {scores.Dexterity,2} CON {scores.Constitution,2}",
+            7,
+            Text);
+        DrawText(
+            new Vector2(24, 87),
+            $"INT {scores.Intelligence,2} WIS {scores.Wisdom,2} CHA {scores.Charisma,2}",
+            7,
+            Text);
+        DrawText(new Vector2(24, 101), "LEGAL CHOICES (ABILITY CAP 20)", 7, Highlight);
+
+        const int visible = 5;
+        var first = Math.Clamp(
+            _creationTalentChoiceIndex - (visible / 2),
+            0,
+            Math.Max(0, choices.Count - visible));
+        for (var row = 0; row < Math.Min(visible, choices.Count); row++)
+        {
+            var index = first + row;
+            DrawText(
+                new Vector2(30, 116 + (row * 11)),
+                $"{(index == _creationTalentChoiceIndex ? ">" : " ")} {Shorten(choices[index].Description, 39)}",
+                7,
+                index == _creationTalentChoiceIndex ? Highlight : Text);
+        }
+
+        DrawText(new Vector2(24, 176), "ARROWS CHOOSE  ENTER CONFIRM  ESC BACK", 6, MutedText);
+    }
+
+    private void DrawAdvancement()
+    {
+        DrawRect(new Rect2(18, 18, 204, 164), new Color("17110df4"));
+        DrawRect(new Rect2(21, 21, 198, 158), PanelInset);
+        DrawRect(new Rect2(18, 18, 204, 164), PanelEdge, filled: false, width: 1);
+        DrawText(new Vector2(31, 39), "DUNGEON COMPLETE", 12, Highlight);
+        DrawText(
+            new Vector2(31, 58),
+            _world.AdvancementChoicePending
+                ? $"{_world.Character.Class.ToString().ToUpperInvariant()}  LEVEL 1 -> 2"
+                : $"{_world.Character.Class.ToString().ToUpperInvariant()}  LEVEL {_world.Player.Level}",
+            9,
+            Text);
+        DrawText(
+            new Vector2(31, 73),
+            $"EXPERIENCE  {_world.Experience}",
+            8,
+            Text);
+        if (_world.AdvancementChoicePending &&
+            _world.AdvancementTalent is { } pending)
+        {
+            DrawText(
+                new Vector2(31, 88),
+                $"ROLLED 2D6={pending.Roll} {Shorten(pending.Name, 22)}",
+                6,
+                Highlight);
+            var choices = _world.LegalAdvancementChoices;
+            _advancementChoiceIndex = Math.Clamp(
+                _advancementChoiceIndex,
+                0,
+                choices.Count - 1);
+            const int visibleChoices = 4;
+            var first = Math.Clamp(
+                _advancementChoiceIndex - 1,
+                0,
+                Math.Max(0, choices.Count - visibleChoices));
+            for (var row = 0; row < Math.Min(visibleChoices, choices.Count); row++)
+            {
+                var index = first + row;
+                DrawText(
+                    new Vector2(31, 102 + (row * 11)),
+                    $"{(index == _advancementChoiceIndex ? ">" : " ")} {Shorten(choices[index].Description, 30)}",
+                    6,
+                    index == _advancementChoiceIndex ? Highlight : Text);
+            }
+            DrawText(new Vector2(31, 153), "ARROWS CHOOSE  ENTER CONFIRM", 6, MutedText);
+            DrawText(new Vector2(31, 166), "F5 SAVE PENDING CHOICE", 6, MutedText);
+            return;
+        }
+        if (_world.LastLevelAdvance is { } advance)
+        {
+            DrawText(
+                new Vector2(31, 89),
+                $"HIT DIE  {advance.HitDie.Roll}+{advance.HitDie.ConstitutionBonus} = +{advance.HitDie.Hits} HP",
+                7,
+                MutedText);
+        }
+        if (_world.AdvancementTalent is { } advancementTalent)
+        {
+            DrawText(
+                new Vector2(31, 100),
+                $"NEW TALENT {Shorten(advancementTalent.Choice?.Description ?? advancementTalent.Name, 25)}",
+                6,
+                Highlight);
+        }
+        DrawText(
+            new Vector2(31, 113),
+            $"HP {_world.Player.Health}/{_world.Player.MaxHealth}   WOUNDS {_world.Player.Wounds}/{_world.Player.MaxWounds}",
+            7,
+            Text);
+        DrawText(new Vector2(31, 130), "STARTING TALENTS", 7, Highlight);
+        for (var index = 0; index < _world.Character.Talents.Count; index++)
+        {
+            var talent = _world.Character.Talents[index];
+            DrawText(
+                new Vector2(31, 142 + (index * 10)),
+                $"2D6={talent.Roll} {Shorten(talent.Name, 25)}",
+                6,
+                MutedText);
+        }
+        DrawText(new Vector2(31, 171), "F5 SAVE    ENTER/R NEW CHARACTER", 6, Highlight);
     }
 
     /// <summary>

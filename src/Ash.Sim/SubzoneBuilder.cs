@@ -249,7 +249,13 @@ public static class SubzoneBuilder
         return beat.Kind switch
         {
             BeatKind.Encounter =>
-                [SpawnMonster(objects, map, plan, beat, centre)],
+                [SpawnMonster(
+                    objects,
+                    map,
+                    plan,
+                    beat,
+                    plan.EncounterMonsterTypeId,
+                    centre)],
 
             // An atmospheric beat is empty of threat, not empty of the world:
             // it carries the theme's prop and nothing that can hurt anyone.
@@ -376,7 +382,29 @@ public static class SubzoneBuilder
             SlotGroup = GearSlots.CoinGroup,
         });
 
-        return [chest, gold];
+        var relic = objects.Create(new ObjectSpawn
+        {
+            TypeId = "item.ash-crown-shard",
+            Name = "Ash Crown Shard",
+            ShapeId = "loot.generic",
+            Location = ObjectLocation.InContainer(chest),
+            Footprint = new ObjectFootprint(32, 32),
+            Height = 8,
+            Flags = ObjectFlags.Item | ObjectFlags.Movable | ObjectFlags.Visible,
+        });
+
+        // This is a second threatened space in five paced beats: forty percent
+        // of the subzone contains a static monster, without creating room or
+        // encounter-completion state. Either creature may be evaded or lured.
+        var guardian = SpawnMonster(
+            objects,
+            map,
+            plan,
+            beat,
+            plan.GuardianMonsterTypeId,
+            (centre.X - 2, centre.Y));
+
+        return [chest, gold, relic, guardian];
     }
 
     private static ObjectId SpawnMonster(
@@ -384,19 +412,23 @@ public static class SubzoneBuilder
         WorldMap map,
         SubzonePlan plan,
         BeatPlan beat,
+        string typeId,
         (int X, int Y) centre)
     {
         var rank = plan.MonsterRank;
 
         // The archetype is the rank's, and its numbers scale with the rank
         // inside that: a tyrant met early is still a tyrant.
-        var (typeId, name) = rank >= 6
-            ? ("monster.many-eyed-tyrant", "Many-Eyed Tyrant")
-            : rank >= 3
-                ? ("monster.goblin-guard", "Goblin Guard")
-                : ("monster.cave-rat", "Cave Rat");
+        var authored = MonsterCatalog.TryGet(typeId, out var profile);
+        var name = authored
+            ? profile.Name
+            : typeId == "monster.many-eyed-tyrant"
+                ? "Many-Eyed Tyrant"
+                : typeId == "monster.goblin-guard"
+                    ? "Goblin Guard"
+                    : "Cave Rat";
         var body = CombatBalance.GeneratedMonsterBody(typeId, rank);
-        return Spawn(
+        var monster = Spawn(
             objects,
             map,
             plan,
@@ -404,7 +436,8 @@ public static class SubzoneBuilder
             {
                 TypeId = typeId,
                 Name = name,
-                ShapeId = typeId == "monster.many-eyed-tyrant"
+                ShapeId = typeId == "monster.many-eyed-tyrant" ||
+                    authored && profile.Locomotion == MonsterLocomotion.Fly
                     ? "monster.many-eyed"
                     : "monster.goblin",
                 Location = Anchor(plan, centre.X, centre.Y, beat.FloorZ),
@@ -416,12 +449,12 @@ public static class SubzoneBuilder
                     ObjectFlags.Container |
                     ObjectFlags.Solid |
                     ObjectFlags.Visible,
-                Strength = 8 + rank,
-                Dexterity = 9 + rank,
-                Constitution = 8 + rank,
-                Intelligence = 8,
-                Wisdom = 8,
-                Charisma = 6,
+                Strength = authored ? profile.Abilities.Strength : 8 + rank,
+                Dexterity = authored ? profile.Abilities.Dexterity : 9 + rank,
+                Constitution = authored ? profile.Abilities.Constitution : 8 + rank,
+                Intelligence = authored ? profile.Abilities.Intelligence : 8,
+                Wisdom = authored ? profile.Abilities.Wisdom : 8,
+                Charisma = authored ? profile.Abilities.Charisma : 6,
                 Class = CharacterClass.Fighter,
                 Level = rank,
                 Health = body.MaximumConcussion,
@@ -429,6 +462,29 @@ public static class SubzoneBuilder
                 Wounds = body.MaximumWounds,
                 MaxWounds = body.MaximumWounds,
             });
+
+        var (lootTypeId, lootName) = authored
+            ? (profile.LootTypeId, profile.LootName)
+            : typeId switch
+            {
+                "monster.cave-rat" => ("item.rat-tail", "Rat Tail"),
+                "monster.goblin-guard" => ("item.copper-token", "Copper Token"),
+                _ => ("item.glass-eye", "Glass Eye"),
+            };
+        objects.Create(new ObjectSpawn
+        {
+            TypeId = lootTypeId,
+            Name = lootName,
+            ShapeId = "loot.generic",
+            Location = ObjectLocation.InContainer(monster),
+            Footprint = new ObjectFootprint(32, 32),
+            Height = 8,
+            Flags =
+                ObjectFlags.Item |
+                ObjectFlags.Movable |
+                ObjectFlags.Visible,
+        });
+        return monster;
     }
 
     private static ObjectId SpawnProp(

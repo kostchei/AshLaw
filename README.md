@@ -23,29 +23,57 @@ Godot editor installed. You only need the editor to run the game.
 
 ## Playable interaction slice
 
-The main scene now boots directly into a small playable room:
+The main scene now boots into Human character creation:
+
+- choose **Ironman** or **Unearthed Arcana** with Left/Right;
+- choose a currently playable **Fighter** or **Rogue** with Up/Down;
+- press **Space** or **R** to roll a new character;
+- every Human receives two rolled 2d6 class talents — there is no talent picker;
+- review scores, starting vitality and equipment, then press **Enter** to begin.
+
+The confirmed character enters one generated subzone paced as five dungeon
+beats. Those beats are a generation and balance yardstick, not tracked room
+objectives:
 
 - move the visible character with **WASD** or the arrow keys;
 - press **B** or **I** to open the character's backpack;
 - press **Q** to equip or unequip the first valid main-hand item;
 - press **X** to drop the first backpack item and **G** to pick it up;
-- stand next to a chest and press **E** to open it;
+- press **E** beside scenery to inspect or use it, beside a chest to open it,
+  or beside the final way out to leave;
 - click items to transfer them between an open chest and the backpack;
 - stand next to a monster and press **F** or **Space** to attack;
 - encountered monsters roll an activity and Charisma-adjusted reaction;
 - hostile monsters pursue through the same collision and spatial system as the
-  player;
-- dead monsters leave lootable remains;
+  player, search their last sighting, then return to their territory;
+- monsters draw from a ten-entry level-one catalogue with authored HP, armour,
+  attack, movement, special ability and weakness hooks;
+- pack hunters alert nearby packmates; scent and echo hunters sustain a longer
+  pursuit;
+- dead monsters leave their carried loot on lootable remains;
 - press **F3** to show exact footprints, sprite origins, and painter sort order;
-- press **R** to reset the demo.
+- press **R** to return to character creation.
 
-The room now mixes procedural terrain with the first runtime **Shape Pack v1**:
+The final exit is the vertical-slice victory boundary. It requires the
+vault-box reward but never requires a monster kill. Recovering its legendary
+relic awards the 10 XP required for level two and rolls another 2d6 class
+talent. The player chooses
+the legal benefit within that fixed row, after which the game rolls the class's
+next hit die and advances the Avatar to level 2. Character origin, rolled rows,
+resolved choices, XP, completion, and territorial monster state survive
+save/load in save format 12.
+
+The complete level-one pool and its adaptation rules are in
+[Level-one monster catalogue](docs/level-one-monsters.md).
+
+The subzone mixes procedural terrain with the first runtime **Shape Pack v1**:
 a directional Flare knight, animated goblin, shortsword inventory icon, and
 open/closed chest. The pack is deliberately desaturated and its attribution is
 shipped beside it. The authoritative interaction state still lives in
 `Ash.Sim.PlayableSliceWorld`, not in Godot nodes.
 
-The playable map is 41×29 tiles and extends well beyond the visible world panel.
+The generated map is 65 tiles wide and 21–29 tiles deep, extending well beyond
+the visible world panel. The optional hand-built `--demo` map remains 41×29.
 An integer, fixed-physics-tick camera follows the character while keeping the HUD
 stationary and the nearest-filtered world on its pixel grid.
 

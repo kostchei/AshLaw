@@ -65,12 +65,17 @@ public sealed class ActorSheets
         }
 
         var abilities = actor.Abilities;
+        var hasMonsterProfile = MonsterCatalog.TryGet(
+            actor.TypeId,
+            out var monsterProfile);
         var worn = Worn(actorId);
         var weapon = Weapon(worn);
         var shield = Shield(worn, weapon);
         var finesse = !weapon.Id.IsNone && weapon.HasFlag(ObjectFlags.Finesse);
         var attackProfile = weapon.Id.IsNone
-            ? _profiles.NaturalFor(actor.TypeId)
+            ? hasMonsterProfile
+                ? monsterProfile.Attack
+                : _profiles.NaturalFor(actor.TypeId)
             : _profiles.TryWeapon(weapon.TypeId, out var equippedProfile)
                 ? equippedProfile
                 : null;
@@ -79,7 +84,7 @@ public sealed class ActorSheets
 
         // An unlevelled creature has no class progression: what it brings is
         // its body and its gear.
-        var classAttack = actor.Level > 0
+        var classAttack = actor.Level > 0 && !hasMonsterProfile
             ? _progression.GetAttackModifier(actor.Class, actor.Level)
             : 0;
         var shieldModifier = shield.Id.IsNone ? 0 : shield.DefenseBonus;
@@ -89,32 +94,42 @@ public sealed class ActorSheets
                 !item.HasFlag(ObjectFlags.Broken))
             .Sum(item => item.DefenseBonus);
 
+        var armor = hasMonsterProfile
+            ? monsterProfile.Armor
+            : ArmorWorn(worn);
+        var defense = hasMonsterProfile
+            ? monsterProfile.DefenseBonus
+            : DefenseDerivation.DefenseModifier(
+                armor,
+                baseDefense,
+                _bonuses.BonusOf(abilities, Ability.Dexterity),
+                _bonuses.BonusOf(abilities, Ability.Strength),
+                shieldModifier);
+        var attack = hasMonsterProfile
+            ? monsterProfile.AttackBonus
+            : AttackDerivation.AttackModifier(
+                classAttack,
+                AttackDerivation.WeaponAbilityBonus(
+                    _bonuses,
+                    abilities,
+                    finesse),
+                checked(weaponAttackModifier + weaponQualityModifier));
+
         return new ActorSheet(
             actorId,
             abilities,
             actor.Class,
             actor.Level,
             classAttack,
-            AttackDerivation.AttackModifier(
-                classAttack,
-                AttackDerivation.WeaponAbilityBonus(
-                    _bonuses,
-                    abilities,
-                    finesse),
-                checked(weaponAttackModifier + weaponQualityModifier)),
+            attack,
             weaponAttackModifier,
             weaponQualityModifier,
             AttackDerivation.GoverningAbility(_bonuses, abilities, finesse),
             weapon.Id,
             attackProfile,
             finesse,
-            ArmorWorn(worn),
-            DefenseDerivation.DefenseModifier(
-                ArmorWorn(worn),
-                baseDefense,
-                _bonuses.BonusOf(abilities, Ability.Dexterity),
-                _bonuses.BonusOf(abilities, Ability.Strength),
-                shieldModifier),
+            armor,
+            defense,
             shieldModifier);
     }
 

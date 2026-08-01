@@ -1192,6 +1192,66 @@ public sealed class ObjectStore
     }
 
     /// <summary>
+    /// Commits a character's six permanent ability scores as one update.
+    /// Talent resolution uses this before deriving the next level's body.
+    /// </summary>
+    public void SetActorAbilities(ObjectId id, AbilityScores abilities)
+    {
+        ArgumentNullException.ThrowIfNull(abilities);
+        var index = ResolveSlot(id);
+        RequireFlag(index, ObjectFlags.Actor);
+        _strengths[index] = abilities.Strength;
+        _dexterities[index] = abilities.Dexterity;
+        _constitutions[index] = abilities.Constitution;
+        _intelligences[index] = abilities.Intelligence;
+        _wisdoms[index] = abilities.Wisdom;
+        _charismas[index] = abilities.Charisma;
+        AssertInvariants();
+        Publish(ObjectStoreChangeKind.Updated, id);
+    }
+
+    /// <summary>
+    /// Advances one living actor to the next level and expands both vitality
+    /// layers atomically. Existing damage is retained: the new hit die and new
+    /// wound capacity are added as filled points, but nothing else is healed.
+    /// </summary>
+    public void AdvanceActorLevel(
+        ObjectId id,
+        int newLevel,
+        int addedConcussion,
+        int newMaximumWounds)
+    {
+        var index = ResolveSlot(id);
+        RequireFlag(index, ObjectFlags.Actor);
+        if (_vitality[index] == VitalityState.Dead)
+        {
+            throw new InvalidOperationException("A dead actor cannot advance.");
+        }
+        if (newLevel != _levels[index] + 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(newLevel),
+                newLevel,
+                "Advancement must add exactly one level.");
+        }
+        if (addedConcussion < 1 || newMaximumWounds < _maxWounds[index])
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(addedConcussion),
+                "Advancement cannot reduce either vitality layer.");
+        }
+
+        _levels[index] = newLevel;
+        _maxHealth[index] = checked(_maxHealth[index] + addedConcussion);
+        _health[index] = checked(_health[index] + addedConcussion);
+        var addedWounds = newMaximumWounds - _maxWounds[index];
+        _maxWounds[index] = newMaximumWounds;
+        _wounds[index] = checked(_wounds[index] + addedWounds);
+        AssertInvariants();
+        Publish(ObjectStoreChangeKind.Updated, id);
+    }
+
+    /// <summary>
     /// Validates then applies the complete current combat mutation under one
     /// commit boundary and publishes only after the store is coherent.
     /// </summary>

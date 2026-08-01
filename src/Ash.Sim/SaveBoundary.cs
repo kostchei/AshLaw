@@ -63,6 +63,7 @@ public sealed class WorldSaveGate
     private readonly Ash.Rules.Dice _dice;
     private readonly ActorConditionService? _conditions;
     private readonly CombatDirector? _combat;
+    private readonly Func<WorldProgressSnapshot?>? _progress;
     private readonly string _contentFingerprint;
 
     public WorldSaveGate(
@@ -71,13 +72,15 @@ public sealed class WorldSaveGate
         Ash.Rules.Dice dice,
         string contentFingerprint,
         ActorConditionService? conditions = null,
-        CombatDirector? combat = null)
+        CombatDirector? combat = null,
+        Func<WorldProgressSnapshot?>? progress = null)
     {
         _objects = objects ?? throw new ArgumentNullException(nameof(objects));
         _physics = physics ?? throw new ArgumentNullException(nameof(physics));
         _dice = dice ?? throw new ArgumentNullException(nameof(dice));
         _conditions = conditions;
         _combat = combat;
+        _progress = progress;
         ArgumentException.ThrowIfNullOrWhiteSpace(contentFingerprint);
         _contentFingerprint = contentFingerprint;
     }
@@ -174,7 +177,8 @@ public sealed class WorldSaveGate
                 currentMapId,
                 _dice.State,
                 _conditions?.Capture(),
-                _combat?.Capture()));
+                _combat?.Capture(),
+                _progress?.Invoke()));
         return SaveAttempt.Written(_physics.Tick, path);
     }
 }

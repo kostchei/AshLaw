@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "description": "U8_Ash character creation. These are this game's rules, not part of the vendored Ash V1 package: ability bonuses, ancestries, and the two ways to roll a character. Changing a value here changes the game without touching engine code.",
   "ability_bonuses": {
     "description": "floor((score - 10) / 2), written out so the curve is tunable. Generation never exceeds 18; talents carry a score to 20.",
@@ -94,5 +94,35 @@
         "strength"
       ]
     }
+  },
+  "talent_tables": {
+    "rogue": [
+      { "minimum_roll": 2, "maximum_roll": 2, "id": "shadow_wildcard", "name": "Shadow Wildcard", "description": "Choose +2 to any attribute or any Rogue talent-table option after this row is rolled." },
+      { "minimum_roll": 3, "maximum_roll": 6, "id": "agile_lethality", "name": "Agile Lethality & Thievery", "description": "Backstabbing lethality or advantage with a Rogue skill." },
+      { "minimum_roll": 7, "maximum_roll": 9, "id": "furtive_attribute_boost", "name": "Furtive Attribute Boost", "description": "+2 to Dexterity, Intelligence or Charisma, or +1 to two of them." },
+      { "minimum_roll": 10, "maximum_roll": 11, "id": "evasion_reflexes", "name": "Evasion & Reflexes", "description": "Light-armour defence or improved initiative and reflexes." },
+      { "minimum_roll": 12, "maximum_roll": 12, "id": "shadow_wildcard", "name": "Shadow Wildcard", "description": "Choose +2 to any attribute or any Rogue talent-table option after this row is rolled." }
+    ],
+    "fighter": [
+      { "minimum_roll": 2, "maximum_roll": 2, "id": "mastery_wildcard", "name": "Mastery Wildcard", "description": "Choose +2 to any attribute or any Fighter talent-table option after this row is rolled." },
+      { "minimum_roll": 3, "maximum_roll": 6, "id": "weapon_specialization", "name": "Weapon Specialization & Combat Style", "description": "Weapon specialization or improved armour defence." },
+      { "minimum_roll": 7, "maximum_roll": 9, "id": "martial_attribute_boost", "name": "Martial Attribute Boost", "description": "+2 to Strength, Dexterity or Constitution, or +1 to two of them." },
+      { "minimum_roll": 10, "maximum_roll": 11, "id": "combat_vitality", "name": "Combat Vitality & Lethality", "description": "Additional vitality or increased critical severity." },
+      { "minimum_roll": 12, "maximum_roll": 12, "id": "mastery_wildcard", "name": "Mastery Wildcard", "description": "Choose +2 to any attribute or any Fighter talent-table option after this row is rolled." }
+    ],
+    "cleric": [
+      { "minimum_roll": 2, "maximum_roll": 2, "id": "divine_wildcard", "name": "Divine Wildcard", "description": "+2 to any attribute or any Cleric talent-table option; its sub-option is resolved when that mechanic is implemented." },
+      { "minimum_roll": 3, "maximum_roll": 6, "id": "divine_favor", "name": "Divine Favor & Smite", "description": "Improved divine spellcasting or power against undead." },
+      { "minimum_roll": 7, "maximum_roll": 9, "id": "holy_attribute_boost", "name": "Holy Attribute Boost", "description": "+2 to Wisdom, Strength or Charisma, or +1 to two of them." },
+      { "minimum_roll": 10, "maximum_roll": 11, "id": "sacred_protection", "name": "Sacred Protection & Healing", "description": "Armoured defence or stronger healing." },
+      { "minimum_roll": 12, "maximum_roll": 12, "id": "divine_wildcard", "name": "Divine Wildcard", "description": "+2 to any attribute or any Cleric talent-table option; its sub-option is resolved when that mechanic is implemented." }
+    ],
+    "wizard": [
+      { "minimum_roll": 2, "maximum_roll": 2, "id": "arcane_wildcard", "name": "Arcane Wildcard", "description": "+2 to any attribute or any Wizard talent-table option; its sub-option is resolved when that mechanic is implemented." },
+      { "minimum_roll": 3, "maximum_roll": 5, "id": "arcane_memory", "name": "Arcane Memory & Mastery", "description": "Improved spellcasting or an additional known spell." },
+      { "minimum_roll": 6, "maximum_roll": 9, "id": "mental_attribute_boost", "name": "Mental Attribute Boost", "description": "+2 to Intelligence, Wisdom or Charisma, or +1 to two of them." },
+      { "minimum_roll": 10, "maximum_roll": 11, "id": "wards_metamagic", "name": "Wards & Metamagic", "description": "Magical defence or increased spell range." },
+      { "minimum_roll": 12, "maximum_roll": 12, "id": "arcane_wildcard", "name": "Arcane Wildcard", "description": "+2 to any attribute or any Wizard talent-table option; its sub-option is resolved when that mechanic is implemented." }
+    ]
   }
 }

@@ -117,14 +117,14 @@ public sealed class SubzoneBuilderTests
     [Fact]
     public void MonsterArchetypeAndNumbersRiseWithTheTier()
     {
-        Assert.Equal("monster.cave-rat", MonsterIn(level: 1).TypeId);
+        Assert.True(MonsterCatalog.TryGet(MonsterIn(level: 1).TypeId, out _));
         Assert.Equal("monster.goblin-guard", MonsterIn(level: 3).TypeId);
         Assert.Equal("monster.many-eyed-tyrant", MonsterIn(level: 6).TypeId);
 
         var weak = MonsterIn(level: 1);
         var strong = MonsterIn(level: 6);
         Assert.True(strong.MaxHealth > weak.MaxHealth);
-        Assert.True(strong.Strength > weak.Strength);
+        Assert.Equal(1, weak.Level);
         Assert.Equal(strong.MaxHealth, strong.Health);
     }
 
@@ -200,7 +200,7 @@ public sealed class SubzoneBuilderTests
         using var build = Dispose(SubzoneBuilder.Build(store, plan));
         return build.Spawned
             .Select(store.Get)
-            .Single(value => value.HasFlag(ObjectFlags.Monster));
+            .First(value => value.HasFlag(ObjectFlags.Monster));
     }
 
     /// <summary>

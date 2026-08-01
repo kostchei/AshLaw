@@ -1,82 +1,145 @@
+using Ash.Core;
 using Ash.Rules;
 
 namespace Ash.Sim.Tests;
 
 /// <summary>
-/// The generated world as something a player actually moves through: eighteen
-/// built subzones, a way on at the end of each, and a save that comes back on
-/// the subzone it was taken in.
+/// The first vertical slice as something a player actually completes: one
+/// five-beat subzone, a guarded reward, advancement, and a persistent save.
+/// Beats are generation pacing, never runtime room objectives.
 /// </summary>
 public sealed class GeneratedWorldTests
 {
-    /// <summary>
-    /// A seed with no special properties. It is fixed only so a failure is the
-    /// same failure twice.
-    /// </summary>
     private const ulong Seed = 987654321;
-
     private const int MaxWalkSteps = 600;
 
     [Fact]
-    public void AFreshWorldBuildsEverySubzoneAndStartsInTheFirst()
+    public void AFreshWorldBuildsOnlyTheFirstSubzone()
     {
         using var world = PlayableSliceWorld.CreateGenerated(Seed);
 
-        Assert.Equal(
-            WorldPlanner.SubzoneCount,
-            world.Objects.Maps.All.Count);
+        Assert.Single(world.Objects.Maps.All);
         Assert.Equal(1, world.CurrentMapId);
         Assert.Equal(WorldPlanner.MapWidth, world.CurrentMap.Width);
+        Assert.Equal(2, world.Character.Talents.Count);
 
-        // The Avatar stands on carved floor, not in the rock every subzone is
-        // cut out of, and carries what he was given.
         var here = world.PlayerPosition;
         Assert.True(
-            world.CurrentMap
-                .GetTerrain(here.X, here.Y)
-                .Flags
+            world.CurrentMap.GetTerrain(here.X, here.Y).Flags
                 .HasFlag(TerrainFlags.Walkable));
         Assert.Contains(world.BackpackItems, item => item.Name == "Apple");
-        Assert.Contains(
-            world.BackpackItems,
-            item => item.Name == "Rusty Sword");
+        Assert.Contains(world.BackpackItems, item => item.Name == "Rusty Sword");
 
         world.Objects.ValidateInvariants();
-        foreach (var map in world.Objects.Maps.All)
-        {
-            map.ValidateIndex();
-        }
+        world.CurrentMap.ValidateIndex();
     }
 
-    /// <summary>
-    /// The first subzone has nowhere to go back to and the last has nowhere to
-    /// go on to, so neither carries a mark that leads out of the world.
-    /// </summary>
     [Fact]
-    public void TheEndsOfTheWorldHaveOnlyTheWaysThatLeadSomewhere()
+    public void TheSingleSubzoneHasOnlyItsVictoryExit()
     {
         using var world = PlayableSliceWorld.CreateGenerated(Seed);
-        var maps = world.Objects.Maps.All;
 
+        Assert.Single(world.Objects.Maps.All);
         Assert.Equal(
             [SubzoneBuilder.ExitTypeId],
-            WaymarkTypesOn(maps[0]));
-        Assert.Equal(
-            [SubzoneBuilder.EntranceTypeId, SubzoneBuilder.ExitTypeId],
-            WaymarkTypesOn(maps[1]));
-        Assert.Equal(
-            [SubzoneBuilder.EntranceTypeId],
-            WaymarkTypesOn(maps[^1]));
+            WaymarkTypesOn(world.CurrentMap));
+    }
+
+    [Fact]
+    public void AConfirmedRogueSuppliesScoresClassTalentsAndStartingGear()
+    {
+        var dice = new Dice(424242);
+        var rolled = CharacterCreation.RollUnearthedArcana(
+            RulesRepository.CharacterCreation,
+            dice,
+            CharacterClass.Rogue,
+            Ancestry.Human);
+        var character = CharacterCreation.ResolveTalentsWithFirstLegalChoices(
+            CharacterCreation.RollTalents(
+                RulesRepository.CharacterCreation,
+                dice,
+                rolled));
+
+        using var world = PlayableSliceWorld.CreateGenerated(Seed, character);
+
+        Assert.Equal(character.Scores, world.Player.Abilities);
+        Assert.Equal(CharacterClass.Rogue, world.Player.Class);
+        Assert.Equal(character, world.Character);
+        Assert.Equal(2, world.Character.Talents.Count);
+        Assert.Contains(world.BackpackItems, item => item.Name == "Bronze Dagger");
+        Assert.DoesNotContain(world.BackpackItems, item => item.Name == "Wooden Shield");
+    }
+
+    [Fact]
+    public void GeneratedFeaturesAreContextualObjectsRatherThanRoomState()
+    {
+        using var markerWorld = PlayableSliceWorld.CreateGenerated(Seed);
+        var marker = markerWorld.CurrentMap.QueryAll()
+            .Single(value => value.TypeId.EndsWith("-marker", StringComparison.Ordinal));
+        PlacePlayerBeside(markerWorld, marker);
+
+        var inspected = markerWorld.Interact();
+
+        Assert.True(inspected.Succeeded, inspected.Message);
+        Assert.Contains("unstable ground", inspected.Message, StringComparison.Ordinal);
+
+        using var trestleWorld = PlayableSliceWorld.CreateGenerated(Seed);
+        var trestle = trestleWorld.CurrentMap.QueryAll()
+            .Single(value => value.TypeId == "prop.trestle");
+        PlacePlayerBeside(trestleWorld, trestle);
+
+        var dismantled = trestleWorld.Interact();
+
+        Assert.True(dismantled.Succeeded, dismantled.Message);
+        Assert.False(trestleWorld.Objects.TryGet(trestle.Id, out _));
+    }
+
+    [Fact]
+    public void CrossingGeneratedCrackedFloorResolvesARealHazard()
+    {
+        using var world = PlayableSliceWorld.CreateGenerated(Seed);
+        var hint = world.CurrentMap.QueryAll()
+            .Single(value => value.TypeId == "decal.cracked-floor");
+        PlacePlayerAt(world, hint.Location.Position);
+        var diceBefore = world.Dice.State;
+
+        var crossed = world.MovePlayer(1, 0);
+
+        Assert.True(crossed.Succeeded, crossed.Message);
+        Assert.True(world.CurrentMap
+            .GetTerrain(world.PlayerPosition.X, world.PlayerPosition.Y)
+            .Flags
+            .HasFlag(TerrainFlags.Hazard));
+        Assert.StartsWith("Hazard:", crossed.Message, StringComparison.Ordinal);
+        Assert.NotEqual(diceBefore, world.Dice.State);
+        Assert.InRange(world.Player.Health, 0, world.Player.MaxHealth);
+    }
+
+    [Fact]
+    public void GeneratedMonsterLootBecomesLootableOnItsCorpse()
+    {
+        using var world = PlayableSliceWorld.CreateGenerated(Seed);
+        var monster = world.Monsters.First();
+        var carried = Assert.Single(world.ContentsOf(monster.Id));
+
+        _ = world.Trauma.Apply(
+            world.PlayerId,
+            monster.Id,
+            [new TraumaEffect(TraumaEffectKind.Death)]);
+
+        var corpse = world.Objects.Get(monster.Id);
+        Assert.True(corpse.HasFlag(ObjectFlags.Corpse));
+        Assert.False(corpse.HasFlag(ObjectFlags.Monster));
+        Assert.Equal(carried.Id, Assert.Single(world.ContentsOf(corpse.Id)).Id);
     }
 
     /// <summary>
-    /// The whole loop the slice exists to prove: start in the first generated
-    /// subzone, walk to its way on, step through into the second, save there,
-    /// and load back into the second subzone with the same Avatar, the same
-    /// pack, the same terrain and the same dice.
+    /// Treasure gates the exit, which advances exactly once. Living monsters
+    /// do not: combat remains one possible solution rather than an XP task.
+    /// Save/load retains the rolled character and completed dungeon.
     /// </summary>
     [Fact]
-    public void WalkingThroughToTheNextSubzoneSurvivesASaveAndALoad()
+    public void CompletingTheFirstDungeonAdvancesAndSurvivesSaveLoad()
     {
         var directory = Path.Combine(
             Path.GetTempPath(),
@@ -86,85 +149,95 @@ public sealed class GeneratedWorldTests
         try
         {
             var path = Path.Combine(directory, "world.ashw");
-
-            // Draw the sword, so the walk carries something worn as well as
-            // something packed.
-            Assert.True(world.ToggleRightHand().Succeeded);
-
             var exit = world.Waymarks.Single(mark =>
                 mark.TypeId == SubzoneBuilder.ExitTypeId);
             WalkTo(world, world.GetGridPosition(exit.Id));
+            Assert.Equal(world.GetGridPosition(exit.Id), world.PlayerPosition);
 
-            // Nothing has been transferred to another map yet: the way on is a
-            // thing in the world, and until it is used it is only scenery.
-            Assert.Equal(1, world.CurrentMapId);
+            var blockedByReward = world.UseNearestWaymark();
+            Assert.False(blockedByReward.Succeeded);
+            Assert.Contains("reward", blockedByReward.Message);
+            Assert.Equal(2, world.Monsters.Count);
 
-            var travelled = world.Interact();
+            var vault = world.Objects.Enumerate().Single(value =>
+                value.TypeId == "container.vault-box");
+            var rewards = world.ContentsOf(vault.Id);
+            var claimed = world.Transfers.Execute(
+                rewards.Select(reward => new ObjectTransferRequest(
+                    reward.Id,
+                    reward.Location,
+                    ObjectLocation.InContainer(world.PlayerId))).ToArray());
+            Assert.True(claimed.Succeeded, claimed.Message);
 
-            Assert.True(travelled.Succeeded, travelled.Message);
-            Assert.Equal(2, world.CurrentMapId);
-            Assert.Equal(2, world.Player.Location.MapId);
-            Assert.Equal(MotionState.Resting, world.Player.Motion);
+            var before = world.Player;
+            var completed = world.UseNearestWaymark();
+            Assert.True(completed.Succeeded, completed.Message);
+            Assert.True(world.DungeonCompleted);
+            Assert.Equal(2, world.Monsters.Count);
+            Assert.Equal(PlayableSliceWorld.FirstDungeonExperience, world.Experience);
+            Assert.Equal(1, world.Player.Level);
+            Assert.True(world.AdvancementChoicePending);
+            Assert.NotNull(world.AdvancementTalent);
 
-            // He comes out at the second subzone's way in, standing on it.
-            var arrival = world.Waymarks.Single(mark =>
-                mark.TypeId == SubzoneBuilder.EntranceTypeId);
-            Assert.Equal(
-                world.GetGridPosition(arrival.Id),
-                world.PlayerPosition);
+            Assert.True(world.RequestSave(path).Succeeded);
+            using (var pending = PlayableSliceWorld.Load(path))
+            {
+                Assert.Equal(1, pending.Player.Level);
+                Assert.True(pending.DungeonCompleted);
+                Assert.True(pending.AdvancementChoicePending);
+                Assert.Equal(
+                    world.AdvancementTalent,
+                    pending.AdvancementTalent);
+                Assert.NotEmpty(pending.LegalAdvancementChoices);
+                Assert.Equal(2, pending.Monsters.Count);
+                var loadedBoss = Assert.Single(pending.Monsters.Where(monster =>
+                    MonsterCatalog.Get(monster.TypeId).Mutation is not null));
+                var loadedBossProfile = MonsterCatalog.Get(loadedBoss.TypeId);
+                Assert.Equal(3, loadedBossProfile.TreasureLevel);
+                Assert.Contains(
+                    ".mutation.",
+                    loadedBoss.TypeId,
+                    StringComparison.Ordinal);
+                Assert.All(pending.Monsters, monster =>
+                    Assert.Equal(
+                        MonsterCatalog.Get(monster.TypeId).AttackBonus,
+                        pending.Sheets.For(monster.Id).AttackModifier));
+            }
 
-            // The pack travelled because its owner did.
-            Assert.Contains(world.BackpackItems, item => item.Name == "Apple");
-            Assert.Equal(
-                "Rusty Sword",
-                world.EquippedIn(EquipmentSlot.RightHand)?.Name);
+            var advanced = world.ResolveAdvancementTalent(
+                world.LegalAdvancementChoices[0]);
+            Assert.True(advanced.Succeeded, advanced.Message);
+            Assert.Equal(2, world.Player.Level);
+            Assert.True(world.Player.MaxHealth > before.MaxHealth);
+            Assert.NotNull(world.AdvancementTalent!.Choice);
 
             var savedPlayer = world.Player;
             var savedDice = world.Dice.State;
             var savedTick = world.Physics.Tick;
             var savedTerrain = Describe(world.CurrentMap);
-            var savedLeftBehind = Describe(world.Objects.Maps.Get(1));
 
             Assert.True(world.RequestSave(path).Succeeded);
             using var loaded = PlayableSliceWorld.Load(path);
 
-            // Identity, and the subzone he was standing in.
-            Assert.Equal(2, loaded.CurrentMapId);
+            Assert.Equal(1, loaded.CurrentMapId);
             Assert.Equal(savedPlayer, loaded.Player);
             Assert.Equal(savedTick, loaded.Physics.Tick);
-
-            // Dice state, so the loaded world rolls what this one would have.
             Assert.Equal(savedDice, loaded.Dice.State);
-
-            // Inventory.
-            Assert.Contains(loaded.BackpackItems, item => item.Name == "Apple");
-            Assert.Equal(
-                "Rusty Sword",
-                loaded.EquippedIn(EquipmentSlot.RightHand)?.Name);
-
-            // Terrain — of the subzone he is in, and of the one he left, which
-            // a world that only saved the current map would have lost.
-            Assert.Equal(
-                WorldPlanner.SubzoneCount,
-                loaded.Objects.Maps.All.Count);
+            Assert.Single(loaded.Objects.Maps.All);
             Assert.Equal(savedTerrain, Describe(loaded.CurrentMap));
-            Assert.Equal(
-                savedLeftBehind,
-                Describe(loaded.Objects.Maps.Get(1)));
+            Assert.True(loaded.DungeonCompleted);
+            Assert.Equal(world.Experience, loaded.Experience);
+            Assert.Equal(world.Character, loaded.Character);
+            Assert.Equal(world.AdvancementTalent, loaded.AdvancementTalent);
 
             loaded.Objects.ValidateInvariants();
             loaded.Physics.ValidateInvariants();
-            foreach (var map in loaded.Objects.Maps.All)
-            {
-                map.ValidateIndex();
-            }
+            loaded.CurrentMap.ValidateIndex();
 
-            // And the way back out of the second subzone still works from the
-            // loaded world, which is the whole point of putting both ends in
-            // the world rather than in a plan nothing saves.
-            var back = loaded.Interact();
-            Assert.True(back.Succeeded, back.Message);
-            Assert.Equal(1, loaded.CurrentMapId);
+            var repeated = loaded.UseNearestWaymark();
+            Assert.True(repeated.Succeeded, repeated.Message);
+            Assert.Equal(PlayableSliceWorld.FirstDungeonExperience, loaded.Experience);
+            Assert.Equal(2, loaded.Player.Level);
         }
         finally
         {
@@ -196,18 +269,26 @@ public sealed class GeneratedWorldTests
         return string.Join(",", cells);
     }
 
-    /// <summary>
-    /// Walks the Avatar to <paramref name="target"/> through the same
-    /// <see cref="PlayableSliceWorld.MovePlayer"/> a player's keypress uses,
-    /// one cardinal step at a time and letting the round's move refill.
-    /// </summary>
-    /// <remarks>
-    /// The route is planned over terrain alone, because terrain is what the
-    /// generator guarantees is connected. Objects are not planned around: a
-    /// refused step marks that cell and the route is planned again without it,
-    /// which is how the guardian standing in the middle of the first room gets
-    /// walked round rather than through.
-    /// </remarks>
+    private static void PlacePlayerBeside(
+        PlayableSliceWorld world,
+        WorldObject feature) =>
+        PlacePlayerAt(
+            world,
+            feature.Location.Position with
+            {
+                X = feature.Location.Position.X - PlayableSliceWorld.WorldUnitsPerTile,
+            });
+
+    private static void PlacePlayerAt(PlayableSliceWorld world, Vec3i position)
+    {
+        var placed = world.Transfers.Execute(
+            new ObjectTransferRequest(
+                world.PlayerId,
+                world.Player.Location,
+                ObjectLocation.OnMap(world.CurrentMapId, position)));
+        Assert.True(placed.Succeeded, placed.Message);
+    }
+
     private static void WalkTo(PlayableSliceWorld world, GridPosition target)
     {
         var blocked = new HashSet<GridPosition>();
@@ -231,8 +312,7 @@ public sealed class GeneratedWorldTests
                 if (++stepsTaken > MaxWalkSteps)
                 {
                     throw new InvalidOperationException(
-                        $"Took {MaxWalkSteps} steps without reaching " +
-                        $"{target}.");
+                        $"Took {MaxWalkSteps} steps without reaching {target}.");
                 }
 
                 var here = world.PlayerPosition;
@@ -249,11 +329,6 @@ public sealed class GeneratedWorldTests
         }
     }
 
-    /// <summary>
-    /// The cells of a shortest walk from <paramref name="from"/> to
-    /// <paramref name="to"/>, climbing no more per step than the Avatar clears
-    /// without a <see cref="VaultCheck"/>. Null when there is no such walk.
-    /// </summary>
     private static IReadOnlyList<GridPosition>? FindRoute(
         WorldMap map,
         GridPosition from,

@@ -88,6 +88,32 @@ public sealed class WorldPlannerTests
         }
     }
 
+    [Fact]
+    public void LevelOnePlansDrawTwoDistinctStaticThreatsFromTheTenMonsterPool()
+    {
+        var selected = PlansAcross(200)
+            .Where(plan => plan.MonsterRank == 1)
+            .SelectMany(plan => new[]
+            {
+                plan.EncounterMonsterTypeId,
+                plan.GuardianMonsterTypeId,
+            })
+            .Select(typeId => MonsterCatalog.Get(typeId).BaseTypeId)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.Equal(
+            MonsterCatalog.LevelOne.Select(value => value.TypeId).ToHashSet(),
+            selected);
+        foreach (var plan in PlansAcross(30).Where(value => value.MonsterRank == 1))
+        {
+            Assert.NotEqual(plan.EncounterMonsterTypeId, plan.GuardianMonsterTypeId);
+            Assert.Null(MonsterCatalog.Get(plan.EncounterMonsterTypeId).Mutation);
+            var boss = MonsterCatalog.Get(plan.GuardianMonsterTypeId);
+            Assert.NotNull(boss.Mutation);
+            Assert.Equal(3, boss.TreasureLevel);
+        }
+    }
+
     /// <summary>
     /// Beats must not overlap and must stay on the map: the builder carves them
     /// straight into terrain, so a plan that overlaps is a plan that silently
@@ -298,6 +324,7 @@ public sealed class WorldPlannerTests
         $"{plan.Index} {plan.MapId} {plan.Seed} {plan.Theme} " +
         $"{plan.Verticality} {plan.Width}x{plan.Depth} @{plan.CorridorY} " +
         $"r{plan.MonsterRank}/{plan.TreasureRank} " +
+        $"{plan.EncounterMonsterTypeId}/{plan.GuardianMonsterTypeId} " +
         string.Join(
             ",",
             plan.Beats.Select(beat =>

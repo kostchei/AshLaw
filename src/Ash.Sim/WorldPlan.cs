@@ -120,7 +120,9 @@ public sealed record SubzonePlan(
     int CorridorY,
     IReadOnlyList<BeatPlan> Beats,
     int MonsterRank,
-    int TreasureRank)
+    int TreasureRank,
+    string EncounterMonsterTypeId,
+    string GuardianMonsterTypeId)
 {
     /// <summary>The tag the presentation layer reads a palette from.</summary>
     public string ThemeTag =>
@@ -255,8 +257,8 @@ public static class WorldPlanner
         var dice = new Dice(seed);
 
         // Roll order is the plan's contract: theme, depth, verticality, beat
-        // order, then beat depths. Inserting a roll anywhere above changes
-        // every seed's world, so new choices go on the end.
+        // order, beat depths, then monster types. Inserting a roll anywhere
+        // above changes every seed's world, so new choices go on the end.
         var theme = Themes[dice.Roll(Themes.Length) - 1];
         var mapDepth = MinimumMapDepth +
             dice.Roll(MaximumMapDepth - MinimumMapDepth + 1) - 1;
@@ -278,6 +280,17 @@ public static class WorldPlanner
         // and treasure follows difficulty. A late subzone at low level is meant
         // to be dangerous; that is what makes the order matter.
         var difficulty = tier.Rank + (index / 3);
+        var (encounterMonster, guardianMonster) =
+            RollMonsterTypes(dice, difficulty);
+        if (difficulty == 1)
+        {
+            // A one-mutation boss rolls the first mutation column. Its derived
+            // type id carries the mutation through save/load without adding
+            // per-instance content fields to the object format.
+            guardianMonster = MonsterCatalog.WithMutation(
+                MonsterCatalog.Get(guardianMonster),
+                MonsterMutations.FirstMutation(dice.Roll(12))).TypeId;
+        }
         return new SubzonePlan(
             index,
             checked((ushort)(index + 1)),
@@ -289,7 +302,28 @@ public static class WorldPlanner
             corridorY,
             beats,
             difficulty,
-            difficulty);
+            difficulty,
+            encounterMonster,
+            guardianMonster);
+    }
+
+    private static (string Encounter, string Guardian) RollMonsterTypes(
+        Dice dice,
+        int difficulty)
+    {
+        if (difficulty > 1)
+        {
+            var typeId = difficulty >= 6
+                ? "monster.many-eyed-tyrant"
+                : "monster.goblin-guard";
+            return (typeId, typeId);
+        }
+
+        var pool = MonsterCatalog.LevelOne;
+        var encounterIndex = dice.Roll(pool.Count) - 1;
+        var guardianOffset = dice.Roll(pool.Count - 1);
+        var guardianIndex = (encounterIndex + guardianOffset) % pool.Count;
+        return (pool[encounterIndex].TypeId, pool[guardianIndex].TypeId);
     }
 
     public static TransitionPlan PlanTransition(ulong worldSeed, int index)

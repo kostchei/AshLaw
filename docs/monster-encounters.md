@@ -1,6 +1,6 @@
 # Monster encounter states
 
-`Ash.Sim.CombatDirector` owns the vertical slice's transient monster encounter
+`Ash.Sim.CombatDirector` owns the vertical slice's monster encounter
 state. It advances on the shared 200 ms combat beat and uses the world's seeded
 `Dice`, so identical encounter inputs produce the same activity, reaction, and
 timing rolls.
@@ -15,7 +15,7 @@ A monster enters the encounter state machine when either:
 - a living player comes within the six-tile awareness radius; or
 - the player lands an adjacent attack before the monster has noticed them.
 
-The state sequence is:
+The initial state sequence is:
 
 ```text
 unaware -> recognizing -> alerted -> engaged
@@ -30,6 +30,17 @@ beat whenever it changes between pursuit and attack.
 If an unprovoked monster loses the player beyond the awareness radius while it
 is still recognizing, the encounter state is discarded. A later approach rolls
 a fresh encounter. A monster attacked by the player remembers the provocation.
+
+After engagement, hostile monsters are not bound to a room or encounter volume:
+
+```text
+engaged -> searching last known position -> returning home -> unaware
+                    up to 3 seconds
+```
+
+These are creature states, not room states. Two monsters can notice the player
+at different times, pursuit can cross an authored pacing beat, and fleeing into
+another creature can leave both fights active.
 
 ## Activity roll
 
@@ -79,8 +90,8 @@ demands, trade, stealth, and faction systems can give them distinct actions.
 An engaged hostile monster attacks when cardinally adjacent. Otherwise it
 pursues the player with cardinal steps that reduce Manhattan distance.
 
-- Movement is paced at one tile per second: six tiles across the six-second
-  combat round.
+- Movement is paced from the creature profile. Current level-one rates are
+  15, 25, 30 or 50 feet across the six-second round (3, 5, 6 or 10 tiles).
 - Every step is resolved by the shared `MovementSolver`.
 - Successful steps commit through `ObjectTransferService`, which updates the
   authoritative `WorldMap` spatial index synchronously.
@@ -89,6 +100,14 @@ pursues the player with cardinal steps that reduce Manhattan distance.
   Avatar.
 - A blocked attempt consumes that movement interval and never overlaps or
   bypasses the blocker.
+- An ordinary monster tracks within six tiles and will not travel more than
+  eight tiles from the position where its encounter began.
+- On losing contact it searches toward the last perceived player position for
+  up to three seconds, then walks back to that home position and forgets the
+  encounter.
+- Cave rats, wolves and profiles carrying `PackHunter` alert same-type allies
+  within five tiles and pursue out to sixteen tiles. `ScentTracker` and
+  `EchoHunter` profiles track out to twelve tiles.
 
 This slice does not yet route around a barrier. The monster tries the reducing
 axis with the greatest remaining distance first, then the other reducing axis.
@@ -97,14 +116,14 @@ M6 task.
 
 ## State ownership and persistence
 
-`ActivityOf`, `ReactionOf`, and `AwarenessOf` expose the current encounter state
-for presentation and tests. The combat director deliberately does not save this
-transient state. Loading a world starts monsters without an encounter in
-progress, matching the existing policy for recognition, alerts, and swing
-timers.
+`ActivityOf`, `ReactionOf`, and `AwarenessOf` expose the current creature state
+for presentation and tests. Save format 12 persists recognition, alerts,
+actions, home position, last-known player position and last-perception tick, so
+loading resumes a search or return rather than resetting nearby creatures.
 
 Focused coverage lives in
 `tests/Ash.Sim.Tests/CombatTimingTests.cs`: it checks the activity and
 Charisma-adjusted reaction rolls, immediate provocation, 1d6 reaction timing,
-the 200 ms decision beat, hostile pursuit, non-hostile idling, and collision/
-spatial-index integrity.
+the 200 ms decision beat, hostile pursuit, territorial search/return, pack
+assistance, non-hostile idling, persistence, and collision/spatial-index
+integrity.

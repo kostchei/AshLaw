@@ -221,12 +221,14 @@ public sealed class AttackActionTests
             var expectedAction = Assert.IsType<AttackAction>(
                 original.Combat.ActiveAttackOf(original.PlayerId));
             var expectedCooldown = original.Combat.PlayerCooldownRemainingMilliseconds;
+            var expectedNpcs = original.Combat.Capture().Npcs;
 
             Assert.True(original.RequestSave(firstPath).Succeeded);
             using var loaded = PlayableSliceWorld.Load(firstPath);
 
             Assert.Equal(expectedAction, loaded.Combat.ActiveAttackOf(loaded.PlayerId));
             Assert.Equal(expectedCooldown, loaded.Combat.PlayerCooldownRemainingMilliseconds);
+            Assert.Equal(expectedNpcs, loaded.Combat.Capture().Npcs);
             Assert.Equal(original.Dice.State, loaded.Dice.State);
 
             Assert.True(loaded.RequestSave(secondPath).Succeeded);

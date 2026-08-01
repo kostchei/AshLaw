@@ -19,7 +19,21 @@ public sealed record ObjectWorldSnapshot(
     ObjectStoreSnapshot Objects,
     IReadOnlyList<WorldMapSnapshot> Maps,
     IReadOnlyList<ActorConditionSnapshot>? Conditions = null,
-    CombatDirectorSnapshot? Combat = null);
+    CombatDirectorSnapshot? Combat = null,
+    WorldProgressSnapshot? Progress = null);
+
+/// <summary>Character-origin facts and one-subzone campaign progress.</summary>
+public sealed record WorldProgressSnapshot(
+    CharacterCreationMethod Method,
+    Ancestry Ancestry,
+    AbilityScores? CreationScores,
+    int CreationAttempts,
+    int TalentRolls,
+    ClassTalentRoll? FirstTalent,
+    ClassTalentRoll? SecondTalent,
+    ClassTalentRoll? AdvancementTalent,
+    int Experience,
+    bool DungeonCompleted);
 
 /// <summary>
 /// A world rebuilt from a save: a store, its maps and the tick they were saved
@@ -32,7 +46,8 @@ public sealed record LoadedObjectWorld(
     ushort CurrentMapId,
     ulong DiceState,
     IReadOnlyList<ActorConditionSnapshot>? Conditions = null,
-    CombatDirectorSnapshot? Combat = null);
+    CombatDirectorSnapshot? Combat = null,
+    WorldProgressSnapshot? Progress = null);
 
 public sealed class ObjectWorldSaveException : InvalidOperationException
 {
@@ -63,11 +78,15 @@ public static class ObjectWorldSave
     /// exact expiry and next-periodic ticks, and version 8 explicit condition
     /// removal and stacking policies, and version 9 exact combat director
     /// state: active wind-ups, cooldowns, NPC decisions, movement ledgers and
-    /// death-save timing.
+    /// death-save timing, and version 10 character-creation provenance,
+    /// rolled talents, experience and one-subzone completion, and version 11
+    /// the player's resolved choice within every immutable talent roll, and
+    /// version 12 territorial NPC home, last-known-position and perception
+    /// timing state.
     /// Version 1 was never written outside this repository's tests, so it has
     /// no migration and is simply refused.
     /// </summary>
-    public const int FormatVersion = 9;
+    public const int FormatVersion = 12;
 
     /// <summary>
     /// The oldest format this build still reads. Version 2 migrates forward
@@ -80,7 +99,7 @@ public static class ObjectWorldSave
     /// The oldest reader that can still make sense of a file this build writes.
     /// A reader below this refuses the file instead of guessing at it.
     /// </summary>
-    public const int MinimumReaderVersion = 9;
+    public const int MinimumReaderVersion = 12;
 
     /// <summary>A sanity bound so a corrupt length cannot ask for a huge buffer.</summary>
     public const int MaximumPayloadBytes = 256 * 1024 * 1024;
@@ -171,7 +190,8 @@ public static class ObjectWorldSave
                 "The save payload does not match its checksum.");
         }
 
-        var (maps, objects, conditions, combat) = ReadPayload(payload, formatVersion, tick);
+        var (maps, objects, conditions, combat, progress) =
+            ReadPayload(payload, formatVersion, tick);
         return new ObjectWorldSnapshot(
             fingerprint,
             tick,
@@ -180,7 +200,8 @@ public static class ObjectWorldSave
             objects,
             maps,
             conditions,
-            combat);
+            combat,
+            progress);
     }
 
     /// <summary>
@@ -194,7 +215,8 @@ public static class ObjectWorldSave
         ushort currentMapId,
         ulong diceState = 0,
         IReadOnlyList<ActorConditionSnapshot>? conditions = null,
-        CombatDirectorSnapshot? combat = null)
+        CombatDirectorSnapshot? combat = null,
+        WorldProgressSnapshot? progress = null)
     {
         ArgumentNullException.ThrowIfNull(objects);
         ArgumentException.ThrowIfNullOrWhiteSpace(contentFingerprint);
@@ -206,7 +228,8 @@ public static class ObjectWorldSave
             objects.Capture(),
             objects.Maps.All.Select(map => map.Capture()).ToArray(),
             conditions ?? [],
-            combat ?? CombatDirectorSnapshot.Empty(simulationTick));
+            combat ?? CombatDirectorSnapshot.Empty(simulationTick),
+            progress);
     }
 
     /// <summary>
@@ -251,7 +274,8 @@ public static class ObjectWorldSave
             snapshot.CurrentMapId,
             snapshot.DiceState,
             snapshot.Conditions ?? [],
-            snapshot.Combat ?? CombatDirectorSnapshot.Empty(snapshot.SimulationTick));
+            snapshot.Combat ?? CombatDirectorSnapshot.Empty(snapshot.SimulationTick),
+            snapshot.Progress);
     }
 
     public static LoadedObjectWorld RestoreFile(
@@ -372,11 +396,14 @@ public static class ObjectWorldSave
             buffer,
             snapshot.Combat ?? CombatDirectorSnapshot.Empty(snapshot.SimulationTick));
 
+        WriteProgress(buffer, snapshot.Progress);
+
         return buffer.ToArray();
     }
 
     private static (IReadOnlyList<WorldMapSnapshot> Maps, ObjectStoreSnapshot Objects,
-        IReadOnlyList<ActorConditionSnapshot> Conditions, CombatDirectorSnapshot Combat)
+        IReadOnlyList<ActorConditionSnapshot> Conditions, CombatDirectorSnapshot Combat,
+        WorldProgressSnapshot? Progress)
         ReadPayload(ReadOnlySpan<byte> payload, int formatVersion, long simulationTick)
     {
         var reader = new SpanReader(payload);
@@ -478,8 +505,12 @@ public static class ObjectWorldSave
         }
 
         var combat = formatVersion >= 9
-            ? ReadCombatDirector(ref reader)
+            ? ReadCombatDirector(ref reader, formatVersion)
             : CombatDirectorSnapshot.Empty(simulationTick);
+
+        var progress = formatVersion >= 10
+            ? ReadProgress(ref reader, formatVersion)
+            : null;
 
         if (!reader.AtEnd)
         {
@@ -487,7 +518,202 @@ public static class ObjectWorldSave
                 "The payload has trailing bytes after the object store.");
         }
 
-        return (maps, new ObjectStoreSnapshot(slots, free), conditions, combat);
+        return (maps, new ObjectStoreSnapshot(slots, free), conditions, combat, progress);
+    }
+
+    private static void WriteProgress(
+        Stream buffer,
+        WorldProgressSnapshot? progress)
+    {
+        buffer.WriteByte(progress is null ? (byte)0 : (byte)1);
+        if (progress is null)
+        {
+            return;
+        }
+
+        WriteInt32(buffer, (int)progress.Method);
+        WriteInt32(buffer, (int)progress.Ancestry);
+        var creationScores = progress.CreationScores ?? throw new InvalidOperationException(
+            "Save format 11 and later require the confirmed " +
+            "character-creation scores.");
+        foreach (var score in creationScores.InOrder)
+        {
+            WriteInt32(buffer, score);
+        }
+        WriteInt32(buffer, progress.CreationAttempts);
+        WriteInt32(buffer, progress.TalentRolls);
+        WriteTalent(buffer, progress.FirstTalent);
+        WriteTalent(buffer, progress.SecondTalent);
+        WriteTalent(buffer, progress.AdvancementTalent);
+        WriteInt32(buffer, progress.Experience);
+        buffer.WriteByte(progress.DungeonCompleted ? (byte)1 : (byte)0);
+    }
+
+    private static WorldProgressSnapshot? ReadProgress(
+        ref SpanReader reader,
+        int formatVersion)
+    {
+        var present = reader.ReadByte();
+        if (present == 0)
+        {
+            return null;
+        }
+        if (present != 1)
+        {
+            throw new ObjectWorldSaveException("World progress has an invalid presence flag.");
+        }
+
+        var method = ReadEnum<CharacterCreationMethod>(
+            ref reader, 0, nameof(CharacterCreationMethod));
+        var ancestry = ReadEnum<Ancestry>(ref reader, 0, nameof(Ancestry));
+        AbilityScores? creationScores = null;
+        if (formatVersion >= 11)
+        {
+            var scores = new int[AbilityScores.AbilityCount];
+            for (var index = 0; index < scores.Length; index++)
+            {
+                scores[index] = reader.ReadInt32();
+            }
+            creationScores = AbilityScores.FromOrder(scores);
+        }
+        var attempts = reader.ReadInt32();
+        var talentRolls = reader.ReadInt32();
+        var first = ReadTalent(ref reader, formatVersion);
+        var second = ReadTalent(ref reader, formatVersion);
+        var advancement = ReadTalent(ref reader, formatVersion);
+        var experience = reader.ReadInt32();
+        var completed = reader.ReadByte();
+        if (attempts < 1 || talentRolls is < 0 or > 2 || experience < 0 ||
+            completed > 1)
+        {
+            throw new ObjectWorldSaveException("World progress contains invalid values.");
+        }
+        if ((first is null ? 0 : 1) + (second is null ? 0 : 1) != talentRolls)
+        {
+            throw new ObjectWorldSaveException(
+                "World progress talent count does not match its rolled talents.");
+        }
+
+        return new WorldProgressSnapshot(
+            method,
+            ancestry,
+            creationScores,
+            attempts,
+            talentRolls,
+            first,
+            second,
+            advancement,
+            experience,
+            completed == 1);
+    }
+
+    private static void WriteTalent(Stream buffer, ClassTalentRoll? talent)
+    {
+        buffer.WriteByte(talent is null ? (byte)0 : (byte)1);
+        if (talent is null)
+        {
+            return;
+        }
+        WriteInt32(buffer, talent.Roll);
+        WriteText(buffer, talent.Id);
+        WriteText(buffer, talent.Name);
+        WriteText(buffer, talent.Description);
+        WriteTalentChoice(buffer, talent.Choice);
+    }
+
+    private static ClassTalentRoll? ReadTalent(
+        ref SpanReader reader,
+        int formatVersion)
+    {
+        var present = reader.ReadByte();
+        if (present == 0)
+        {
+            return null;
+        }
+        if (present != 1)
+        {
+            throw new ObjectWorldSaveException("A talent has an invalid presence flag.");
+        }
+        var roll = reader.ReadInt32();
+        if (roll is < 2 or > 12)
+        {
+            throw new ObjectWorldSaveException($"A saved talent has invalid roll {roll}.");
+        }
+        var talent = new ClassTalentRoll(
+            roll,
+            reader.ReadText(),
+            reader.ReadText(),
+            reader.ReadText());
+        return formatVersion >= 11
+            ? talent with { Choice = ReadTalentChoice(ref reader) }
+            : talent;
+    }
+
+    private static void WriteTalentChoice(
+        Stream buffer,
+        ClassTalentChoice? choice)
+    {
+        buffer.WriteByte(choice is null ? (byte)0 : (byte)1);
+        if (choice is null)
+        {
+            return;
+        }
+
+        WriteText(buffer, choice.Id);
+        WriteInt32(buffer, (int)choice.Kind);
+        WriteText(buffer, choice.Description);
+        WriteInt32(buffer, choice.FirstAbility is { } first ? (int)first : -1);
+        WriteInt32(buffer, choice.FirstIncrease);
+        WriteInt32(buffer, choice.SecondAbility is { } second ? (int)second : -1);
+        WriteInt32(buffer, choice.SecondIncrease);
+        WriteInt32(buffer, choice.WeaponFamily is { } family ? (int)family : -1);
+        WriteInt32(buffer, choice.RogueSkill is { } skill ? (int)skill : -1);
+    }
+
+    private static ClassTalentChoice? ReadTalentChoice(ref SpanReader reader)
+    {
+        var present = reader.ReadByte();
+        if (present == 0)
+        {
+            return null;
+        }
+        if (present != 1)
+        {
+            throw new ObjectWorldSaveException(
+                "A talent choice has an invalid presence flag.");
+        }
+
+        var id = reader.ReadText();
+        var kindValue = reader.ReadInt32();
+        var description = reader.ReadText();
+        var firstValue = reader.ReadInt32();
+        var firstIncrease = reader.ReadInt32();
+        var secondValue = reader.ReadInt32();
+        var secondIncrease = reader.ReadInt32();
+        var familyValue = reader.ReadInt32();
+        var skillValue = reader.ReadInt32();
+        if (string.IsNullOrWhiteSpace(id) ||
+            !Enum.IsDefined((TalentChoiceKind)kindValue) ||
+            firstValue < -1 || firstValue >= AbilityScores.AbilityCount ||
+            secondValue < -1 || secondValue >= AbilityScores.AbilityCount ||
+            firstIncrease is < 0 or > 2 || secondIncrease is < 0 or > 1 ||
+            (familyValue != -1 && !Enum.IsDefined((WeaponFamily)familyValue)) ||
+            (skillValue != -1 && !Enum.IsDefined((RogueSkill)skillValue)))
+        {
+            throw new ObjectWorldSaveException(
+                "A saved talent choice contains invalid values.");
+        }
+
+        return new ClassTalentChoice(
+            id,
+            (TalentChoiceKind)kindValue,
+            description,
+            firstValue == -1 ? null : (Ability)firstValue,
+            firstIncrease,
+            secondValue == -1 ? null : (Ability)secondValue,
+            secondIncrease,
+            familyValue == -1 ? null : (WeaponFamily)familyValue,
+            skillValue == -1 ? null : (RogueSkill)skillValue);
     }
 
     private static void WriteCombatDirector(
@@ -517,6 +743,13 @@ public static class ObjectWorldSave
             WriteInt64(buffer, npc.ActionReadyAtTick);
             WriteInt64(buffer, npc.SwingReadyAtTick);
             WriteInt64(buffer, npc.StepReadyAtTick);
+            WriteInt32(buffer, npc.HomePosition.X);
+            WriteInt32(buffer, npc.HomePosition.Y);
+            WriteInt32(buffer, npc.HomePosition.Z);
+            WriteInt32(buffer, npc.LastKnownPlayerPosition.X);
+            WriteInt32(buffer, npc.LastKnownPlayerPosition.Y);
+            WriteInt32(buffer, npc.LastKnownPlayerPosition.Z);
+            WriteInt64(buffer, npc.LastPerceivedAtTick);
         }
 
         var attacks = combat.ActiveAttacks
@@ -537,7 +770,9 @@ public static class ObjectWorldSave
         }
     }
 
-    private static CombatDirectorSnapshot ReadCombatDirector(ref SpanReader reader)
+    private static CombatDirectorSnapshot ReadCombatDirector(
+        ref SpanReader reader,
+        int formatVersion)
     {
         var playerReady = reader.ReadInt64();
         var deathSave = ReadNullableInt64(ref reader);
@@ -569,6 +804,24 @@ public static class ObjectWorldSave
                 var value => throw new ObjectWorldSaveException(
                     $"NPC combat state {index} has invalid provoked flag {value}."),
             };
+            var actionReady = reader.ReadInt64();
+            var swingReady = reader.ReadInt64();
+            var stepReady = reader.ReadInt64();
+            var home = default(Vec3i);
+            var lastKnown = default(Vec3i);
+            var lastPerceived = -1L;
+            if (formatVersion >= 12)
+            {
+                home = new Vec3i(
+                    reader.ReadInt32(),
+                    reader.ReadInt32(),
+                    reader.ReadInt32());
+                lastKnown = new Vec3i(
+                    reader.ReadInt32(),
+                    reader.ReadInt32(),
+                    reader.ReadInt32());
+                lastPerceived = reader.ReadInt64();
+            }
             npcs[index] = new NpcCombatSnapshot(
                 actorId,
                 awareness,
@@ -576,9 +829,12 @@ public static class ObjectWorldSave
                 reaction,
                 action,
                 provoked,
-                reader.ReadInt64(),
-                reader.ReadInt64(),
-                reader.ReadInt64());
+                actionReady,
+                swingReady,
+                stepReady,
+                home,
+                lastKnown,
+                lastPerceived);
         }
 
         var attackCount = ReadBoundedCount(ref reader, "active attack", 1_000_000);

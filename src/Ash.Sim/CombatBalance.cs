@@ -32,6 +32,10 @@ public static class CombatBalance
         {
             throw new ArgumentOutOfRangeException(nameof(rank));
         }
+        if (MonsterCatalog.TryGet(typeId, out var profile))
+        {
+            return new MonsterBodyProfile(profile.MaximumConcussion, 0);
+        }
         return typeId switch
         {
             CombatProfileCatalog.CaveRatTypeId =>

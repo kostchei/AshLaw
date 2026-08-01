@@ -191,4 +191,132 @@ public sealed class CharacterCreationTests
         Assert.Equal(2, rolled.TalentRolls);
         Assert.Equal(Data.AncestryOf(Ancestry.Human).TalentRolls, rolled.TalentRolls);
     }
+
+    [Theory]
+    [InlineData(CharacterClass.Fighter)]
+    [InlineData(CharacterClass.Rogue)]
+    public void HumanTalentsAreTwoResolvedDiceRollsNotChoices(
+        CharacterClass characterClass)
+    {
+        var dice = new Dice(20260801);
+        var character = CharacterCreation.RollUnearthedArcana(
+            Data,
+            dice,
+            characterClass);
+
+        var talented = CharacterCreation.RollTalents(Data, dice, character);
+
+        Assert.Equal(2, talented.TalentRolls);
+        Assert.Equal(2, talented.Talents.Count);
+        Assert.All(talented.Talents, talent =>
+        {
+            Assert.InRange(talent.Roll, 2, 12);
+            var authored = Data.TalentTableFor(characterClass).ForRoll(talent.Roll);
+            Assert.Equal(authored.Id, talent.Id);
+            Assert.Equal(authored.Name, talent.Name);
+        });
+    }
+
+    [Fact]
+    public void TheSameCreationSequenceRollsTheSameTalents()
+    {
+        static CreatedCharacter Roll(CharacterCreationData data)
+        {
+            var dice = new Dice(77);
+            var character = CharacterCreation.RollUnearthedArcana(
+                data,
+                dice,
+                CharacterClass.Fighter);
+            return CharacterCreation.RollTalents(data, dice, character);
+        }
+
+        Assert.Equal(Roll(Data), Roll(Data));
+    }
+
+    [Fact]
+    public void AStatTalentOffersOnlyFullValueChoicesUnderTwenty()
+    {
+        var scores = new AbilityScores(
+            strength: 19,
+            dexterity: 18,
+            constitution: 20,
+            intelligence: 10,
+            wisdom: 10,
+            charisma: 10);
+        var talent = new ClassTalentRoll(
+            8,
+            "martial_attribute_boost",
+            "Martial Attribute Boost",
+            "test");
+
+        var choices = CharacterCreation.LegalTalentChoices(
+            CharacterClass.Fighter,
+            scores,
+            talent);
+
+        Assert.Contains(choices, choice => choice.Description == "+2 DEX");
+        Assert.DoesNotContain(choices, choice => choice.Description == "+2 STR");
+        Assert.DoesNotContain(choices, choice =>
+            choice.FirstAbility == Ability.Constitution ||
+            choice.SecondAbility == Ability.Constitution);
+        Assert.Contains(choices, choice =>
+            choice.FirstAbility == Ability.Strength &&
+            choice.SecondAbility == Ability.Dexterity &&
+            choice.FirstIncrease == 1 &&
+            choice.SecondIncrease == 1);
+    }
+
+    [Fact]
+    public void ThePlayerChoiceDoesNotChangeTheRandomTalentRow()
+    {
+        var talent = new ClassTalentRoll(
+            8,
+            "martial_attribute_boost",
+            "Martial Attribute Boost",
+            "test");
+        var character = new CreatedCharacter(
+            new AbilityScores(19, 18, 20, 10, 10, 10),
+            CharacterClass.Fighter,
+            Ancestry.Human,
+            CharacterCreationMethod.Ironman,
+            TalentRolls: 1,
+            Attempts: 1,
+            FirstTalent: talent);
+        var choice = CharacterCreation.LegalTalentChoices(
+                character.Class,
+                character.Scores,
+                talent)
+            .Single(value => value.Description == "+1 STR, +1 DEX");
+
+        var resolved = CharacterCreation.ResolveTalent(character, 0, choice);
+
+        Assert.Equal(20, resolved.Scores.Strength);
+        Assert.Equal(19, resolved.Scores.Dexterity);
+        Assert.Equal(20, resolved.Scores.Constitution);
+        Assert.Equal(talent.Roll, resolved.FirstTalent!.Roll);
+        Assert.Equal(talent.Id, resolved.FirstTalent.Id);
+        Assert.Equal(choice, resolved.FirstTalent.Choice);
+        Assert.True(resolved.TalentsResolved);
+    }
+
+    [Fact]
+    public void RolledWeaponAndSkillRowsLetThePlayerChooseTheirTarget()
+    {
+        var scores = new AbilityScores(12, 12, 12, 12, 12, 12);
+        var fighter = CharacterCreation.LegalTalentChoices(
+            CharacterClass.Fighter,
+            scores,
+            new ClassTalentRoll(4, "weapon_specialization", "Weapon", "test"));
+        var rogue = CharacterCreation.LegalTalentChoices(
+            CharacterClass.Rogue,
+            scores,
+            new ClassTalentRoll(4, "agile_lethality", "Agile", "test"));
+
+        Assert.Contains(fighter, choice =>
+            choice.WeaponFamily == WeaponFamily.Sword);
+        Assert.Contains(fighter, choice =>
+            choice.WeaponFamily == WeaponFamily.Dagger);
+        Assert.Contains(rogue, choice => choice.RogueSkill == RogueSkill.Traps);
+        Assert.Contains(rogue, choice => choice.RogueSkill == RogueSkill.Stealth);
+    }
 }

@@ -14,10 +14,12 @@ The playable demo uses these pools:
 | Goblin Guard | 16 | 0 | A durable melee opponent, but not critical-proof. |
 | Many-Eyed Tyrant | 24 | 0 | Several ordinary hits or one severe critical. |
 
-Generated monsters scale from the same archetypes by encounter rank. Their
-concussion formulas and zero-wound policy are authored in one catalogue rather
-than spread through spawning code. This keeps resolver output inspectable and
-makes balance changes explicit instead of hiding them behind damage caps.
+The generated level-one pool uses ten immutable `MonsterProfile` entries with
+7–10 concussion, zero wounds, exact attack and defence modifiers, armour-table
+category and movement rate. See [Level-one monsters](level-one-monsters.md).
+Higher ranks retain the goblin-guard and many-eyed-tyrant scaling formulas.
+This keeps resolver output inspectable and makes balance changes explicit
+instead of hiding them behind damage caps.
 
 Playable monsters currently have zero wounds deliberately: only the Avatar's
 death clock is scheduled. A non-player wound pool would otherwise create an

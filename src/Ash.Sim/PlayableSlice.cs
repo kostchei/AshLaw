@@ -57,8 +57,9 @@ public sealed class PlayableSliceWorld : IDisposable
     /// written for different content is refused rather than reinterpreted.
     /// </summary>
     public static string ContentFingerprint =>
-        $"ash.playable-slice.v3:{RulesRepository.RuntimeRulesFingerprint}:" +
-        CombatProfileCatalog.CanonicalFingerprint;
+        $"ash.playable-slice.v7:{RulesRepository.RuntimeRulesFingerprint}:" +
+        $"{CombatProfileCatalog.CanonicalFingerprint}:" +
+        MonsterCatalog.CanonicalFingerprint;
 
     private const string AvatarTypeId = "actor.avatar";
     private const string DaggerTypeId = "item.bronze-dagger";
@@ -77,6 +78,16 @@ public sealed class PlayableSliceWorld : IDisposable
     /// many dice his class happens to take.
     /// </summary>
     private const ulong AvatarBodySalt = 0x9E3779B97F4A7C15UL;
+
+    private const ulong DefaultCharacterSalt = 0xD1B54A32D192ED03UL;
+
+    public const int ExperienceRequiredPerLevel = 10;
+
+    /// <summary>
+    /// The first vault contains a legendary quest relic. Recovering that
+    /// treasure supplies one complete level; killing its guards supplies none.
+    /// </summary>
+    public const int FirstDungeonExperience = ExperienceRequiredPerLevel;
 
     /// <summary>
     /// What a world is generated against. Difficulty and treasure scale from
@@ -113,8 +124,20 @@ public sealed class PlayableSliceWorld : IDisposable
         ObjectId playerId,
         long startTick,
         ulong diceState,
+        CreatedCharacter character,
+        int experience = 0,
+        bool dungeonCompleted = false,
+        ClassTalentRoll? advancementTalent = null,
         IAttackRulesResolver? attackResolver = null)
     {
+        Character = character ?? throw new ArgumentNullException(nameof(character));
+        if (experience < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(experience));
+        }
+        Experience = experience;
+        DungeonCompleted = dungeonCompleted;
+        AdvancementTalent = advancementTalent;
         Dice = Dice.FromState(diceState);
         Objects = objects;
         Transfers = new ObjectTransferService(objects);
@@ -159,7 +182,13 @@ public sealed class PlayableSliceWorld : IDisposable
             Conditions,
             playerId);
         SaveGate = new WorldSaveGate(
-            objects, Physics, Dice, ContentFingerprint, Conditions, Combat);
+            objects,
+            Physics,
+            Dice,
+            ContentFingerprint,
+            Conditions,
+            Combat,
+            CaptureProgress);
         Drag = new DragService(objects);
         Stacks = new StackService(objects);
         LastMessage = "Explore. Open a chest or fight a monster.";
@@ -230,6 +259,30 @@ public sealed class PlayableSliceWorld : IDisposable
     public InjuryState PlayerInjury => Vitality.Of(PlayerId);
 
     public ActorSheet PlayerSheet => Sheets.For(PlayerId);
+
+    /// <summary>How the Avatar was rolled, including both Human talents.</summary>
+    public CreatedCharacter Character { get; }
+
+    public int Experience { get; private set; }
+
+    public bool DungeonCompleted { get; private set; }
+
+    public LevelAdvanceResult? LastLevelAdvance { get; private set; }
+
+    /// <summary>The additional 2d6 class talent rolled on reaching level two.</summary>
+    public ClassTalentRoll? AdvancementTalent { get; private set; }
+
+    /// <summary>The Level-2 row has been rolled but awaits its player choice.</summary>
+    public bool AdvancementChoicePending =>
+        AdvancementTalent is { Choice: null };
+
+    public IReadOnlyList<ClassTalentChoice> LegalAdvancementChoices =>
+        AdvancementTalent is { Choice: null } talent
+            ? CharacterCreation.LegalTalentChoices(
+                Player.Class,
+                Player.Abilities,
+                talent)
+            : [];
 
     /// <summary>The object currently held by the cursor, if any.</summary>
     public WorldObject? HeldObject =>
@@ -336,10 +389,12 @@ public sealed class PlayableSliceWorld : IDisposable
         IAttackRulesResolver? attackResolver = null)
     {
         var objects = new ObjectStore();
+        var character = DefaultDemoCharacter();
         var player = SpawnAvatar(
             objects,
             DemoMapLocation(new GridPosition(4, 14)),
-            RollAvatarBody(seed));
+            RollStartingBody(seed, character),
+            character);
 
         SpawnChest(
             objects,
@@ -414,7 +469,8 @@ public sealed class PlayableSliceWorld : IDisposable
                 player,
                 startTick: 0,
                 seed,
-                attackResolver);
+                character,
+                attackResolver: attackResolver);
             world.Settle();
             return world;
         }
@@ -428,20 +484,26 @@ public sealed class PlayableSliceWorld : IDisposable
     }
 
     /// <summary>
-    /// A fresh generated world: the whole eighteen-subzone plan for
-    /// <paramref name="worldSeed"/>, built, with the Avatar standing at the
-    /// first subzone's way in.
+    /// A fresh vertical-slice world: the first planned subzone for
+    /// <paramref name="worldSeed"/>, with the Avatar at its way in.
     /// </summary>
     /// <remarks>
-    /// Every subzone is built up front and every map is kept. Eighteen maps of
-    /// 65 by at most 29 cells is a few hundred kilobytes, which buys something
-    /// worth having: a transition is a move between two maps that already
-    /// exist, so it cannot fail halfway through building the far side, and the
-    /// save is the whole world rather than the room the player happens to be
-    /// standing in. Building lazily is a change to make when a world is too big
-    /// to hold, not before.
+    /// The full planner still describes eighteen future subzones. The playable
+    /// milestone deliberately builds only index zero so character creation,
+    /// five-beat dungeon pacing and advancement can close one coherent loop
+    /// first. The beats are generation structure, not runtime objectives.
     /// </remarks>
-    public static PlayableSliceWorld CreateGenerated(ulong worldSeed)
+    public static PlayableSliceWorld CreateGenerated(ulong worldSeed) =>
+        CreateGenerated(worldSeed, RollDefaultCharacter(worldSeed));
+
+    /// <summary>
+    /// Builds the first playable vertical slice: one generated subzone with
+    /// five authored pacing beats for the confirmed character, ending in
+    /// advancement rather than eagerly constructing the other seventeen maps.
+    /// </summary>
+    public static PlayableSliceWorld CreateGenerated(
+        ulong worldSeed,
+        CreatedCharacter character)
     {
         if (worldSeed == 0)
         {
@@ -452,42 +514,52 @@ public sealed class PlayableSliceWorld : IDisposable
                 "start from.");
         }
 
-        var plan = WorldPlanner.Plan(worldSeed, StartingTier);
+        ArgumentNullException.ThrowIfNull(character);
+        if (character.Talents.Count !=
+            RulesRepository.CharacterCreation.AncestryOf(character.Ancestry).TalentRolls)
+        {
+            throw new ArgumentException(
+                "The confirmed character does not carry all ancestry talent rolls.",
+                nameof(character));
+        }
+        if (!character.TalentsResolved)
+        {
+            throw new ArgumentException(
+                "The confirmed character has unresolved talent choices.",
+                nameof(character));
+        }
+
+        var tier = new CharacterTier(Level: 1, character.Class);
+        var plan = WorldPlanner.PlanSubzone(worldSeed, index: 0, tier);
         var objects = new ObjectStore();
-        var built = new List<WorldMap>(plan.Subzones.Count);
+        WorldMap? built = null;
         try
         {
-            foreach (var subzone in plan.Subzones)
-            {
-                built.Add(SubzoneBuilder.Build(objects, subzone).Map);
-            }
-
-            var first = plan.Subzones[0];
-            var (cellX, cellY) = WorldPlanner.EntranceCell(first);
+            built = SubzoneBuilder.Build(objects, plan).Map;
+            var (cellX, cellY) = WorldPlanner.EntranceCell(plan);
             var player = SpawnAvatar(
                 objects,
                 ObjectLocation.OnMap(
-                    first.MapId,
+                    plan.MapId,
                     AnchorOf(
                         new GridPosition(cellX, cellY),
-                        first.Beats[0].FloorZ)),
-                RollAvatarBody(worldSeed));
+                        plan.Beats[0].FloorZ)),
+                RollStartingBody(worldSeed, character),
+                character);
             var world = new PlayableSliceWorld(
                 objects,
                 player,
                 startTick: 0,
-                worldSeed);
+                worldSeed,
+                character);
             world.Settle();
             world.LastMessage =
-                $"You enter {first.Theme}. Find the way on.";
+                $"You enter {plan.Theme}. Explore, claim its treasure, and find the way out.";
             return world;
         }
         catch
         {
-            foreach (var map in built)
-            {
-                map.Dispose();
-            }
+            built?.Dispose();
 
             throw;
         }
@@ -536,11 +608,25 @@ public sealed class PlayableSliceWorld : IDisposable
                 $"{AvatarTypeId} is at {avatar.Location}.");
         }
 
+        var progress = loaded.Progress;
+        var character = new CreatedCharacter(
+            progress?.CreationScores ?? avatar.Abilities,
+            avatar.Class,
+            progress?.Ancestry ?? Ancestry.Human,
+            progress?.Method ?? CharacterCreationMethod.Ironman,
+            progress?.TalentRolls ?? 0,
+            progress?.CreationAttempts ?? 1,
+            progress?.FirstTalent,
+            progress?.SecondTalent);
         var world = new PlayableSliceWorld(
             loaded.Objects,
             avatar.Id,
             loaded.SimulationTick,
-            loaded.DiceState);
+            loaded.DiceState,
+            character,
+            progress?.Experience ?? 0,
+            progress?.DungeonCompleted ?? false,
+            progress?.AdvancementTalent);
         foreach (var condition in loaded.Conditions ?? [])
         {
             if (!loaded.Objects.TryGet(condition.ActorId, out var actor) ||
@@ -602,9 +688,8 @@ public sealed class PlayableSliceWorld : IDisposable
     {
         SaveGate.Cancel();
 
-        // Every map, not just the one being played: a generated world holds
-        // eighteen, and any left registered would keep indexing a store
-        // nothing else is using.
+        // Every registered map, not just the one being played. The vertical
+        // slice holds one; the store still supports a later multi-map world.
         foreach (var map in Objects.Maps.All)
         {
             map.Dispose();
@@ -617,14 +702,28 @@ public sealed class PlayableSliceWorld : IDisposable
     /// at. Rolled rather than authored, so a d10 fighter and a d4 wizard are
     /// not the same person with a different hat.
     /// </summary>
-    private static RolledBody RollAvatarBody(ulong seed) =>
+    /// <summary>The body the confirmed level-one character will start with.</summary>
+    public static RolledBody RollStartingBody(
+        ulong seed,
+        CreatedCharacter character) =>
         ActorVitality.RollBody(
             RulesRepository.Vitality,
             RulesRepository.AbilityBonuses,
             new Dice(seed ^ AvatarBodySalt),
-            StartingTier.Class,
-            StartingTier.Level,
-            AvatarScores);
+            character.Class,
+            level: 1,
+            character.Scores);
+
+    public static IReadOnlyList<string> StartingEquipmentFor(
+        CharacterClass characterClass) =>
+        characterClass switch
+        {
+            CharacterClass.Fighter =>
+                ["Rusty Sword", "Leather Jerkin", "Wooden Shield", "Iron Helm", "Apple"],
+            CharacterClass.Rogue =>
+                ["Bronze Dagger", "Leather Jerkin", "Apple"],
+            _ => ["Leather Jerkin", "Apple"],
+        };
 
     /// <summary>
     /// The Avatar and what he starts out holding, wherever the world puts him.
@@ -632,7 +731,8 @@ public sealed class PlayableSliceWorld : IDisposable
     private static ObjectId SpawnAvatar(
         ObjectStore objects,
         ObjectLocation location,
-        RolledBody body)
+        RolledBody body,
+        CreatedCharacter character)
     {
         var player = objects.Create(new ObjectSpawn
         {
@@ -649,28 +749,43 @@ public sealed class PlayableSliceWorld : IDisposable
                 ObjectFlags.Solid |
                 ObjectFlags.AffectedByGravity |
                 ObjectFlags.Visible,
-            Strength = AvatarScores.Strength,
-            Dexterity = AvatarScores.Dexterity,
-            Constitution = AvatarScores.Constitution,
-            Intelligence = AvatarScores.Intelligence,
-            Wisdom = AvatarScores.Wisdom,
-            Charisma = AvatarScores.Charisma,
-            Class = StartingTier.Class,
-            Level = StartingTier.Level,
+            Strength = character.Scores.Strength,
+            Dexterity = character.Scores.Dexterity,
+            Constitution = character.Scores.Constitution,
+            Intelligence = character.Scores.Intelligence,
+            Wisdom = character.Scores.Wisdom,
+            Charisma = character.Scores.Charisma,
+            Class = character.Class,
+            Level = 1,
             Health = body.MaximumConcussion,
             MaxHealth = body.MaximumConcussion,
             Wounds = body.MaximumWounds,
             MaxWounds = body.MaximumWounds,
         });
-        SpawnItem(
-            objects,
-            player,
-            "item.rusty-sword",
-            "Rusty Sword",
-            "loot.shortsword",
-            EquipmentSlotMask.RightHand,
-            ObjectFlags.Weapon,
-            quality: -1);
+        if (character.Class == CharacterClass.Rogue)
+        {
+            SpawnItem(
+                objects,
+                player,
+                DaggerTypeId,
+                "Bronze Dagger",
+                "loot.shortsword",
+                EquipmentSlotMask.EitherHand | EquipmentSlotMask.Scabbard,
+                ObjectFlags.Weapon | ObjectFlags.Finesse,
+                quality: -1);
+        }
+        else
+        {
+            SpawnItem(
+                objects,
+                player,
+                "item.rusty-sword",
+                "Rusty Sword",
+                "loot.shortsword",
+                EquipmentSlotMask.RightHand,
+                ObjectFlags.Weapon,
+                quality: -1);
+        }
         SpawnItem(
             objects,
             player,
@@ -679,19 +794,22 @@ public sealed class PlayableSliceWorld : IDisposable
             equipmentSlots: EquipmentSlotMask.Body,
             armorType: ArmorType.Leather,
             defenseBonus: 2);
-        SpawnItem(
-            objects,
-            player,
-            "item.wooden-shield",
-            "Wooden Shield",
-            equipmentSlots: EquipmentSlotMask.LeftHand,
-            defenseBonus: 2);
-        SpawnItem(
-            objects,
-            player,
-            "item.iron-helm",
-            "Iron Helm",
-            equipmentSlots: EquipmentSlotMask.Head);
+        if (character.Class == CharacterClass.Fighter)
+        {
+            SpawnItem(
+                objects,
+                player,
+                "item.wooden-shield",
+                "Wooden Shield",
+                equipmentSlots: EquipmentSlotMask.LeftHand,
+                defenseBonus: 2);
+            SpawnItem(
+                objects,
+                player,
+                "item.iron-helm",
+                "Iron Helm",
+                equipmentSlots: EquipmentSlotMask.Head);
+        }
         SpawnItem(objects, player, "item.apple", "Apple");
         return player;
     }
@@ -1046,6 +1164,32 @@ public sealed class PlayableSliceWorld : IDisposable
             CloseActiveChest();
         }
 
+        var terrain = CurrentMap.GetTerrain(
+            PlayerPosition.X,
+            PlayerPosition.Y);
+        if (terrain.Flags.HasFlag(TerrainFlags.Hazard))
+        {
+            var crossing = EnvironmentalHazard.CrossCrackedFloor(
+                Dice,
+                Player.Abilities,
+                RulesRepository.AbilityBonuses,
+                Player.Impairments);
+            if (crossing.Avoided)
+            {
+                return Finish(
+                    true,
+                    $"Hazard: you keep your footing on the cracked floor " +
+                    $"({crossing.Check.Total} vs {crossing.Difficulty}).");
+            }
+
+            var damage = Vitality.Damage(PlayerId, crossing.Damage);
+            return Finish(
+                true,
+                $"Hazard: the cracked floor gives way for {crossing.Damage} " +
+                $"damage ({crossing.Check.Total} vs {crossing.Difficulty}); " +
+                $"{damage.State.Concussion}/{damage.State.MaximumConcussion} HP remain.");
+        }
+
         return Finish(
             true,
             vault is { } cleared
@@ -1114,12 +1258,56 @@ public sealed class PlayableSliceWorld : IDisposable
             return chest;
         }
 
-        var travelled = UseNearestWaymark();
-        return travelled.Succeeded
-            ? travelled
-            : Finish(
-                false,
-                "Stand next to a chest, a corpse, or a way through first.");
+        var feature = QueryNearPlayer(1, ObjectFlags.Visible)
+            .Where(value => value.Id != PlayerId)
+            .Where(value => value.TypeId == "prop.trestle" ||
+                            value.TypeId == "decal.cracked-floor" ||
+                            value.TypeId.StartsWith("prop.", StringComparison.Ordinal) &&
+                            value.TypeId.EndsWith("-marker", StringComparison.Ordinal))
+            .Where(value => PlayerPosition.ManhattanDistance(GridPositionOf(value)) <= 1)
+            .OrderBy(value => PlayerPosition.ManhattanDistance(GridPositionOf(value)))
+            .ThenBy(value => value.Id)
+            .Cast<WorldObject?>()
+            .FirstOrDefault();
+        if (feature is { } nearby)
+        {
+            if (nearby.TypeId == "prop.trestle")
+            {
+                var dependants = CurrentMap.SupportedObjects(nearby.Id).Count;
+                Objects.Destroy(nearby.Id);
+                return Finish(
+                    true,
+                    dependants == 0
+                        ? "You pull the loose trestle apart."
+                        : $"You pull the trestle apart; {dependants} supported " +
+                          "object(s) fall.");
+            }
+            if (nearby.TypeId == "decal.cracked-floor")
+            {
+                return Finish(
+                    true,
+                    "The fractures continue across the floor ahead. Crossing " +
+                    "will test your Dexterity.");
+            }
+
+            return Finish(
+                true,
+                "The weathered marker warns that unstable ground and old " +
+                "supports lie farther along this passage.");
+        }
+
+        var here = PlayerPosition;
+        if (Waymarks.Any(mark =>
+                here.ManhattanDistance(GridPositionOf(mark)) <= 1))
+        {
+            // Preserve a boundary's authored refusal (such as an unclaimed
+            // reward) instead of replacing it with "stand closer".
+            return UseNearestWaymark();
+        }
+
+        return Finish(
+            false,
+            "Stand next to something usable, a chest, a corpse, or a way through first.");
     }
 
     /// <summary>
@@ -1138,8 +1326,7 @@ public sealed class PlayableSliceWorld : IDisposable
     public SliceActionResult UseNearestWaymark()
     {
         var here = PlayerPosition;
-        var nearest = QueryNearPlayer(1, ObjectFlags.Visible)
-            .Where(IsWaymark)
+        var nearest = Waymarks
             .Where(mark => here.ManhattanDistance(GridPositionOf(mark)) <= 1)
             .OrderBy(mark => here.ManhattanDistance(GridPositionOf(mark)))
             .ThenBy(mark => mark.Id)
@@ -1168,6 +1355,10 @@ public sealed class PlayableSliceWorld : IDisposable
         var toMapId = checked((ushort)(onward ? fromMapId + 1 : fromMapId - 1));
         if (!Objects.Maps.TryGet(toMapId, out var destination))
         {
+            if (onward && Objects.Maps.All.Count == 1)
+            {
+                return CompleteFirstDungeon();
+            }
             return Finish(
                 false,
                 $"{waymark.Name} leads to map {toMapId}, which this world " +
@@ -1449,6 +1640,110 @@ public sealed class PlayableSliceWorld : IDisposable
 
         _activeChestId = ObjectId.None;
     }
+
+    private SliceActionResult CompleteFirstDungeon()
+    {
+        if (DungeonCompleted)
+        {
+            return Finish(true, "The dungeon is already complete.");
+        }
+
+        var unclaimedReward = Objects.Enumerate()
+            .Where(value => value.TypeId == "container.vault-box")
+            .Any(chest => Objects.GetContents(chest.Id).Count > 0);
+        if (unclaimedReward)
+        {
+            return Finish(false, "Claim the vault-box reward before leaving.");
+        }
+
+        DungeonCompleted = true;
+        Experience = checked(Experience + FirstDungeonExperience);
+        AdvancementTalent = CharacterCreation.RollTalent(
+            RulesRepository.CharacterCreation,
+            Dice,
+            Player.Class);
+        return Finish(
+            true,
+            $"Legendary hoard recovered: +{FirstDungeonExperience} XP. " +
+            "Resolve your rolled talent to advance to level 2.");
+    }
+
+    /// <summary>
+    /// Resolves the already-rolled Level-2 talent, applies its permanent score
+    /// change, then rolls and commits the new level. The 2d6 row is never
+    /// rerolled by this choice.
+    /// </summary>
+    public SliceActionResult ResolveAdvancementTalent(ClassTalentChoice choice)
+    {
+        ArgumentNullException.ThrowIfNull(choice);
+        if (!DungeonCompleted || AdvancementTalent is not { Choice: null } talent)
+        {
+            return Finish(false, "There is no pending advancement talent.");
+        }
+
+        var resolved = CharacterCreation.ResolveTalent(
+            Player.Class,
+            Player.Abilities,
+            talent,
+            choice);
+        var previousAbilities = Player.Abilities;
+        var changedAbilities = CharacterCreation.ApplyAbilityChoice(
+            previousAbilities,
+            choice);
+        var diceRollback = Dice.State;
+        try
+        {
+            Objects.SetActorAbilities(PlayerId, changedAbilities);
+            LastLevelAdvance = Vitality.AdvanceLevel(PlayerId);
+            AdvancementTalent = resolved;
+            return Finish(
+                true,
+                $"{choice.Description}. You advance to level {Player.Level}.");
+        }
+        catch
+        {
+            Objects.SetActorAbilities(PlayerId, previousAbilities);
+            Dice.RestoreState(diceRollback);
+            throw;
+        }
+    }
+
+    private WorldProgressSnapshot CaptureProgress() =>
+        new(
+            Character.Method,
+            Character.Ancestry,
+            Character.Scores,
+            Character.Attempts,
+            Character.TalentRolls,
+            Character.FirstTalent,
+            Character.SecondTalent,
+            AdvancementTalent,
+            Experience,
+            DungeonCompleted);
+
+    private static CreatedCharacter RollDefaultCharacter(ulong seed)
+    {
+        var dice = new Dice(seed ^ DefaultCharacterSalt);
+        var character = CharacterCreation.RollUnearthedArcana(
+            RulesRepository.CharacterCreation,
+            dice,
+            CharacterClass.Fighter,
+            Ancestry.Human);
+        return CharacterCreation.ResolveTalentsWithFirstLegalChoices(
+            CharacterCreation.RollTalents(
+                RulesRepository.CharacterCreation,
+                dice,
+                character));
+    }
+
+    private static CreatedCharacter DefaultDemoCharacter() =>
+        new(
+            AvatarScores,
+            StartingTier.Class,
+            Ancestry.Human,
+            CharacterCreationMethod.UnearthedArcana,
+            TalentRolls: 0,
+            Attempts: 1);
 
     private void PublishCombatEvents(IEnumerable<CombatEvent> events)
     {

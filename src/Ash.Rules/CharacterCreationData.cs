@@ -45,6 +45,47 @@ public sealed record AncestryDefinition(
     string Name,
     int TalentRolls);
 
+/// <summary>One resolved row on a class's authored 2d6 talent table.</summary>
+public sealed record ClassTalentDefinition(
+    int MinimumRoll,
+    int MaximumRoll,
+    string Id,
+    string Name,
+    string Description)
+{
+    public bool Contains(int roll) =>
+        roll >= MinimumRoll && roll <= MaximumRoll;
+}
+
+/// <summary>The complete 2d6 talent table for one class.</summary>
+public sealed class ClassTalentTable
+{
+    private readonly ClassTalentDefinition[] _rows;
+
+    internal ClassTalentTable(
+        CharacterClass characterClass,
+        IReadOnlyList<ClassTalentDefinition> rows)
+    {
+        Class = characterClass;
+        _rows = rows.OrderBy(row => row.MinimumRoll).ToArray();
+    }
+
+    public CharacterClass Class { get; }
+
+    public IReadOnlyList<ClassTalentDefinition> Rows => _rows;
+
+    public ClassTalentDefinition ForRoll(int roll)
+    {
+        if (roll is < 2 or > 12)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(roll), roll, "A 2d6 talent roll runs from 2 through 12.");
+        }
+
+        return _rows.Single(row => row.Contains(roll));
+    }
+}
+
 public sealed record IronmanRules(
     int DicePerScore,
     int DieSides,
@@ -85,18 +126,20 @@ public sealed record UnearthedArcanaRules(
 /// </summary>
 public sealed class CharacterCreationData
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     internal CharacterCreationData(
         AbilityBonusTable abilityBonuses,
         IReadOnlyDictionary<Ancestry, AncestryDefinition> ancestries,
         IronmanRules ironman,
-        UnearthedArcanaRules unearthedArcana)
+        UnearthedArcanaRules unearthedArcana,
+        IReadOnlyDictionary<CharacterClass, ClassTalentTable> talentTables)
     {
         AbilityBonuses = abilityBonuses;
         Ancestries = ancestries;
         Ironman = ironman;
         UnearthedArcana = unearthedArcana;
+        TalentTables = talentTables;
     }
 
     public AbilityBonusTable AbilityBonuses { get; }
@@ -107,11 +150,19 @@ public sealed class CharacterCreationData
 
     public UnearthedArcanaRules UnearthedArcana { get; }
 
+    public IReadOnlyDictionary<CharacterClass, ClassTalentTable> TalentTables { get; }
+
     public AncestryDefinition AncestryOf(Ancestry ancestry) =>
         Ancestries.TryGetValue(ancestry, out var definition)
             ? definition
             : throw new RulesResolutionException(
                 $"No ancestry '{ancestry}' is configured.");
+
+    public ClassTalentTable TalentTableFor(CharacterClass characterClass) =>
+        TalentTables.TryGetValue(characterClass, out var table)
+            ? table
+            : throw new RulesResolutionException(
+                $"No talent table is configured for {characterClass}.");
 }
 
 /// <summary>
@@ -160,7 +211,8 @@ public static class CharacterCreationLoader
             ReadBonuses(document.AbilityBonuses),
             ReadAncestries(document.Ancestries),
             ReadIronman(document.Ironman),
-            ReadUnearthedArcana(document.UnearthedArcana));
+            ReadUnearthedArcana(document.UnearthedArcana),
+            ReadTalentTables(document.TalentTables));
     }
 
     public static CharacterCreationData LoadFromFile(string path)
@@ -293,6 +345,67 @@ public static class CharacterCreationLoader
             priorities);
     }
 
+    private static IReadOnlyDictionary<CharacterClass, ClassTalentTable>
+        ReadTalentTables(
+            IReadOnlyDictionary<string, IReadOnlyList<TalentRowDocument>>? documents)
+    {
+        var tables = new Dictionary<CharacterClass, ClassTalentTable>();
+        foreach (var (name, rows) in Require(documents, "talent_tables"))
+        {
+            var characterClass = ParseEnum<CharacterClass>(name, "class");
+            if (rows.Count == 0)
+            {
+                throw new RulesDataException(
+                    $"Talent table '{name}' has no rows.");
+            }
+
+            var definitions = rows.Select((row, index) =>
+            {
+                if (row.MinimumRoll < 2 || row.MaximumRoll > 12 ||
+                    row.MinimumRoll > row.MaximumRoll)
+                {
+                    throw new RulesDataException(
+                        $"talent_tables.{name}[{index}] has an invalid 2d6 range.");
+                }
+                if (string.IsNullOrWhiteSpace(row.Id) ||
+                    string.IsNullOrWhiteSpace(row.Name) ||
+                    string.IsNullOrWhiteSpace(row.Description))
+                {
+                    throw new RulesDataException(
+                        $"talent_tables.{name}[{index}] needs an id, name and description.");
+                }
+
+                return new ClassTalentDefinition(
+                    row.MinimumRoll,
+                    row.MaximumRoll,
+                    row.Id,
+                    row.Name,
+                    row.Description);
+            }).ToArray();
+
+            for (var roll = 2; roll <= 12; roll++)
+            {
+                var matches = definitions.Count(row => row.Contains(roll));
+                if (matches != 1)
+                {
+                    throw new RulesDataException(
+                        $"Talent table '{name}' must cover roll {roll} exactly once, not {matches} times.");
+                }
+            }
+
+            tables.Add(
+                characterClass,
+                new ClassTalentTable(characterClass, definitions));
+        }
+
+        if (tables.Count == 0)
+        {
+            throw new RulesDataException("No class talent tables are configured.");
+        }
+
+        return tables;
+    }
+
     /// <summary>Reads an ability order, which must name each ability once.</summary>
     private static IReadOnlyList<Ability> ReadAbilities(
         IReadOnlyList<string>? names,
@@ -332,6 +445,9 @@ public static class CharacterCreationLoader
         public IronmanDocument? Ironman { get; init; }
 
         public UnearthedArcanaDocument? UnearthedArcana { get; init; }
+
+        public IReadOnlyDictionary<string, IReadOnlyList<TalentRowDocument>>?
+            TalentTables { get; init; }
     }
 
     private sealed record BonusDocument
@@ -395,5 +511,18 @@ public static class CharacterCreationLoader
 
         public IReadOnlyDictionary<string, IReadOnlyList<string>>?
             ClassPriorities { get; init; }
+    }
+
+    private sealed record TalentRowDocument
+    {
+        public int MinimumRoll { get; init; }
+
+        public int MaximumRoll { get; init; }
+
+        public string Id { get; init; } = string.Empty;
+
+        public string Name { get; init; } = string.Empty;
+
+        public string Description { get; init; } = string.Empty;
     }
 }

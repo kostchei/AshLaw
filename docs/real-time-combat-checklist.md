@@ -47,7 +47,9 @@ checkboxes in the phases below remain authoritative.
   keys for animation poses, audio, HUD summaries, and the calculation inspector.
   Evidence: `AttackActionTests` (270-test simulation suite) and
   `tools/run-game.ps1 -Demo -Combat` on Godot 4.7-stable.
-- **Phase 7:** complete. Save format 9 persists active actions, cooldowns, and
+- **Phase 7:** complete. Save format 12 persists active actions, cooldowns,
+  character-creation provenance, rolled talents and their player-resolved
+  choices, XP, dungeon completion, and territorial home/search state, and
   deterministic continuation; packaged text rules and canonical rule/profile
   fingerprints replace the source-tree runtime assumption. Evidence:
   `MidWindUpSaveResumesTheExactImpactRecoveryAndFutureRolls`,

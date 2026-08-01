@@ -93,7 +93,7 @@ public sealed class CharacterCreationDataTests
 
     /// <summary>A minimal valid document, with one part swapped out at a time.</summary>
     private static string Document(
-        int schemaVersion = 1,
+        int schemaVersion = 2,
         string bonusRows = """[ { "score": 3, "bonus": -4 } ]""",
         int maximumScore = 3,
         string fighterPriority = """
@@ -130,6 +130,17 @@ public sealed class CharacterCreationDataTests
             "keep_highest": 3,
             "pools": [8,7,6,5,4,3],
             "class_priorities": { "fighter": {{fighterPriority}} }
+          },
+          "talent_tables": {
+            "fighter": [
+              {
+                "minimum_roll": 2,
+                "maximum_roll": 12,
+                "id": "test_talent",
+                "name": "Test Talent",
+                "description": "A complete test table."
+              }
+            ]
           }
         }
         """;

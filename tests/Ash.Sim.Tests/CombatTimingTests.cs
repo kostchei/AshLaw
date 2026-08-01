@@ -1,3 +1,4 @@
+using Ash.Core;
 using Ash.Rules;
 
 namespace Ash.Sim.Tests;
@@ -340,6 +341,54 @@ public sealed class CombatTimingTests
     }
 
     [Fact]
+    public void AHostileMonsterSearchesThenReturnsToItsHomeTerritory()
+    {
+        using var world = NpcWorld(
+            seed: 7,
+            typeId: "monster.goblin-scout",
+            playerDistanceTiles: 3);
+        var scout = world.Monsters.Single(value =>
+            value.TypeId == "monster.goblin-scout");
+        var home = world.GetGridPosition(scout.Id);
+
+        RunUntil(world, CombatEventKind.Alerted, maxBeats: 40);
+        AdvanceBeat(world);
+        PlacePlayerFarFrom(world, scout.Id, minimumDistanceTiles: 10);
+
+        AdvanceBeat(world);
+        Assert.Equal(Awareness.Searching, world.Combat.AwarenessOf(scout.Id));
+
+        var returned = false;
+        for (var beat = 0; beat < 80; beat++)
+        {
+            AdvanceBeat(world);
+            if (world.Combat.AwarenessOf(scout.Id) == Awareness.Unaware)
+            {
+                returned = true;
+                break;
+            }
+        }
+
+        Assert.True(returned);
+        Assert.Equal(home, world.GetGridPosition(scout.Id));
+    }
+
+    [Fact]
+    public void ProvokingAPackHunterAlertsNearbyPackmates()
+    {
+        using var world = MeleeWorld(seed: 8);
+        var rat = Rat(world);
+        var ally = SpawnPackmate(world, rat);
+
+        Assert.True(world.AttackAdjacentMonster().Succeeded);
+
+        Assert.Equal(MonsterReaction.Hostile, world.Combat.ReactionOf(ally.Id));
+        Assert.Equal(Awareness.Alerted, world.Combat.AwarenessOf(ally.Id));
+        AdvanceBeat(world);
+        Assert.Equal(Awareness.Engaged, world.Combat.AwarenessOf(ally.Id));
+    }
+
+    [Fact]
     public void EveryCreatureThatCanRaiseAnAlarmHasAVoice()
     {
         using var world = PlayableSliceWorld.CreateDemo();
@@ -403,13 +452,19 @@ public sealed class CombatTimingTests
     private static PlayableSliceWorld MeleeWorld(
         ulong seed,
         int playerDistanceTiles = 1)
+        => NpcWorld(seed, "monster.cave-rat", playerDistanceTiles);
+
+    private static PlayableSliceWorld NpcWorld(
+        ulong seed,
+        string typeId,
+        int playerDistanceTiles)
     {
         var world = PlayableSliceWorld.CreateDemo(seed, new TimingAttackResolver());
-        var rat = Rat(world);
-        var ratCell = world.GetGridPosition(rat.Id);
-        var target = rat.Location.Position with
+        var npc = world.Monsters.Single(value => value.TypeId == typeId);
+        var npcCell = world.GetGridPosition(npc.Id);
+        var target = npc.Location.Position with
         {
-            X = rat.Location.Position.X -
+            X = npc.Location.Position.X -
                 (playerDistanceTiles * PlayableSliceWorld.WorldUnitsPerTile),
         };
         var placed = world.Transfers.Execute(
@@ -420,8 +475,98 @@ public sealed class CombatTimingTests
         Assert.True(placed.Succeeded, placed.Message);
         Assert.Equal(
             playerDistanceTiles,
-            world.PlayerPosition.ManhattanDistance(ratCell));
+            world.PlayerPosition.ManhattanDistance(npcCell));
         return world;
+    }
+
+    private static void PlacePlayerFarFrom(
+        PlayableSliceWorld world,
+        ObjectId npcId,
+        int minimumDistanceTiles)
+    {
+        var npc = world.GetGridPosition(npcId);
+        var candidates =
+            from y in Enumerable.Range(0, world.CurrentMap.Depth)
+            from x in Enumerable.Range(0, world.CurrentMap.Width)
+            let cell = new GridPosition(x, y)
+            let terrain = world.CurrentMap.GetTerrain(x, y)
+            where terrain.Flags.HasFlag(TerrainFlags.Walkable)
+            where cell.ManhattanDistance(npc) >= minimumDistanceTiles
+            orderby cell.ManhattanDistance(npc) descending
+            select new Vec3i(
+                (x + 1) * PlayableSliceWorld.WorldUnitsPerTile,
+                (y + 1) * PlayableSliceWorld.WorldUnitsPerTile,
+                terrain.FloorZ);
+
+        foreach (var position in candidates)
+        {
+            var placed = world.Transfers.Execute(
+                new ObjectTransferRequest(
+                    world.PlayerId,
+                    world.Player.Location,
+                    ObjectLocation.OnMap(world.CurrentMapId, position)));
+            if (placed.Succeeded)
+            {
+                return;
+            }
+        }
+
+        throw new InvalidOperationException("No distant legal player cell was found.");
+    }
+
+    private static WorldObject SpawnPackmate(
+        PlayableSliceWorld world,
+        WorldObject source)
+    {
+        for (var distance = 2; distance <= 5; distance++)
+        {
+            foreach (var (deltaX, deltaY) in new[]
+                     {
+                         (distance, 0), (-distance, 0),
+                         (0, distance), (0, -distance),
+                     })
+            {
+                var location = ObjectLocation.OnMap(
+                    world.CurrentMapId,
+                    source.Location.Position with
+                    {
+                        X = source.Location.Position.X +
+                            (deltaX * PlayableSliceWorld.WorldUnitsPerTile),
+                        Y = source.Location.Position.Y +
+                            (deltaY * PlayableSliceWorld.WorldUnitsPerTile),
+                    });
+                var spawn = new ObjectSpawn
+                {
+                    TypeId = source.TypeId,
+                    Name = "Second Cave Rat",
+                    ShapeId = source.ShapeId,
+                    Location = location,
+                    Footprint = source.Footprint,
+                    Height = source.Height,
+                    Flags = source.Flags,
+                    Strength = source.Strength,
+                    Dexterity = source.Dexterity,
+                    Constitution = source.Constitution,
+                    Intelligence = source.Intelligence,
+                    Wisdom = source.Wisdom,
+                    Charisma = source.Charisma,
+                    Class = source.Class,
+                    Level = source.Level,
+                    Health = source.Health,
+                    MaxHealth = source.MaxHealth,
+                    Wounds = source.Wounds,
+                    MaxWounds = source.MaxWounds,
+                };
+                if (world.CurrentMap.ValidatePlacement(
+                        spawn.AsProbe(location),
+                        location).Allowed)
+                {
+                    return world.Objects.Get(world.Objects.Create(spawn));
+                }
+            }
+        }
+
+        throw new InvalidOperationException("No legal nearby packmate cell was found.");
     }
 
     /// <summary>Keeps timing tests about clocks and movement, not lethal rolls.</summary>

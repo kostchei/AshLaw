@@ -12,6 +12,14 @@ public readonly record struct RolledBody(
     public int MaximumConcussion => Concussion.Maximum;
 }
 
+/// <summary>What one level added to a living actor's body.</summary>
+public readonly record struct LevelAdvanceResult(
+    int PreviousLevel,
+    int NewLevel,
+    HitDieResult HitDie,
+    int NewMaximumConcussion,
+    int NewMaximumWounds);
+
 /// <summary>
 /// The seam between the object store's numbers and the injury rules' meaning.
 /// </summary>
@@ -80,6 +88,52 @@ public sealed class ActorVitality
         RollBody(_data, _bonuses, _dice, characterClass, level, scores);
 
     public InjuryState Of(ObjectId actorId) => _objects.InjuryOf(actorId);
+
+    /// <summary>Rolls and commits one new class hit die and wound step.</summary>
+    public LevelAdvanceResult AdvanceLevel(ObjectId actorId)
+    {
+        var actor = _objects.Get(actorId);
+        if (!actor.HasFlag(ObjectFlags.Actor) || actor.Level < 1)
+        {
+            throw new InvalidOperationException(
+                $"{actor.Name} has no character level to advance.");
+        }
+
+        var nextLevel = checked(actor.Level + 1);
+        if (nextLevel > ClassProgressionTable.MaximumLevel)
+        {
+            throw new InvalidOperationException(
+                $"{actor.Name} is already at the maximum level.");
+        }
+
+        var constitutionBonus = Vitality.ConstitutionBonusPerDie(
+            _data,
+            actor.Class,
+            actor.Abilities,
+            _bonuses);
+        var hitDie = Vitality.RollHitDie(
+            _data,
+            _dice,
+            actor.Class,
+            constitutionBonus);
+        var newMaximumWounds = Vitality.MaximumWounds(
+            _data,
+            nextLevel,
+            actor.Abilities,
+            _bonuses);
+        _objects.AdvanceActorLevel(
+            actorId,
+            nextLevel,
+            hitDie.Hits,
+            newMaximumWounds);
+        var advanced = _objects.Get(actorId);
+        return new LevelAdvanceResult(
+            actor.Level,
+            nextLevel,
+            hitDie,
+            advanced.MaxHealth,
+            advanced.MaxWounds);
+    }
 
     /// <summary>
     /// Hurts a body: concussion hits first, then wounds, then the death clock.

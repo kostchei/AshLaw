@@ -19,6 +19,12 @@ public enum Awareness : byte
 
     /// <summary>Fighting.</summary>
     Engaged = 3,
+
+    /// <summary>Moving to the last place the player was perceived.</summary>
+    Searching = 4,
+
+    /// <summary>Disengaged and travelling back to its home territory.</summary>
+    Returning = 5,
 }
 
 /// <summary>What a monster was doing when the player encountered it.</summary>
@@ -132,7 +138,10 @@ public readonly record struct NpcCombatSnapshot(
     bool Provoked,
     long ActionReadyAtTick,
     long SwingReadyAtTick,
-    long StepReadyAtTick);
+    long StepReadyAtTick,
+    Vec3i HomePosition,
+    Vec3i LastKnownPlayerPosition,
+    long LastPerceivedAtTick = -1);
 
 public sealed record CombatDirectorSnapshot(
     long PlayerReadyAtTick,
@@ -328,6 +337,17 @@ public sealed class CombatDirector
     /// <summary>How far an NPC can start recognising the player from.</summary>
     public const int AwarenessRadiusTiles = 6;
 
+    /// <summary>How long a territorial creature searches after losing contact.</summary>
+    public const int LostContactMilliseconds = 3000;
+
+    /// <summary>Ordinary monsters do not chase indefinitely away from home.</summary>
+    public const int TerritorialPursuitRadiusTiles = 8;
+
+    /// <summary>Pack hunters are the explicit long-pursuit exception.</summary>
+    public const int PackPursuitRadiusTiles = 16;
+
+    public const int PackAssistanceRadiusTiles = 5;
+
     /// <summary>
     /// A monster spends its six tiles of round movement evenly across the
     /// round instead of crossing all six on one 200 ms beat.
@@ -480,6 +500,16 @@ public sealed class CombatDirector
     public MonsterReaction? ReactionOf(ObjectId npcId) =>
         _npcs.TryGetValue(npcId, out var state) ? state.Reaction : null;
 
+    public int MovementStepsPerRoundOf(ObjectId npcId)
+    {
+        var npc = _objects.Get(npcId);
+        if (!npc.HasFlag(ObjectFlags.Monster))
+        {
+            throw new ArgumentException("Movement rate requires a monster.", nameof(npcId));
+        }
+        return MovementStepsPerRoundFor(npc);
+    }
+
     public AttackAction? ActiveAttackOf(ObjectId actorId) =>
         _activeAttacks.TryGetValue(actorId, out var action) ? action : null;
 
@@ -503,7 +533,10 @@ public sealed class CombatDirector
                     value.Value.Provoked,
                     value.Value.ActionReadyAtTick,
                     value.Value.SwingReadyAtTick,
-                    value.Value.StepReadyAtTick))
+                    value.Value.StepReadyAtTick,
+                    value.Value.HomePosition,
+                    value.Value.LastKnownPlayerPosition,
+                    value.Value.LastPerceivedAtTick))
                 .ToArray(),
             _activeAttacks.Values.OrderBy(value => value.AttackerId).ToArray());
     }
@@ -533,6 +566,8 @@ public sealed class CombatDirector
                 throw new ObjectWorldSaveException(
                     $"The saved NPC combat state for {value.ActorId} is invalid.");
             }
+            var legacy = value.LastPerceivedAtTick < 0;
+            var player = _objects.Get(_playerId);
             npcs.Add(value.ActorId, new NpcCombatState(
                 value.Awareness,
                 value.Activity,
@@ -541,7 +576,10 @@ public sealed class CombatDirector
                 value.Provoked,
                 value.ActionReadyAtTick,
                 value.SwingReadyAtTick,
-                value.StepReadyAtTick));
+                value.StepReadyAtTick,
+                legacy ? actor.Location.Position : value.HomePosition,
+                legacy ? player.Location.Position : value.LastKnownPlayerPosition,
+                legacy ? _clock.Tick : value.LastPerceivedAtTick));
         }
 
         var attacks = new Dictionary<ObjectId, AttackAction>();
@@ -754,7 +792,8 @@ public sealed class CombatDirector
         var player = _objects.Get(_playerId);
         if (!_npcs.TryGetValue(npcId, out var state))
         {
-            _npcs[npcId] = BeginEncounter(player, provoked: true);
+            _npcs[npcId] = BeginEncounter(npc, player, provoked: true);
+            AlertPack(npc, player);
             return;
         }
 
@@ -763,19 +802,24 @@ public sealed class CombatDirector
             Reaction = MonsterReaction.Hostile,
             Provoked = true,
         };
-        if (state.Awareness is Awareness.Alerted or Awareness.Engaged)
+        if (state.Awareness is Awareness.Alerted or Awareness.Engaged or
+            Awareness.Searching or Awareness.Returning)
         {
             changed = changed with
             {
+                Awareness = Awareness.Engaged,
                 Action = DesiredAction(
                     MonsterReaction.Hostile,
                     TileDistance(npc, player)),
                 ActionReadyAtTick = checked(
                     _clock.Tick + AlertToActionBeats),
+                LastKnownPlayerPosition = player.Location.Position,
+                LastPerceivedAtTick = _clock.Tick,
             };
         }
 
         _npcs[npcId] = changed;
+        AlertPack(npc, player);
     }
 
     private void AdvanceNpc(
@@ -788,7 +832,7 @@ public sealed class CombatDirector
         {
             if (distance <= AwarenessRadiusTiles)
             {
-                _npcs[npc.Id] = BeginEncounter(player, provoked: false);
+                _npcs[npc.Id] = BeginEncounter(npc, player, provoked: false);
             }
 
             return;
@@ -833,6 +877,10 @@ public sealed class CombatDirector
                         Damage: 0,
                         RemainingHealth: npc.Health,
                         $"{npc.Name}: {CreatureVoices.Utterance(voice)}"));
+                if (state.Reaction == MonsterReaction.Hostile)
+                {
+                    AlertPack(npc, player);
+                }
                 return;
 
             case Awareness.Alerted:
@@ -852,6 +900,28 @@ public sealed class CombatDirector
                 return;
 
             case Awareness.Engaged:
+                if (distance <= TrackingRadiusFor(npc))
+                {
+                    state = state with
+                    {
+                        LastKnownPlayerPosition = player.Location.Position,
+                        LastPerceivedAtTick = _clock.Tick,
+                    };
+                    _npcs[npc.Id] = state;
+                }
+                else
+                {
+                    BeginSearchOrReturn(npc, state);
+                    return;
+                }
+
+                if (state.Reaction == MonsterReaction.Hostile &&
+                    DistanceFromHome(npc, state) >= PursuitRadiusFor(npc))
+                {
+                    BeginReturn(npc, state);
+                    return;
+                }
+
                 var desired = DesiredAction(state.Reaction, distance);
                 if (desired != state.Action)
                 {
@@ -872,6 +942,42 @@ public sealed class CombatDirector
                 PerformAction(npc, player, state, events);
                 return;
 
+            case Awareness.Searching:
+                if (distance <= TrackingRadiusFor(npc))
+                {
+                    _npcs[npc.Id] = state with
+                    {
+                        Awareness = Awareness.Engaged,
+                        Reaction = MonsterReaction.Hostile,
+                        Action = DesiredAction(MonsterReaction.Hostile, distance),
+                        ActionReadyAtTick = checked(_clock.Tick + AlertToActionBeats),
+                        LastKnownPlayerPosition = player.Location.Position,
+                        LastPerceivedAtTick = _clock.Tick,
+                    };
+                    return;
+                }
+
+                if (_clock.Tick - state.LastPerceivedAtTick >=
+                        CombatClock.BeatsIn(LostContactMilliseconds) ||
+                    DistanceFromHome(npc, state) >= PursuitRadiusFor(npc))
+                {
+                    BeginReturn(npc, state);
+                    return;
+                }
+
+                MoveToward(npc, state.LastKnownPlayerPosition, state);
+                return;
+
+            case Awareness.Returning:
+                if (TileDistance(npc.Location.Position, state.HomePosition) == 0)
+                {
+                    _npcs.Remove(npc.Id);
+                    return;
+                }
+
+                MoveToward(npc, state.HomePosition, state);
+                return;
+
             default:
                 throw new InvalidOperationException(
                     $"{npc.Name} is in an unknown awareness state " +
@@ -879,7 +985,10 @@ public sealed class CombatDirector
         }
     }
 
-    private NpcCombatState BeginEncounter(WorldObject player, bool provoked)
+    private NpcCombatState BeginEncounter(
+        WorldObject npc,
+        WorldObject player,
+        bool provoked)
     {
         var activity = ActivityFrom(_dice.D6() + _dice.D6());
         var reaction = provoked
@@ -900,8 +1009,114 @@ public sealed class CombatDirector
             ActionReadyAtTick: checked(
                 _clock.Tick + CombatClock.BeatsIn(seconds * 1000)),
             SwingReadyAtTick: _clock.Tick,
-            StepReadyAtTick: _clock.Tick);
+            StepReadyAtTick: _clock.Tick,
+            HomePosition: npc.Location.Position,
+            LastKnownPlayerPosition: player.Location.Position,
+            LastPerceivedAtTick: _clock.Tick);
     }
+
+    private void BeginSearchOrReturn(WorldObject npc, NpcCombatState state)
+    {
+        if (state.Reaction != MonsterReaction.Hostile ||
+            DistanceFromHome(npc, state) >= PursuitRadiusFor(npc))
+        {
+            BeginReturn(npc, state);
+            return;
+        }
+
+        _npcs[npc.Id] = state with
+        {
+            Awareness = Awareness.Searching,
+            Action = NpcAction.Pursue,
+            ActionReadyAtTick = _clock.Tick,
+        };
+    }
+
+    private void BeginReturn(WorldObject npc, NpcCombatState state)
+    {
+        _activeAttacks.Remove(npc.Id);
+        _npcs[npc.Id] = state with
+        {
+            Awareness = Awareness.Returning,
+            Action = NpcAction.Pursue,
+            ActionReadyAtTick = _clock.Tick,
+        };
+    }
+
+    private void AlertPack(WorldObject source, WorldObject player)
+    {
+        if (!IsPackHunter(source))
+        {
+            return;
+        }
+
+        foreach (var ally in LivingNpcs()
+                     .Where(value => value.Id != source.Id &&
+                                     value.TypeId == source.TypeId &&
+                                     TileDistance(value, source) <=
+                                         PackAssistanceRadiusTiles))
+        {
+            var distance = TileDistance(ally, player);
+            if (_npcs.TryGetValue(ally.Id, out var state))
+            {
+                _activeAttacks.Remove(ally.Id);
+                _npcs[ally.Id] = state with
+                {
+                    Awareness = Awareness.Alerted,
+                    Reaction = MonsterReaction.Hostile,
+                    Action = DesiredAction(MonsterReaction.Hostile, distance),
+                    Provoked = true,
+                    ActionReadyAtTick = checked(_clock.Tick + AlertToActionBeats),
+                    LastKnownPlayerPosition = player.Location.Position,
+                    LastPerceivedAtTick = _clock.Tick,
+                };
+                continue;
+            }
+
+            _npcs[ally.Id] = new NpcCombatState(
+                Awareness.Alerted,
+                ActivityFrom(_dice.D6() + _dice.D6()),
+                MonsterReaction.Hostile,
+                DesiredAction(MonsterReaction.Hostile, distance),
+                Provoked: true,
+                ActionReadyAtTick: checked(_clock.Tick + AlertToActionBeats),
+                SwingReadyAtTick: _clock.Tick,
+                StepReadyAtTick: _clock.Tick,
+                HomePosition: ally.Location.Position,
+                LastKnownPlayerPosition: player.Location.Position,
+                LastPerceivedAtTick: _clock.Tick);
+        }
+    }
+
+    private static bool IsPackHunter(WorldObject npc) =>
+        npc.TypeId == CombatProfileCatalog.CaveRatTypeId ||
+        npc.TypeId.Contains("wolf", StringComparison.OrdinalIgnoreCase) ||
+        MonsterCatalog.TryGet(npc.TypeId, out var profile) &&
+        profile.SpecialAbility == MonsterSpecialAbility.PackHunter;
+
+    private static int PursuitRadiusFor(WorldObject npc) =>
+        IsPackHunter(npc)
+            ? PackPursuitRadiusTiles
+            : TracksBeyondTerritory(npc)
+                ? 12
+                : TerritorialPursuitRadiusTiles;
+
+    private static int TrackingRadiusFor(WorldObject npc) =>
+        IsPackHunter(npc)
+            ? PackPursuitRadiusTiles
+            : TracksBeyondTerritory(npc)
+                ? 12
+                : AwarenessRadiusTiles;
+
+    private static bool TracksBeyondTerritory(WorldObject npc) =>
+        MonsterCatalog.TryGet(npc.TypeId, out var profile) &&
+        profile.SpecialAbility is MonsterSpecialAbility.ScentTracker or
+            MonsterSpecialAbility.EchoHunter;
+
+    private static int DistanceFromHome(
+        WorldObject npc,
+        NpcCombatState state) =>
+        TileDistance(npc.Location.Position, state.HomePosition);
 
     private static MonsterActivity ActivityFrom(int roll) => roll switch
     {
@@ -1159,7 +1374,7 @@ public sealed class CombatDirector
     {
         _lastAttacks[action.AttackerId] = action with { Phase = phase, Outcome = message };
         var voice = _objects.TryGet(action.AttackerId, out var attacker)
-            && CreatureVoices.All.TryGetValue(attacker.TypeId, out var knownVoice)
+            && CreatureVoices.TryFor(attacker.TypeId, out var knownVoice)
             ? knownVoice
             : CreatureVoice.Hail;
         var remaining = _objects.TryGet(action.TargetId, out var target)
@@ -1189,7 +1404,7 @@ public sealed class CombatDirector
             case NpcAction.Idle:
                 return;
             case NpcAction.Pursue:
-                Pursue(npc, player, state);
+                MoveToward(npc, player.Location.Position, state);
                 return;
             case NpcAction.Attack:
                 Swing(npc, player, events);
@@ -1200,9 +1415,9 @@ public sealed class CombatDirector
         }
     }
 
-    private void Pursue(
+    private void MoveToward(
         WorldObject npc,
-        WorldObject player,
+        Vec3i target,
         NpcCombatState state)
     {
         if (_conditions.PreventsMovement(npc.Id))
@@ -1218,18 +1433,17 @@ public sealed class CombatDirector
         // A blocked attempt still consumes this movement interval. Rechecking
         // five times a second would let several monsters jitter against the
         // same occupied spatial cell and would exceed the round's move.
+        var movementSteps = MovementStepsPerRoundFor(npc);
         _npcs[npc.Id] = state with
         {
             StepReadyAtTick = checked(
-                _clock.Tick + CombatClock.BeatsIn(
-                    AttackSpeed.RoundMilliseconds /
-                    _conditions.MovementStepsPerRound(
-                        npc.Id,
-                        MovementAllowance.StepsPerRound))),
+                _clock.Tick +
+                (CombatClock.BeatsIn(AttackSpeed.RoundMilliseconds) /
+                 movementSteps)),
         };
 
         var from = npc.Location.Position;
-        var to = player.Location.Position;
+        var to = target;
         var deltaX = Math.Sign(to.X - from.X);
         var deltaY = Math.Sign(to.Y - from.Y);
         var xFirst = Math.Abs(to.X - from.X) >= Math.Abs(to.Y - from.Y);
@@ -1273,6 +1487,16 @@ public sealed class CombatDirector
 
             return;
         }
+    }
+
+    private int MovementStepsPerRoundFor(WorldObject npc)
+    {
+        var normalSteps = MonsterCatalog.TryGet(npc.TypeId, out var profile)
+            ? profile.MovementStepsPerRound
+            : MovementAllowance.StepsPerRound;
+        return Math.Max(
+            1,
+            _conditions.MovementStepsPerRound(npc.Id, normalSteps));
     }
 
     /// <summary>
@@ -1476,8 +1700,11 @@ public sealed class CombatDirector
 
     private static int TileDistance(WorldObject from, WorldObject to)
     {
-        var a = from.Location.Position;
-        var b = to.Location.Position;
+        return TileDistance(from.Location.Position, to.Location.Position);
+    }
+
+    private static int TileDistance(Vec3i a, Vec3i b)
+    {
         return (Math.Abs(a.X - b.X) + Math.Abs(a.Y - b.Y)) /
             WorldMap.WorldUnitsPerTile;
     }
@@ -1497,5 +1724,8 @@ public sealed class CombatDirector
         bool Provoked,
         long ActionReadyAtTick,
         long SwingReadyAtTick,
-        long StepReadyAtTick);
+        long StepReadyAtTick,
+        Vec3i HomePosition,
+        Vec3i LastKnownPlayerPosition,
+        long LastPerceivedAtTick);
 }

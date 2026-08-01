@@ -42,13 +42,25 @@ public static class CreatureVoices
             ["monster.many-eyed-tyrant"] = CreatureVoice.Keen,
         };
 
+    private static readonly Lazy<IReadOnlyDictionary<string, CreatureVoice>>
+        AllVoices = new(() =>
+            ByTypeId
+                .Concat(MonsterCatalog.LevelOne.Select(value =>
+                    new KeyValuePair<string, CreatureVoice>(
+                        value.TypeId,
+                        value.Voice)))
+                .ToDictionary(
+                    value => value.Key,
+                    value => value.Value,
+                    StringComparer.Ordinal));
+
     /// <summary>Every voice a type id is registered for, in type id order.</summary>
-    public static IReadOnlyDictionary<string, CreatureVoice> All => ByTypeId;
+    public static IReadOnlyDictionary<string, CreatureVoice> All => AllVoices.Value;
 
     public static CreatureVoice For(string typeId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(typeId);
-        if (!ByTypeId.TryGetValue(typeId, out var voice))
+        if (!TryFor(typeId, out var voice))
         {
             throw new InvalidOperationException(
                 $"Actor type '{typeId}' has no alert voice. Every actor that " +
@@ -57,6 +69,21 @@ public static class CreatureVoices
         }
 
         return voice;
+    }
+
+    public static bool TryFor(string typeId, out CreatureVoice voice)
+    {
+        if (ByTypeId.TryGetValue(typeId, out voice))
+        {
+            return true;
+        }
+        if (MonsterCatalog.TryGet(typeId, out var profile))
+        {
+            voice = profile.Voice;
+            return true;
+        }
+        voice = default;
+        return false;
     }
 
     /// <summary>

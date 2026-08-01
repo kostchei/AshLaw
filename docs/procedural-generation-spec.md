@@ -57,17 +57,20 @@ section per map. On top of that:
 - `PlayableSliceWorld` is multi-map. `CurrentMapId` is derived from the map the
   Avatar is standing on rather than stored, so a transition and a load both
   change it by moving him and nothing else has to be kept in step.
-  `PlayableSliceWorld.CreateGenerated` plans a world, builds every subzone, and
-  starts him at the first one's way in. `DemoMapId` is now only the hand-built
+  The full planner can still describe all eighteen subzones. The current
+  vertical slice has `PlayableSliceWorld.CreateGenerated` build only index zero
+  and start the confirmed character at its way in; its exit is the completion
+  boundary rather than a transition to an eagerly built second map. `DemoMapId`
+  remains only the hand-built
   acceptance map, which keeps the physics area no generated subzone carries.
 - `MapTransitionService` performs the move, and `SubzoneBuilder` gives each
   subzone the two ends it needs: a `portal.entrance` on every subzone after the
   first and a `portal.exit` on every one before the last. Both ends are objects
   in the world, so a loaded world can be left the same way a freshly generated
   one can — nothing has to reconstruct the plan that made them.
-- Every subzone is resident. Eighteen fully built maps is the simplest correct
-  answer and is what is implemented; streaming is an optimisation to make only
-  when it is measured to be needed.
+- The one-subzone milestone keeps exactly one generated map resident. Expanding
+  back to the planned eighteen maps follows only after character creation,
+  treasure, advancement and the five-beat pacing are balanced.
 
 ## 2. Micro structure: the 5-beat pacing
 
@@ -75,16 +78,28 @@ Within *each* subzone the pacing follows a localised 5-Room Dungeon structure.
 This is not five physical rooms but a sequence of five paced beats, each drawn
 from a varied pool so the pacing does not read as a template:
 
-1. **Encounter** — combat or a guardian.
+The runtime does not count, discover, activate, or complete these beats. They
+become ordinary terrain, objects and creatures. Their consequences arise from
+the same contextual interaction, hazard, physics, perception and combat rules
+as the rest of the world, and separate encounters may overlap spatially.
+
+1. **Encounter** — a static monster which can be fought, evaded or lured.
 2. **Atmospheric** — empty by design, for tension, lore and visual storytelling,
    carrying the theme's props and palette.
 3. **Interactive** — physics puzzles (for example `prop.trestle` and its
    removable support), lore objects, non-hostile interactions.
-4. **Hazard** — environmental danger via `TerrainFlags.Hazard` or a pit. These
-   *must* carry a visual hint — a decal, cracked floor, bloodstain — so an
-   observant player can avoid them. A hazard with no hint is a bug.
-5. **Reward** — `container.vault-box` or similar: gold stacks, gems, finesse
-   weapons.
+4. **Hazard** — environmental danger via `TerrainFlags.Hazard` or a pit. The
+   first cracked-floor implementation makes a Dexterity check on entry and
+   deals 1d4 concussion damage on failure. Hazards *must* carry a visual hint —
+   a decal, cracked floor, bloodstain — so an observant player can avoid them.
+   A hazard with no hint is a bug.
+5. **Reward** — `container.vault-box`, its legendary relic, and an independently
+   acting guard which need not be killed.
+
+Two of the five paced spaces therefore contain a static threat (40%), matching
+the small-delve density target without packing every space with combat. A later
+wandering-monster slice may check every three rounds; it must spawn ordinary
+creatures into this same perception/territory system, not create room state.
 
 ### Verticality
 
@@ -133,19 +148,26 @@ second progression system.
 ### Monsters
 
 - A monster spawner takes the character tier and the subzone's seed.
-- It selects a pool of archetypes for that tier — `monster.cave-rat` at the low
-  end, `monster.many-eyed-tyrant` at the high.
-- It scales `MaxHealth`, ability scores and spawned equipment
-  (`EquipmentSlotMask`) so encounters stay meaningful under the d20 resolution
-  rules in `AttackResolver`.
+- Level one selects two distinct entries from the ten-profile pool: five
+  Shadowdark adaptations and five stable outputs from the seeded system
+  generator. Higher tiers currently retain the guard/tyrant scaling bridge.
+- `MonsterProfile` supplies concussion, abilities, armour category, exact
+  attack/defence bonuses, attack table, movement, special/weakness hooks, voice
+  and carried loot. Its canonical fingerprint protects saves from reinterpretation.
+- Killing monsters awards no XP. Monsters are obstacles controlling terrain or
+  treasure, so evasion, bribery, luring and traps remain valid solutions.
 
 ### Treasure
 
 - Treasure spawns through the `GearSlots` pooling rules, never around them.
-- Ordinary enemies drop low-tier loot — `item.bronze-dagger`, single coins.
+- Ordinary enemies carry low-tier loot which remains on their corpse; no room
+  or encounter-completion state is required to create the drop.
 - Reward beats and bosses use stack spawning for dense rewards — gold, gems — so
   the pack's 12-slot limit is challenged rather than cluttered.
 - Treasure tier scales with character tier and subzone difficulty.
+- The first vault's Ash Crown Shard is a legendary hoard worth 10 XP, the flat
+  threshold for level two. Carousing and normal/extraordinary hoard awards are
+  later progression content.
 
 ## 5. Terrain and building generation
 

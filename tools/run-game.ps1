@@ -55,6 +55,10 @@ param(
     # Open the help overlay, so a screenshot shows it.
     [switch]$Help,
 
+    # Keep the initial Human character-creation screen open during a smoke
+    # screenshot instead of auto-confirming its deterministic draft.
+    [switch]$CharacterCreation,
+
     # Exercise the in-game save and load commands during the run.
     [switch]$SaveLoad,
 
@@ -197,6 +201,7 @@ if ($Goto) { $godotArgs += "--smoke-goto=$Goto" }
 if ($DebugOverlay) { $godotArgs += "--debug-overlay" }
 if ($Backpack) { $godotArgs += "--backpack-open" }
 if ($Help) { $godotArgs += "--help-open" }
+if ($CharacterCreation) { $godotArgs += "--character-creation-open" }
 if ($SaveLoad) { $godotArgs += "--smoke-save-load" }
 if ($Combat) { $godotArgs += "--smoke-combat" }
 if ($DragDrop) { $godotArgs += "--smoke-drag-drop" }
