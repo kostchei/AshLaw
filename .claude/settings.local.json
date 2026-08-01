@@ -11,7 +11,8 @@
       "Bash(dotnet --version)",
       "Bash(dotnet --list-sdks)",
       "Bash(dotnet build *)",
-      "Bash(dotnet test *)"
+      "Bash(dotnet test *)",
+      "Bash(xargs wc -l)"
     ]
   }
 }

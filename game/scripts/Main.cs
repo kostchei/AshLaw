@@ -895,9 +895,9 @@ public partial class Main : Node2D
     /// </summary>
     private void DrawHelp()
     {
-        DrawRect(new Rect2(30, 22, 180, 156), new Color("17110df2"));
-        DrawRect(new Rect2(33, 25, 174, 150), PanelInset);
-        DrawRect(new Rect2(30, 22, 180, 156), PanelEdge, filled: false, width: 1);
+        DrawRect(new Rect2(30, 22, 180, 174), new Color("17110df2"));
+        DrawRect(new Rect2(33, 25, 174, 168), PanelInset);
+        DrawRect(new Rect2(30, 22, 180, 174), PanelEdge, filled: false, width: 1);
         DrawText(new Vector2(40, 38), "CONTROLS", 10, Highlight);
 
         var lines = new[]
@@ -908,6 +908,8 @@ public partial class Main : Node2D
             ("I / B", "carried gear"),
             ("E", "use, inspect, open, or exit"),
             ("F / SPACE", "attack (6s round)"),
+            ("T", "shoot the nearest"),
+            ("Z / V", "wither / spellfire"),
             ("Q", "hand the top weapon"),
             ("G / X", "grab / drop"),
             ("F5 / F9", "save / load"),
@@ -922,7 +924,7 @@ public partial class Main : Node2D
             DrawText(new Vector2(110, y), lines[index].Item2, 7, MutedText);
         }
 
-        DrawText(new Vector2(40, 172), "H CLOSES THIS", 7, MutedText);
+        DrawText(new Vector2(40, 190), "H CLOSES THIS", 7, MutedText);
     }
 
     public override void _UnhandledInput(InputEvent @event)
@@ -1002,6 +1004,15 @@ public partial class Main : Node2D
             case Key.F:
             case Key.Space:
                 _world.AttackAdjacentMonster();
+                return true;
+            case Key.T:
+                _world.ShootNearestMonster();
+                return true;
+            case Key.Z:
+                _world.CastAtNearestMonster(SpellCatalog.WitherFlesh.Id);
+                return true;
+            case Key.V:
+                _world.CastAtNearestMonster(SpellCatalog.SpellfireDraw.Id);
                 return true;
             case Key.Escape:
                 if (_world.Drag.IsDragging)

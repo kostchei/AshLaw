@@ -333,11 +333,26 @@ public sealed class CombatTimingTests
             Flags = ObjectFlags.Fixed | ObjectFlags.Solid,
         });
 
+        var blockedCell = new GridPosition(start.X - 1, start.Y);
         RunUntil(world, CombatEventKind.Alerted, maxBeats: 40);
-        AdvanceBeat(world);
 
-        Assert.Equal(start, world.GetGridPosition(rat.Id));
-        world.CurrentMap.ValidateIndex();
+        // The direct line is closed, so the rat routes round the obstacle
+        // instead of standing against it. It must still never occupy the
+        // blocked cell, and the index must stay coherent through every step.
+        for (var beat = 0; beat < 12; beat++)
+        {
+            AdvanceBeat(world);
+            Assert.NotEqual(blockedCell, world.GetGridPosition(rat.Id));
+            world.CurrentMap.ValidateIndex();
+        }
+
+        var player = world.PlayerPosition;
+        Assert.NotEqual(start, world.GetGridPosition(rat.Id));
+        Assert.True(
+            world.GetGridPosition(rat.Id).ManhattanDistance(player) <
+                start.ManhattanDistance(player),
+            "A routed pursuit must close on the player rather than stall on the " +
+            "obstacle in the direct line.");
     }
 
     [Fact]

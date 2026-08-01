@@ -64,6 +64,8 @@ public sealed class CombatProfileCatalog
     public const string BronzeDaggerTypeId = "item.bronze-dagger";
     public const string GoblinBladeTypeId = "item.notched-blade";
     public const string CaveRatTypeId = "monster.cave-rat";
+    public const string ShortBowTypeId = "item.short-bow";
+    public const string ThrowingKnifeTypeId = "item.throwing-knife";
 
     public static readonly AttackProfile RustySword = new(
         "attack.rusty-sword",
@@ -81,6 +83,26 @@ public sealed class CombatProfileCatalog
         "attack.goblin-blade",
         AttackCategoryId.OneHandedSlashing,
         CriticalTableId.Slash);
+
+    /// <summary>
+    /// A bow's attack identity, which is also its arrow's: the profile belongs
+    /// to the shot, and the shot is the same thing whether it is being asked
+    /// about as equipment on a sheet or as a projectile in the air.
+    /// </summary>
+    public static readonly AttackProfile ShortBow = new(
+        "attack.short-bow",
+        AttackCategoryId.MissileWeapons,
+        CriticalTableId.Puncture,
+        Size: AttackSize.Medium,
+        MaximumCriticalTier: CriticalTier.D);
+
+    public static readonly AttackProfile ThrowingKnife = new(
+        "attack.throwing-knife",
+        AttackCategoryId.MissileWeapons,
+        CriticalTableId.Puncture,
+        WeaponAttackModifier: -2,
+        Size: AttackSize.Small,
+        MaximumCriticalTier: CriticalTier.B);
 
     public static readonly AttackProfile CaveRatBite = new(
         "attack.cave-rat-bite",
@@ -140,6 +162,8 @@ public sealed class CombatProfileCatalog
             [RustySwordTypeId] = RustySword,
             [BronzeDaggerTypeId] = BronzeDagger,
             [GoblinBladeTypeId] = GoblinBlade,
+            [ShortBowTypeId] = ShortBow,
+            [ThrowingKnifeTypeId] = ThrowingKnife,
         },
         new Dictionary<string, AttackProfile>(StringComparer.Ordinal)
         {
@@ -164,6 +188,8 @@ public sealed class CombatProfileCatalog
             [RustySwordTypeId] = RustySword,
             [BronzeDaggerTypeId] = BronzeDagger,
             [GoblinBladeTypeId] = GoblinBlade,
+            [ShortBowTypeId] = ShortBow,
+            [ThrowingKnifeTypeId] = ThrowingKnife,
             [CaveRatTypeId] = CaveRatBite,
             ["fallback.unarmed"] = Unarmed,
         };

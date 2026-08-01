@@ -20,7 +20,28 @@ public sealed record ObjectWorldSnapshot(
     IReadOnlyList<WorldMapSnapshot> Maps,
     IReadOnlyList<ActorConditionSnapshot>? Conditions = null,
     CombatDirectorSnapshot? Combat = null,
-    WorldProgressSnapshot? Progress = null);
+    WorldProgressSnapshot? Progress = null,
+    WorldAiSnapshot? Ai = null);
+
+/// <summary>
+/// The parts of a world that are neither objects nor the fight the player is
+/// in: what is currently in the air, what is being cast, what a mishap has
+/// taken away, and whose day is going where.
+/// </summary>
+/// <remarks>
+/// Grouped rather than added to <see cref="ObjectWorldSnapshot"/> one list at a
+/// time because they share a property: each is a process attached to objects
+/// that already save themselves, so none of them can be reconstructed from the
+/// object graph and all of them are meaningless without it.
+/// </remarks>
+public sealed record WorldAiSnapshot(
+    IReadOnlyList<ProjectileFlight> Projectiles,
+    IReadOnlyList<SpellCast> Casts,
+    IReadOnlyList<SpellLockout> Lockouts,
+    IReadOnlyList<NpcScheduleSnapshot> Schedules)
+{
+    public static WorldAiSnapshot Empty { get; } = new([], [], [], []);
+}
 
 /// <summary>Character-origin facts and one-subzone campaign progress.</summary>
 public sealed record WorldProgressSnapshot(
@@ -47,7 +68,8 @@ public sealed record LoadedObjectWorld(
     ulong DiceState,
     IReadOnlyList<ActorConditionSnapshot>? Conditions = null,
     CombatDirectorSnapshot? Combat = null,
-    WorldProgressSnapshot? Progress = null);
+    WorldProgressSnapshot? Progress = null,
+    WorldAiSnapshot? Ai = null);
 
 public sealed class ObjectWorldSaveException : InvalidOperationException
 {
@@ -82,11 +104,14 @@ public static class ObjectWorldSave
     /// rolled talents, experience and one-subzone completion, and version 11
     /// the player's resolved choice within every immutable talent roll, and
     /// version 12 territorial NPC home, last-known-position and perception
-    /// timing state.
+    /// timing state, and version 13 the rest of what a fight and a day are made
+    /// of: per-creature behaviour profiles and withdrawal timing, projectiles in
+    /// flight, casts in progress, spells a mishap has locked away until dawn,
+    /// and NPC schedule state.
     /// Version 1 was never written outside this repository's tests, so it has
     /// no migration and is simply refused.
     /// </summary>
-    public const int FormatVersion = 12;
+    public const int FormatVersion = 13;
 
     /// <summary>
     /// The oldest format this build still reads. Version 2 migrates forward
@@ -99,7 +124,7 @@ public static class ObjectWorldSave
     /// The oldest reader that can still make sense of a file this build writes.
     /// A reader below this refuses the file instead of guessing at it.
     /// </summary>
-    public const int MinimumReaderVersion = 12;
+    public const int MinimumReaderVersion = 13;
 
     /// <summary>A sanity bound so a corrupt length cannot ask for a huge buffer.</summary>
     public const int MaximumPayloadBytes = 256 * 1024 * 1024;
@@ -190,7 +215,7 @@ public static class ObjectWorldSave
                 "The save payload does not match its checksum.");
         }
 
-        var (maps, objects, conditions, combat, progress) =
+        var (maps, objects, conditions, combat, progress, ai) =
             ReadPayload(payload, formatVersion, tick);
         return new ObjectWorldSnapshot(
             fingerprint,
@@ -201,7 +226,8 @@ public static class ObjectWorldSave
             maps,
             conditions,
             combat,
-            progress);
+            progress,
+            ai);
     }
 
     /// <summary>
@@ -216,7 +242,8 @@ public static class ObjectWorldSave
         ulong diceState = 0,
         IReadOnlyList<ActorConditionSnapshot>? conditions = null,
         CombatDirectorSnapshot? combat = null,
-        WorldProgressSnapshot? progress = null)
+        WorldProgressSnapshot? progress = null,
+        WorldAiSnapshot? ai = null)
     {
         ArgumentNullException.ThrowIfNull(objects);
         ArgumentException.ThrowIfNullOrWhiteSpace(contentFingerprint);
@@ -229,7 +256,8 @@ public static class ObjectWorldSave
             objects.Maps.All.Select(map => map.Capture()).ToArray(),
             conditions ?? [],
             combat ?? CombatDirectorSnapshot.Empty(simulationTick),
-            progress);
+            progress,
+            ai ?? WorldAiSnapshot.Empty);
     }
 
     /// <summary>
@@ -275,7 +303,8 @@ public static class ObjectWorldSave
             snapshot.DiceState,
             snapshot.Conditions ?? [],
             snapshot.Combat ?? CombatDirectorSnapshot.Empty(snapshot.SimulationTick),
-            snapshot.Progress);
+            snapshot.Progress,
+            snapshot.Ai ?? WorldAiSnapshot.Empty);
     }
 
     public static LoadedObjectWorld RestoreFile(
@@ -397,13 +426,14 @@ public static class ObjectWorldSave
             snapshot.Combat ?? CombatDirectorSnapshot.Empty(snapshot.SimulationTick));
 
         WriteProgress(buffer, snapshot.Progress);
+        WriteAi(buffer, snapshot.Ai ?? WorldAiSnapshot.Empty);
 
         return buffer.ToArray();
     }
 
     private static (IReadOnlyList<WorldMapSnapshot> Maps, ObjectStoreSnapshot Objects,
         IReadOnlyList<ActorConditionSnapshot> Conditions, CombatDirectorSnapshot Combat,
-        WorldProgressSnapshot? Progress)
+        WorldProgressSnapshot? Progress, WorldAiSnapshot Ai)
         ReadPayload(ReadOnlySpan<byte> payload, int formatVersion, long simulationTick)
     {
         var reader = new SpanReader(payload);
@@ -512,14 +542,146 @@ public static class ObjectWorldSave
             ? ReadProgress(ref reader, formatVersion)
             : null;
 
+        var ai = formatVersion >= 13
+            ? ReadAi(ref reader)
+            : WorldAiSnapshot.Empty;
+
         if (!reader.AtEnd)
         {
             throw new ObjectWorldSaveException(
                 "The payload has trailing bytes after the object store.");
         }
 
-        return (maps, new ObjectStoreSnapshot(slots, free), conditions, combat, progress);
+        return (maps, new ObjectStoreSnapshot(slots, free), conditions, combat, progress, ai);
     }
+
+    /// <summary>
+    /// Writes what a fight and a day are doing outside the object graph. Every
+    /// list is written in a total order — object id, then id and string — so the
+    /// same world always produces the same bytes.
+    /// </summary>
+    private static void WriteAi(Stream buffer, WorldAiSnapshot ai)
+    {
+        var flights = ai.Projectiles.OrderBy(value => value.ProjectileId).ToArray();
+        WriteInt32(buffer, flights.Length);
+        foreach (var flight in flights)
+        {
+            WriteUInt32(buffer, flight.ProjectileId.Value);
+            WriteUInt32(buffer, flight.ShooterId.Value);
+            WriteUInt32(buffer, flight.TargetId.Value);
+            WriteText(buffer, flight.DefinitionId);
+            WriteVec3i(buffer, flight.Origin);
+            WriteVec3i(buffer, flight.AimPoint);
+            WriteInt32(buffer, flight.TilesTravelled);
+            WriteInt64(buffer, flight.LaunchedAtTick);
+        }
+
+        var casts = ai.Casts.OrderBy(value => value.CasterId).ToArray();
+        WriteInt32(buffer, casts.Length);
+        foreach (var cast in casts)
+        {
+            WriteUInt32(buffer, cast.CasterId.Value);
+            WriteText(buffer, cast.SpellId);
+            WriteUInt32(buffer, cast.TargetId.Value);
+            WriteVec3i(buffer, cast.AimPoint);
+            WriteInt64(buffer, cast.StartTick);
+            WriteInt64(buffer, cast.ReleaseTick);
+        }
+
+        var lockouts = ai.Lockouts
+            .OrderBy(value => value.CasterId)
+            .ThenBy(value => value.SpellId, StringComparer.Ordinal)
+            .ToArray();
+        WriteInt32(buffer, lockouts.Length);
+        foreach (var lockout in lockouts)
+        {
+            WriteUInt32(buffer, lockout.CasterId.Value);
+            WriteText(buffer, lockout.SpellId);
+            WriteInt64(buffer, lockout.ExpiresAtTick);
+        }
+
+        var schedules = ai.Schedules.OrderBy(value => value.ActorId).ToArray();
+        WriteInt32(buffer, schedules.Length);
+        foreach (var schedule in schedules)
+        {
+            WriteUInt32(buffer, schedule.ActorId.Value);
+            WriteText(buffer, schedule.RoutineId);
+            WriteVec3i(buffer, schedule.Anchor);
+            WriteInt32(buffer, (int)schedule.Activity);
+            WriteInt32(buffer, (int)schedule.Fallback);
+            WriteVec3i(buffer, schedule.Destination);
+            WriteInt64(buffer, schedule.StepReadyAtTick);
+            WriteInt64(buffer, schedule.SuspendedUntilTick);
+        }
+    }
+
+    private static WorldAiSnapshot ReadAi(ref SpanReader reader)
+    {
+        var flightCount = ReadBoundedCount(ref reader, "projectile", 1_000_000);
+        var flights = new ProjectileFlight[flightCount];
+        for (var index = 0; index < flights.Length; index++)
+        {
+            flights[index] = new ProjectileFlight(
+                ObjectIdFromValue(reader.ReadUInt32()),
+                ObjectIdFromValue(reader.ReadUInt32()),
+                ObjectIdFromValue(reader.ReadUInt32()),
+                reader.ReadText(),
+                ReadVec3i(ref reader),
+                ReadVec3i(ref reader),
+                reader.ReadInt32(),
+                reader.ReadInt64());
+        }
+
+        var castCount = ReadBoundedCount(ref reader, "spell cast", 1_000_000);
+        var casts = new SpellCast[castCount];
+        for (var index = 0; index < casts.Length; index++)
+        {
+            casts[index] = new SpellCast(
+                ObjectIdFromValue(reader.ReadUInt32()),
+                reader.ReadText(),
+                ObjectIdFromValue(reader.ReadUInt32()),
+                ReadVec3i(ref reader),
+                reader.ReadInt64(),
+                reader.ReadInt64());
+        }
+
+        var lockoutCount = ReadBoundedCount(ref reader, "spell lockout", 1_000_000);
+        var lockouts = new SpellLockout[lockoutCount];
+        for (var index = 0; index < lockouts.Length; index++)
+        {
+            lockouts[index] = new SpellLockout(
+                ObjectIdFromValue(reader.ReadUInt32()),
+                reader.ReadText(),
+                reader.ReadInt64());
+        }
+
+        var scheduleCount = ReadBoundedCount(ref reader, "NPC schedule", 1_000_000);
+        var schedules = new NpcScheduleSnapshot[scheduleCount];
+        for (var index = 0; index < schedules.Length; index++)
+        {
+            schedules[index] = new NpcScheduleSnapshot(
+                ObjectIdFromValue(reader.ReadUInt32()),
+                reader.ReadText(),
+                ReadVec3i(ref reader),
+                ReadEnum<ScheduleActivity>(ref reader, index, nameof(ScheduleActivity)),
+                ReadEnum<ScheduleFallback>(ref reader, index, nameof(ScheduleFallback)),
+                ReadVec3i(ref reader),
+                reader.ReadInt64(),
+                reader.ReadInt64());
+        }
+
+        return new WorldAiSnapshot(flights, casts, lockouts, schedules);
+    }
+
+    private static void WriteVec3i(Stream buffer, Vec3i value)
+    {
+        WriteInt32(buffer, value.X);
+        WriteInt32(buffer, value.Y);
+        WriteInt32(buffer, value.Z);
+    }
+
+    private static Vec3i ReadVec3i(ref SpanReader reader) =>
+        new(reader.ReadInt32(), reader.ReadInt32(), reader.ReadInt32());
 
     private static void WriteProgress(
         Stream buffer,
@@ -750,6 +912,15 @@ public static class ObjectWorldSave
             WriteInt32(buffer, npc.LastKnownPlayerPosition.Y);
             WriteInt32(buffer, npc.LastKnownPlayerPosition.Z);
             WriteInt64(buffer, npc.LastPerceivedAtTick);
+            WriteInt64(buffer, npc.WithdrawUntilTick);
+        }
+
+        var behaviors = combat.Behaviors.OrderBy(value => value.ActorId).ToArray();
+        WriteInt32(buffer, behaviors.Length);
+        foreach (var (actorId, profile) in behaviors)
+        {
+            WriteUInt32(buffer, actorId.Value);
+            WriteInt32(buffer, (int)profile);
         }
 
         var attacks = combat.ActiveAttacks
@@ -792,7 +963,7 @@ public static class ObjectWorldSave
             var activity = ReadEnum<MonsterActivity>(ref reader, index, nameof(MonsterActivity));
             var reaction = ReadEnum<MonsterReaction>(ref reader, index, nameof(MonsterReaction));
             var action = reader.ReadByte();
-            if (action > 2)
+            if (!Enum.IsDefined((CombatDirector.NpcAction)action))
             {
                 throw new ObjectWorldSaveException(
                     $"NPC combat state {index} has unknown action {action}.");
@@ -810,6 +981,7 @@ public static class ObjectWorldSave
             var home = default(Vec3i);
             var lastKnown = default(Vec3i);
             var lastPerceived = -1L;
+            var withdrawUntil = 0L;
             if (formatVersion >= 12)
             {
                 home = new Vec3i(
@@ -821,6 +993,11 @@ public static class ObjectWorldSave
                     reader.ReadInt32(),
                     reader.ReadInt32());
                 lastPerceived = reader.ReadInt64();
+            }
+
+            if (formatVersion >= 13)
+            {
+                withdrawUntil = reader.ReadInt64();
             }
             npcs[index] = new NpcCombatSnapshot(
                 actorId,
@@ -834,7 +1011,23 @@ public static class ObjectWorldSave
                 stepReady,
                 home,
                 lastKnown,
-                lastPerceived);
+                lastPerceived,
+                withdrawUntil);
+        }
+
+        var behaviors = Array.Empty<(ObjectId, BehaviorProfile)>();
+        if (formatVersion >= 13)
+        {
+            var behaviorCount = ReadBoundedCount(ref reader, "behaviour override", 1_000_000);
+            var overrides = new (ObjectId, BehaviorProfile)[behaviorCount];
+            for (var index = 0; index < overrides.Length; index++)
+            {
+                overrides[index] = (
+                    ObjectIdFromValue(reader.ReadUInt32()),
+                    ReadEnum<BehaviorProfile>(ref reader, index, nameof(BehaviorProfile)));
+            }
+
+            behaviors = overrides;
         }
 
         var attackCount = ReadBoundedCount(ref reader, "active attack", 1_000_000);
@@ -855,7 +1048,8 @@ public static class ObjectWorldSave
                 EmptyToNull(reader.ReadText()));
         }
 
-        return new CombatDirectorSnapshot(playerReady, deathSave, steps, npcs, attacks);
+        return new CombatDirectorSnapshot(
+            playerReady, deathSave, steps, npcs, attacks, behaviors);
     }
 
     private static int ReadBoundedCount(

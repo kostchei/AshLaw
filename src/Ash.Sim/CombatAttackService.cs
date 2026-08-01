@@ -79,17 +79,57 @@ public sealed class CombatAttackService
             throw new InvalidOperationException($"{attacker.Name} cannot attack under its current conditions.");
         }
         var attackerSheet = _sheets.For(attackerId);
-        var targetSheet = _sheets.For(targetId);
         var profile = attackerSheet.AttackProfile ?? throw new InvalidOperationException(
             $"{attacker.Name} has no attack profile for its equipped weapon.");
         RequireMeleeReach(attacker, target, profile, IsLegalCleaveFollowUp(attackerId, targetId));
+        return Resolve(attackerId, targetId, profile, allowCleave: true);
+    }
 
+    /// <summary>
+    /// The impact of something that crossed the room to get here: an arrow, a
+    /// thrown blade, or a spell that landed.
+    /// </summary>
+    /// <remarks>
+    /// The same one call site into <see cref="Ash.Rules"/>, with two differences
+    /// that are properties of range rather than of resolution: reach is not
+    /// rechecked, because the projectile's own flight already decided what it
+    /// reached, and the melee-only Cleave follow-up cannot apply. The attack
+    /// profile is supplied because it belongs to the launcher — a bow, or the
+    /// spell — and not to whatever the attacker happens to be holding by the
+    /// time the shot lands.
+    /// </remarks>
+    public CombatAttackOutcome ResolveRanged(
+        ObjectId attackerId,
+        ObjectId targetId,
+        AttackProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        var attacker = LivingActor(attackerId, nameof(attackerId));
+        _ = LivingActor(targetId, nameof(targetId));
+        if (_conditions?.PreventsAction(attackerId) == true)
+        {
+            throw new InvalidOperationException(
+                $"{attacker.Name} cannot attack under its current conditions.");
+        }
+
+        return Resolve(attackerId, targetId, profile, allowCleave: false);
+    }
+
+    private CombatAttackOutcome Resolve(
+        ObjectId attackerId,
+        ObjectId targetId,
+        AttackProfile profile,
+        bool allowCleave)
+    {
+        var attackerSheet = _sheets.For(attackerId);
+        var targetSheet = _sheets.For(targetId);
+        var cleaving = allowCleave && IsLegalCleaveFollowUp(attackerId, targetId);
         var diceRollback = _dice.State;
         var conditionRollback = _conditions?.Capture();
         try
         {
             var consumptions = new List<ActorConditionConsumption>();
-            if (IsLegalCleaveFollowUp(attackerId, targetId))
+            if (cleaving)
             {
                 var cleave = _conditions!.Of(attackerId)
                     .Where(condition => condition.Kind == TraumaEffectKind.Cleave &&

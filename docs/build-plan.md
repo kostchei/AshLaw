@@ -479,15 +479,30 @@ Implements INTEGRATION.md §10 steps 1–12. No Godot, no world model.
 
 ### M6 — Actors and combat (6–8 weeks) · spec Stage 6 — *first consumer of M0*
 
-**Vertical-slice status:** the first active-enemy state machine is implemented
-in `Ash.Sim.CombatDirector`. Encounters roll a 2d6 activity, then (unless the
+**Vertical-slice status:** the enemy state machine is implemented in
+`Ash.Sim.CombatDirector`. Encounters roll a 2d6 activity, then (unless the
 player attacks immediately) `2d6 + Charisma modifier` for reaction. Monsters
 take 1d6 seconds to react and one 200 ms beat to act or change actions. Hostile
 monsters pursue at six tiles per round through the shared movement, placement,
-transfer, and spatial-index systems; non-hostile reactions currently hold
-position. This is direct distance-reducing pursuit, not the obstacle-routing
-pathfinding required by task 4. See
+transfer, and spatial-index systems; non-hostile reactions hold position. See
 [Monster encounter states](monster-encounters.md).
+
+Pursuit routes around obstacles through `Ash.Sim.SpatialPathfinder`, an A* over
+`WorldMap.FindSupport` and `WorldMap.ValidatePlacement` with an explicit node
+budget. There is deliberately no navigation grid: a candidate tile is decided by
+the same two calls a committed step makes, so content that moves a crate cannot
+put the two answers out of step (the drift control in spec §20).
+
+What a creature decides is owned by `Ash.Sim.BehaviorProfileCatalog`: Guard,
+Pack Hunter, Skirmisher and Coward, derived from the bestiary's own
+`SpecialAbility` with a per-actor override for scripts and scenarios (AI-005).
+Ranged attacks and spells are tracked `Ash.Sim.ProjectileSystem` objects moved by
+ordinary transfers and resolved against the spatial index; casting is
+`Ash.Sim.SpellCastingService` — targeting modes, reagent costs, melee
+provocation, interruption, and the natural-1 mishap lockout the rules data
+defines. NPC daily routines are `Ash.Sim.NpcScheduleService`, with the AI-014
+fallback chain ending in a defined hold-position rather than a blocked process.
+All of it persists in save format v13.
 
 The checkable implementation sequence for replacing fixed damage with equipped,
 data-backed real-time resolution is in

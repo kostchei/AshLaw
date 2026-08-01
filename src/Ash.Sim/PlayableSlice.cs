@@ -57,9 +57,10 @@ public sealed class PlayableSliceWorld : IDisposable
     /// written for different content is refused rather than reinterpreted.
     /// </summary>
     public static string ContentFingerprint =>
-        $"ash.playable-slice.v7:{RulesRepository.RuntimeRulesFingerprint}:" +
+        $"ash.playable-slice.v8:{RulesRepository.RuntimeRulesFingerprint}:" +
         $"{CombatProfileCatalog.CanonicalFingerprint}:" +
-        MonsterCatalog.CanonicalFingerprint;
+        $"{MonsterCatalog.CanonicalFingerprint}:" +
+        ContentIdentity.ProjectilesAndSpells;
 
     private const string AvatarTypeId = "actor.avatar";
     private const string DaggerTypeId = "item.bronze-dagger";
@@ -171,6 +172,18 @@ public sealed class PlayableSliceWorld : IDisposable
             Conditions,
             () => Clock.Tick,
             Trauma);
+        Pathfinder = new SpatialPathfinder(objects);
+        Projectiles = new ProjectileSystem(objects, Transfers, Clock, Attacks);
+        Spells = new SpellCastingService(
+            objects,
+            Sheets,
+            Conditions,
+            Clock,
+            Projectiles,
+            RulesRepository.Rules.Spellcasting);
+        Behaviors = new BehaviorProfileCatalog();
+        Schedules = new NpcScheduleService(
+            objects, Transfers, Pathfinder, Clock, Conditions);
         Combat = new CombatDirector(
             objects,
             Movement,
@@ -180,6 +193,10 @@ public sealed class PlayableSliceWorld : IDisposable
             Vitality,
             Attacks,
             Conditions,
+            Pathfinder,
+            Projectiles,
+            Spells,
+            Behaviors,
             playerId);
         SaveGate = new WorldSaveGate(
             objects,
@@ -188,7 +205,8 @@ public sealed class PlayableSliceWorld : IDisposable
             ContentFingerprint,
             Conditions,
             Combat,
-            CaptureProgress);
+            CaptureProgress,
+            CaptureAi);
         Drag = new DragService(objects);
         Stacks = new StackService(objects);
         LastMessage = "Explore. Open a chest or fight a monster.";
@@ -212,6 +230,24 @@ public sealed class PlayableSliceWorld : IDisposable
 
     /// <summary>Who has noticed whom, and when anyone may next swing.</summary>
     public CombatDirector Combat { get; }
+
+    /// <summary>Obstacle routing over the map's own spatial index.</summary>
+    public SpatialPathfinder Pathfinder { get; }
+
+    /// <summary>Everything currently crossing a room.</summary>
+    public ProjectileSystem Projectiles { get; }
+
+    /// <summary>Casts in progress and the spells a mishap has taken away.</summary>
+    public SpellCastingService Spells { get; }
+
+    /// <summary>Which creature fights which way.</summary>
+    public BehaviorProfileCatalog Behaviors { get; }
+
+    /// <summary>The daily routines of NPCs nobody is fighting.</summary>
+    public NpcScheduleService Schedules { get; }
+
+    /// <summary>What the last advanced beat's scheduled NPCs did.</summary>
+    public IReadOnlyList<ScheduleStep> LastScheduleSteps { get; private set; } = [];
 
     /// <summary>The shared player and NPC melee-resolution path.</summary>
     public CombatAttackService Attacks { get; }
@@ -640,6 +676,16 @@ public sealed class PlayableSliceWorld : IDisposable
         world.Conditions.Restore(loaded.Conditions ?? []);
         world.Combat.Restore(
             loaded.Combat ?? CombatDirectorSnapshot.Empty(world.Clock.Tick));
+
+        // Order matters: the projectiles must be back in the air before the
+        // casts that could have launched them are validated, and the schedules
+        // before anyone walks. Each restore refuses state it cannot make sense
+        // of rather than dropping it, so a save that disagrees with its own
+        // object graph fails loudly at load.
+        var ai = loaded.Ai ?? WorldAiSnapshot.Empty;
+        world.Projectiles.Restore(ai.Projectiles);
+        world.Spells.Restore(ai.Casts, ai.Lockouts);
+        world.Schedules.Restore(ai.Schedules);
         return world;
     }
 
@@ -811,8 +857,59 @@ public sealed class PlayableSliceWorld : IDisposable
                 equipmentSlots: EquipmentSlotMask.Head);
         }
         SpawnItem(objects, player, "item.apple", "Apple");
+
+        // A way to fight at range and a way to cast, so the ranged and magic
+        // paths are reachable from a fresh demo rather than only from a test.
+        SpawnItem(
+            objects,
+            player,
+            ProjectileCatalog.ShortBowTypeId,
+            "Short Bow",
+            "loot.shortsword",
+            EquipmentSlotMask.EitherHand,
+            ObjectFlags.Weapon);
+        SpawnStack(
+            objects,
+            player,
+            ProjectileCatalog.ArrowTypeId,
+            "Arrows",
+            quantity: GearSlots.AmmunitionPerSlot,
+            perSlot: GearSlots.AmmunitionPerSlot);
+        SpawnStack(
+            objects,
+            player,
+            SpellCatalog.GraveSaltTypeId,
+            SpellCatalog.GraveSaltName,
+            quantity: 6,
+            perSlot: GearSlots.GemsPerSlot);
         return player;
     }
+
+    /// <summary>Goods carried by the count rather than the piece.</summary>
+    private static void SpawnStack(
+        ObjectStore objects,
+        ObjectId parent,
+        string typeId,
+        string name,
+        int quantity,
+        int perSlot) =>
+        objects.Create(new ObjectSpawn
+        {
+            TypeId = typeId,
+            Name = name,
+            ShapeId = "loot.generic",
+            Location = ObjectLocation.InContainer(parent),
+            Footprint = new ObjectFootprint(32, 32),
+            Height = 8,
+            Flags =
+                ObjectFlags.Item |
+                ObjectFlags.Movable |
+                ObjectFlags.Stackable |
+                ObjectFlags.Visible,
+            Quantity = quantity,
+            MaxQuantity = perSlot,
+            QuantityPerSlot = perSlot,
+        });
 
     /// <summary>
     /// A light blade: finesse weapons are swung with dexterity when that serves
@@ -1007,10 +1104,17 @@ public sealed class PlayableSliceWorld : IDisposable
                 }
             }
             PublishCombatEvents(Combat.Advance());
+
+            // Schedules run after combat and never for a creature combat is
+            // already driving: a monster that has noticed the Avatar has
+            // stopped keeping to its day, and two systems spending the same
+            // creature's movement would cross twice the ground a round allows.
+            LastScheduleSteps = Schedules.Advance(Combat.IsEngagedWithPlayer);
         }
         else
         {
             LastCombatEvents = [];
+            LastScheduleSteps = [];
         }
 
         // End of a completed tick: the one point a deferred save is safe.
@@ -1622,6 +1726,105 @@ public sealed class PlayableSliceWorld : IDisposable
         return Finish(true, swing.Message);
     }
 
+    /// <summary>
+    /// Looses the equipped ranged weapon at the nearest living monster in range.
+    /// </summary>
+    /// <remarks>
+    /// The shot is aimed at where the creature is now. What it hits is decided
+    /// by the flight, beat by beat, so a monster that moves may be missed and
+    /// one that walks into the line may be hit instead.
+    /// </remarks>
+    public SliceActionResult ShootNearestMonster()
+    {
+        if (Conditions.PreventsAction(PlayerId))
+        {
+            return Finish(false, "You cannot shoot while incapacitated.");
+        }
+
+        var weaponId = Attacks.WeaponOf(PlayerId);
+        if (weaponId.IsNone ||
+            ProjectileCatalog.ForLauncher(Objects.Get(weaponId).TypeId) is not
+                { } definition)
+        {
+            return Finish(false, "You have nothing to shoot with.");
+        }
+
+        var playerPosition = PlayerPosition;
+        var target = QueryNearPlayer(definition.RangeTiles, ObjectFlags.Monster)
+            .Where(candidate => candidate.IsAlive)
+            .OrderBy(candidate =>
+                playerPosition.ManhattanDistance(GridPositionOf(candidate)))
+            .ThenBy(candidate => candidate.Id)
+            .Cast<WorldObject?>()
+            .FirstOrDefault();
+        if (target is null)
+        {
+            return Finish(false, "No living monster is within range.");
+        }
+
+        var shot = Combat.TryPlayerShoot(
+            target.Value.Location.Position, target.Value.Id);
+        if (!shot.Swung)
+        {
+            return Finish(false, shot.Message);
+        }
+
+        Combat.Provoke(target.Value.Id);
+        PublishCombatEvents(Combat.DrainImmediateEvents());
+        return Finish(true, shot.Message);
+    }
+
+    /// <summary>
+    /// Begins one of the player's spells. Legality is decided now, before the
+    /// wind-up commits anything (CMB-043); the cost is paid at release.
+    /// </summary>
+    public SliceActionResult CastSpell(
+        string spellId,
+        ObjectId targetId = default,
+        GridPosition? aimCell = null)
+    {
+        var attempt = Combat.TryPlayerCast(
+            spellId,
+            targetId,
+            aimCell is { } cell ? AnchorOf(cell) : null);
+        PublishCombatEvents(Combat.DrainImmediateEvents());
+        return Finish(attempt.Accepted, attempt.Message);
+    }
+
+    /// <summary>
+    /// Casts at the nearest living monster, choosing the aim the spell's own
+    /// targeting mode asks for.
+    /// </summary>
+    public SliceActionResult CastAtNearestMonster(string spellId)
+    {
+        if (!SpellCatalog.TryGet(spellId, out var spell))
+        {
+            return Finish(false, $"There is no spell called '{spellId}'.");
+        }
+
+        if (spell.Targeting == SpellTargeting.SelfCentered)
+        {
+            return CastSpell(spellId);
+        }
+
+        var playerPosition = PlayerPosition;
+        var target = QueryNearPlayer(spell.RangeTiles, ObjectFlags.Monster)
+            .Where(candidate => candidate.IsAlive)
+            .OrderBy(candidate =>
+                playerPosition.ManhattanDistance(GridPositionOf(candidate)))
+            .ThenBy(candidate => candidate.Id)
+            .Cast<WorldObject?>()
+            .FirstOrDefault();
+        if (target is null)
+        {
+            return Finish(false, $"Nothing is within {spell.Name}'s reach.");
+        }
+
+        return spell.Targeting == SpellTargeting.SingleActor
+            ? CastSpell(spellId, target.Value.Id)
+            : CastSpell(spellId, aimCell: GridPositionOf(target.Value));
+    }
+
     public SliceActionResult ClosePanels()
     {
         BackpackOpen = false;
@@ -1720,6 +1923,20 @@ public sealed class PlayableSliceWorld : IDisposable
             AdvancementTalent,
             Experience,
             DungeonCompleted);
+
+    /// <summary>
+    /// The processes attached to this world's objects: what is in the air, what
+    /// is being cast, what a mishap took away, and whose day is going where.
+    /// </summary>
+    private WorldAiSnapshot CaptureAi()
+    {
+        var (casts, lockouts) = Spells.Capture();
+        return new WorldAiSnapshot(
+            Projectiles.Capture(),
+            casts,
+            lockouts,
+            Schedules.Scheduled);
+    }
 
     private static CreatedCharacter RollDefaultCharacter(ulong seed)
     {

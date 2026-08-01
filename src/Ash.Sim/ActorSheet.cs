@@ -27,7 +27,14 @@ public readonly record struct ActorSheet(
     bool WeaponIsFinesse,
     ArmorType Armor,
     int DefenseModifier,
-    int ShieldModifier)
+    int ShieldModifier,
+
+    /// <summary>
+    /// What is on the off arm, in the terms the spellcasting restrictions are
+    /// written in: a tradition that bars metal shields needs to know which kind
+    /// this is, not merely that it grants two points of defence.
+    /// </summary>
+    ShieldKind Shield = ShieldKind.None)
 {
     public bool IsUnarmed => Weapon.IsNone;
 }
@@ -130,7 +137,12 @@ public sealed class ActorSheets
             finesse,
             armor,
             defense,
-            shieldModifier);
+            shieldModifier,
+            shield.Id.IsNone
+                ? ShieldKind.None
+                : ArmorRestriction.IsMetal(shield.ArmorType)
+                    ? ShieldKind.Metal
+                    : ShieldKind.Wooden);
     }
 
     private IReadOnlyList<WorldObject> Worn(ObjectId actorId) =>

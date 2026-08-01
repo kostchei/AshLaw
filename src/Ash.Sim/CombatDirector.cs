@@ -97,6 +97,27 @@ public enum CombatEventKind : byte
 
     /// <summary>A committed death transformed the target into a corpse.</summary>
     CorpseCreated = 13,
+
+    /// <summary>Something left a hand or a bowstring and is now in the air.</summary>
+    ProjectileLaunched = 14,
+
+    /// <summary>A tracked projectile reached something and stopped.</summary>
+    ProjectileImpact = 15,
+
+    /// <summary>A cast began its wind-up.</summary>
+    SpellCastStarted = 16,
+
+    /// <summary>A cast completed and its effect left the caster.</summary>
+    SpellReleased = 17,
+
+    /// <summary>A cast ended without an effect: broken, or unpaid for.</summary>
+    SpellFailed = 18,
+
+    /// <summary>A spell attack rolled a natural 1 and is lost until dawn.</summary>
+    SpellMishap = 19,
+
+    /// <summary>A creature broke off and started running.</summary>
+    Fled = 20,
 }
 
 public enum AttackActionPhase : byte
@@ -141,17 +162,27 @@ public readonly record struct NpcCombatSnapshot(
     long StepReadyAtTick,
     Vec3i HomePosition,
     Vec3i LastKnownPlayerPosition,
-    long LastPerceivedAtTick = -1);
+    long LastPerceivedAtTick = -1,
+
+    /// <summary>
+    /// The beat a skirmisher's withdrawal ends on. Saved because a creature
+    /// halfway through backing off is in a state a position cannot describe.
+    /// </summary>
+    long WithdrawUntilTick = 0);
 
 public sealed record CombatDirectorSnapshot(
     long PlayerReadyAtTick,
     long? PlayerDeathSaveAtTick,
     IReadOnlyList<long> PlayerStepTicks,
     IReadOnlyList<NpcCombatSnapshot> Npcs,
-    IReadOnlyList<AttackAction> ActiveAttacks)
+    IReadOnlyList<AttackAction> ActiveAttacks,
+    IReadOnlyList<(ObjectId ActorId, BehaviorProfile Profile)>? BehaviorOverrides = null)
 {
     public static CombatDirectorSnapshot Empty(long tick) =>
-        new(tick, null, [], [], []);
+        new(tick, null, [], [], [], []);
+
+    public IReadOnlyList<(ObjectId ActorId, BehaviorProfile Profile)> Behaviors =>
+        BehaviorOverrides ?? [];
 }
 
 /// <summary>
@@ -369,6 +400,10 @@ public sealed class CombatDirector
     private readonly ActorVitality _vitality;
     private readonly CombatAttackService _attacks;
     private readonly ActorConditionService _conditions;
+    private readonly SpatialPathfinder _pathfinder;
+    private readonly ProjectileSystem _projectiles;
+    private readonly SpellCastingService _spells;
+    private readonly BehaviorProfileCatalog _behaviors;
     private readonly ObjectId _playerId;
     private readonly Dictionary<ObjectId, NpcCombatState> _npcs = [];
     private readonly Dictionary<ObjectId, AttackAction> _activeAttacks = [];
@@ -406,6 +441,10 @@ public sealed class CombatDirector
         ActorVitality vitality,
         CombatAttackService attacks,
         ActorConditionService conditions,
+        SpatialPathfinder pathfinder,
+        ProjectileSystem projectiles,
+        SpellCastingService spells,
+        BehaviorProfileCatalog behaviors,
         ObjectId playerId)
     {
         _objects = objects ?? throw new ArgumentNullException(nameof(objects));
@@ -416,6 +455,10 @@ public sealed class CombatDirector
         _vitality = vitality ?? throw new ArgumentNullException(nameof(vitality));
         _attacks = attacks ?? throw new ArgumentNullException(nameof(attacks));
         _conditions = conditions ?? throw new ArgumentNullException(nameof(conditions));
+        _pathfinder = pathfinder ?? throw new ArgumentNullException(nameof(pathfinder));
+        _projectiles = projectiles ?? throw new ArgumentNullException(nameof(projectiles));
+        _spells = spells ?? throw new ArgumentNullException(nameof(spells));
+        _behaviors = behaviors ?? throw new ArgumentNullException(nameof(behaviors));
         if (playerId.IsNone)
         {
             throw new ArgumentException(
@@ -536,9 +579,11 @@ public sealed class CombatDirector
                     value.Value.StepReadyAtTick,
                     value.Value.HomePosition,
                     value.Value.LastKnownPlayerPosition,
-                    value.Value.LastPerceivedAtTick))
+                    value.Value.LastPerceivedAtTick,
+                    value.Value.WithdrawUntilTick))
                 .ToArray(),
-            _activeAttacks.Values.OrderBy(value => value.AttackerId).ToArray());
+            _activeAttacks.Values.OrderBy(value => value.AttackerId).ToArray(),
+            _behaviors.Capture());
     }
 
     public void Restore(CombatDirectorSnapshot snapshot)
@@ -579,7 +624,8 @@ public sealed class CombatDirector
                 value.StepReadyAtTick,
                 legacy ? actor.Location.Position : value.HomePosition,
                 legacy ? player.Location.Position : value.LastKnownPlayerPosition,
-                legacy ? _clock.Tick : value.LastPerceivedAtTick));
+                legacy ? _clock.Tick : value.LastPerceivedAtTick,
+                value.WithdrawUntilTick));
         }
 
         var attacks = new Dictionary<ObjectId, AttackAction>();
@@ -616,6 +662,7 @@ public sealed class CombatDirector
         }
         _lastAttacks.Clear();
         _immediateEvents.Clear();
+        _behaviors.Restore(snapshot.Behaviors);
     }
 
     /// <summary>
@@ -625,7 +672,16 @@ public sealed class CombatDirector
     public IReadOnlyList<CombatEvent> Advance()
     {
         var events = new List<CombatEvent>();
+
+        // Order within one beat is fixed and deliberate. Melee impacts commit
+        // first, because they were scheduled first. Flights advance next, so
+        // everything already in the air resolves before anything new joins it —
+        // which is also what stops a shot loosed on this beat from crossing a
+        // room and landing on it. Casts release last, into that same air.
         ResolveDueAttacks(events);
+        _spells.AdvanceLockouts();
+        ResolveProjectiles(events);
+        ResolveDueCasts(events);
         if (!_objects.TryGet(_playerId, out var player) || !player.IsAlive)
         {
             // Nothing to recognise. Existing states stay put rather than being
@@ -695,6 +751,171 @@ public sealed class CombatDirector
             true,
             interval,
             $"You begin your attack; impact in {AlertToActionMilliseconds} ms.");
+    }
+
+    /// <summary>
+    /// Looses the player's ranged weapon at <paramref name="aimPoint"/>, on the
+    /// same swing clock a melee blow spends.
+    /// </summary>
+    /// <remarks>
+    /// A shot costs the round's attack exactly as a swing does, and it costs its
+    /// ammunition at the moment it leaves — not on impact, because an arrow that
+    /// missed is still an arrow that was fired. What it does when it arrives is
+    /// the projectile's business, not this method's.
+    /// </remarks>
+    public SwingAttempt TryPlayerShoot(Vec3i aimPoint, ObjectId targetId = default)
+    {
+        if (_clock.Tick < _playerReadyAtTick)
+        {
+            var remaining = PlayerCooldownRemainingMilliseconds;
+            return new SwingAttempt(
+                false,
+                remaining,
+                $"You are still recovering ({remaining / 1000.0:0.0}s).");
+        }
+
+        var weaponId = _attacks.WeaponOf(_playerId);
+        if (weaponId.IsNone ||
+            ProjectileCatalog.ForLauncher(_objects.Get(weaponId).TypeId) is not
+                { } definition)
+        {
+            return new SwingAttempt(false, 0, "You have nothing to shoot with.");
+        }
+
+        var player = _objects.Get(_playerId);
+        var distance = TileDistance(player.Location.Position, aimPoint);
+        if (distance > definition.RangeTiles)
+        {
+            return new SwingAttempt(
+                false,
+                0,
+                $"That is {distance} tiles away and " +
+                $"{definition.Name.ToLowerInvariant()} carries " +
+                $"{definition.RangeTiles}.");
+        }
+
+        var ammunition = ProjectileCatalog.AmmunitionFor(_objects.Get(weaponId).TypeId);
+        if (!SpendAmmunition(_playerId, weaponId, ammunition))
+        {
+            return new SwingAttempt(false, 0, "You are out of ammunition.");
+        }
+
+        var interval = AttackSpeed.SwingIntervalMilliseconds(SpeedInputsFor(_playerId));
+        _playerReadyAtTick = checked(_clock.Tick + CombatClock.BeatsIn(interval));
+        var flight = _projectiles.Launch(_playerId, targetId, definition, aimPoint);
+        _immediateEvents.Add(LaunchEvent(flight, definition.Name));
+        return new SwingAttempt(true, interval, $"You loose {definition.Name.ToLowerInvariant()}.");
+    }
+
+    /// <summary>
+    /// Begins one of the player's spells, and lets everything in reach take the
+    /// opening that casting in melee gives them.
+    /// </summary>
+    public SpellCastAttempt TryPlayerCast(
+        string spellId,
+        ObjectId targetId = default,
+        Vec3i? aimPoint = null)
+    {
+        var attempt = _spells.Begin(_playerId, spellId, targetId, aimPoint);
+        if (!attempt.Accepted || attempt.Cast is not { } cast)
+        {
+            return attempt;
+        }
+
+        var spell = SpellCatalog.Get(spellId);
+        _immediateEvents.Add(new CombatEvent(
+            CombatEventKind.SpellCastStarted,
+            _clock.Tick,
+            _playerId,
+            cast.TargetId,
+            VoiceOf(_playerId),
+            0,
+            _objects.Get(_playerId).Health,
+            $"You begin {spell.Name}; it releases in " +
+            $"{spell.WindUpMilliseconds} ms.",
+            PresentationKey: "spell.wind-up"));
+        ProvokeCasting(cast, attempt.Provoked ?? []);
+        return attempt;
+    }
+
+    /// <summary>
+    /// Casting where a blade can reach you tells every such blade that you did.
+    /// Each one that is already fighting gets an immediate swing; each one that
+    /// was not is now.
+    /// </summary>
+    private void ProvokeCasting(SpellCast cast, IReadOnlyList<ObjectId> provoked)
+    {
+        foreach (var enemyId in provoked)
+        {
+            if (!_objects.TryGet(enemyId, out var enemy) ||
+                !enemy.HasFlag(ObjectFlags.Monster) || !enemy.IsAlive)
+            {
+                continue;
+            }
+
+            Provoke(enemyId);
+            if (_conditions.PreventsAction(enemyId) ||
+                _activeAttacks.ContainsKey(enemyId))
+            {
+                continue;
+            }
+
+            var state = _npcs[enemyId];
+            _npcs[enemyId] = state with
+            {
+                SwingReadyAtTick = checked(_clock.Tick + SwingBeatsFor(enemyId)),
+            };
+            ScheduleAttack(
+                enemyId,
+                cast.CasterId,
+                _npcs[enemyId].SwingReadyAtTick,
+                _immediateEvents);
+        }
+    }
+
+    /// <summary>
+    /// Spends one shot. A thrown weapon spends itself and leaves the hand empty;
+    /// ammunition comes out of the pack.
+    /// </summary>
+    private bool SpendAmmunition(ObjectId shooterId, ObjectId weaponId, string ammunitionTypeId)
+    {
+        if (string.IsNullOrEmpty(ammunitionTypeId))
+        {
+            return true;
+        }
+
+        var weapon = _objects.Get(weaponId);
+        if (string.Equals(weapon.TypeId, ammunitionTypeId, StringComparison.Ordinal))
+        {
+            _objects.Destroy(weaponId);
+            return true;
+        }
+
+        var stack = _objects.Enumerate()
+            .Where(value =>
+                value.Location.Kind == LocationKind.InContainer &&
+                value.Location.Parent == shooterId &&
+                string.Equals(value.TypeId, ammunitionTypeId, StringComparison.Ordinal) &&
+                value.Quantity > 0)
+            .OrderBy(value => value.Id)
+            .Cast<WorldObject?>()
+            .FirstOrDefault();
+        if (stack is not { } ammunition)
+        {
+            return false;
+        }
+
+        if (ammunition.Quantity == 1)
+        {
+            _objects.Destroy(ammunition.Id);
+            return true;
+        }
+
+        _objects.CommitStackChange(
+            [new ObjectQuantityUpdate(ammunition.Id, ammunition.Quantity - 1)],
+            [],
+            null);
+        return true;
     }
 
     public IReadOnlyList<CombatEvent> DrainImmediateEvents()
@@ -809,8 +1030,10 @@ public sealed class CombatDirector
             {
                 Awareness = Awareness.Engaged,
                 Action = DesiredAction(
+                    npc,
                     MonsterReaction.Hostile,
-                    TileDistance(npc, player)),
+                    TileDistance(npc, player),
+                    state.WithdrawUntilTick),
                 ActionReadyAtTick = checked(
                     _clock.Tick + AlertToActionBeats),
                 LastKnownPlayerPosition = player.Location.Position,
@@ -859,7 +1082,8 @@ public sealed class CombatDirector
                 }
 
                 var voice = CreatureVoices.For(npc.TypeId);
-                var action = DesiredAction(state.Reaction, distance);
+                var action = DesiredAction(
+                    npc, state.Reaction, distance, state.WithdrawUntilTick);
                 _npcs[npc.Id] = state with
                 {
                     Awareness = Awareness.Alerted,
@@ -877,6 +1101,7 @@ public sealed class CombatDirector
                         Damage: 0,
                         RemainingHealth: npc.Health,
                         $"{npc.Name}: {CreatureVoices.Utterance(voice)}"));
+                AnnounceBreak(npc, state.Action, action, events);
                 if (state.Reaction == MonsterReaction.Hostile)
                 {
                     AlertPack(npc, player);
@@ -900,6 +1125,18 @@ public sealed class CombatDirector
                 return;
 
             case Awareness.Engaged:
+                // A creature that has broken is exempt from both territory
+                // rules. Losing contact does not mean it should search, and
+                // leaving its post is the whole of what it is doing — a
+                // frightened thing sent back to a post the player is standing
+                // on would walk into the fight it just quit.
+                if (state.Action == NpcAction.Flee &&
+                    HasBroken(npc, _behaviors.DefinitionOf(npc)))
+                {
+                    Flee(npc, player, state);
+                    return;
+                }
+
                 if (distance <= TrackingRadiusFor(npc))
                 {
                     state = state with
@@ -922,9 +1159,11 @@ public sealed class CombatDirector
                     return;
                 }
 
-                var desired = DesiredAction(state.Reaction, distance);
+                var desired = DesiredAction(
+                    npc, state.Reaction, distance, state.WithdrawUntilTick);
                 if (desired != state.Action)
                 {
+                    AnnounceBreak(npc, state.Action, desired, events);
                     _npcs[npc.Id] = state with
                     {
                         Action = desired,
@@ -949,7 +1188,11 @@ public sealed class CombatDirector
                     {
                         Awareness = Awareness.Engaged,
                         Reaction = MonsterReaction.Hostile,
-                        Action = DesiredAction(MonsterReaction.Hostile, distance),
+                        Action = DesiredAction(
+                            npc,
+                            MonsterReaction.Hostile,
+                            distance,
+                            state.WithdrawUntilTick),
                         ActionReadyAtTick = checked(_clock.Tick + AlertToActionBeats),
                         LastKnownPlayerPosition = player.Location.Position,
                         LastPerceivedAtTick = _clock.Tick,
@@ -1045,7 +1288,7 @@ public sealed class CombatDirector
 
     private void AlertPack(WorldObject source, WorldObject player)
     {
-        if (!IsPackHunter(source))
+        if (!AlertsKin(source))
         {
             return;
         }
@@ -1064,7 +1307,8 @@ public sealed class CombatDirector
                 {
                     Awareness = Awareness.Alerted,
                     Reaction = MonsterReaction.Hostile,
-                    Action = DesiredAction(MonsterReaction.Hostile, distance),
+                    Action = DesiredAction(
+                        ally, MonsterReaction.Hostile, distance, state.WithdrawUntilTick),
                     Provoked = true,
                     ActionReadyAtTick = checked(_clock.Tick + AlertToActionBeats),
                     LastKnownPlayerPosition = player.Location.Position,
@@ -1077,7 +1321,7 @@ public sealed class CombatDirector
                 Awareness.Alerted,
                 ActivityFrom(_dice.D6() + _dice.D6()),
                 MonsterReaction.Hostile,
-                DesiredAction(MonsterReaction.Hostile, distance),
+                DesiredAction(ally, MonsterReaction.Hostile, distance, 0),
                 Provoked: true,
                 ActionReadyAtTick: checked(_clock.Tick + AlertToActionBeats),
                 SwingReadyAtTick: _clock.Tick,
@@ -1088,30 +1332,37 @@ public sealed class CombatDirector
         }
     }
 
-    private static bool IsPackHunter(WorldObject npc) =>
-        npc.TypeId == CombatProfileCatalog.CaveRatTypeId ||
-        npc.TypeId.Contains("wolf", StringComparison.OrdinalIgnoreCase) ||
-        MonsterCatalog.TryGet(npc.TypeId, out var profile) &&
-        profile.SpecialAbility == MonsterSpecialAbility.PackHunter;
+    /// <summary>How this creature fights, before any per-actor override.</summary>
+    public BehaviorProfile ProfileOf(ObjectId npcId) =>
+        _behaviors.ProfileOf(_objects.Get(npcId));
 
-    private static int PursuitRadiusFor(WorldObject npc) =>
-        IsPackHunter(npc)
-            ? PackPursuitRadiusTiles
-            : TracksBeyondTerritory(npc)
-                ? 12
-                : TerritorialPursuitRadiusTiles;
+    /// <summary>
+    /// Replaces one creature's behaviour profile, for an authored encounter or a
+    /// scenario (AI-005). The change is world state and is saved.
+    /// </summary>
+    public void SetProfile(ObjectId npcId, BehaviorProfile profile) =>
+        _behaviors.Override(npcId, profile);
 
-    private static int TrackingRadiusFor(WorldObject npc) =>
-        IsPackHunter(npc)
-            ? PackPursuitRadiusTiles
-            : TracksBeyondTerritory(npc)
-                ? 12
-                : AwarenessRadiusTiles;
+    /// <summary>Whether the director is currently driving this creature.</summary>
+    public bool IsEngagedWithPlayer(ObjectId npcId) => _npcs.ContainsKey(npcId);
 
-    private static bool TracksBeyondTerritory(WorldObject npc) =>
-        MonsterCatalog.TryGet(npc.TypeId, out var profile) &&
-        profile.SpecialAbility is MonsterSpecialAbility.ScentTracker or
-            MonsterSpecialAbility.EchoHunter;
+    private bool AlertsKin(WorldObject npc) => _behaviors.DefinitionOf(npc).AlertsKin;
+
+    private int PursuitRadiusFor(WorldObject npc) =>
+        _behaviors.DefinitionOf(npc).PursuitRadiusTiles;
+
+    private int TrackingRadiusFor(WorldObject npc) =>
+        _behaviors.DefinitionOf(npc).TrackingRadiusTiles;
+
+    /// <summary>
+    /// Whether a body has taken enough that its profile says to stop. Measured
+    /// on the concussion track, which is the part of a creature that runs out
+    /// during one fight.
+    /// </summary>
+    private static bool HasBroken(WorldObject npc, BehaviorProfileDefinition profile) =>
+        profile.Breaks &&
+        npc.MaxHealth > 0 &&
+        npc.Health <= (int)Math.Floor(npc.MaxHealth * profile.BreakAtHealthFraction);
 
     private static int DistanceFromHome(
         WorldObject npc,
@@ -1138,14 +1389,44 @@ public sealed class CombatDirector
         _ => MonsterReaction.Friendly,
     };
 
-    private static NpcAction DesiredAction(
+    /// <summary>
+    /// What this creature wants to do about the player right now.
+    /// </summary>
+    /// <remarks>
+    /// This is the whole of the difference between the four profiles, and it is
+    /// deliberately one function: a guard, a pack hunter, a skirmisher and a
+    /// coward standing the same distance from the same player differ in exactly
+    /// what they decide here, and in nothing else. Order matters — a creature
+    /// that has broken runs whatever else it might have preferred, and a
+    /// skirmisher inside its withdrawal is backing off even when the player is
+    /// standing next to it.
+    /// </remarks>
+    private NpcAction DesiredAction(
+        WorldObject npc,
         MonsterReaction reaction,
-        int distance) =>
-        reaction != MonsterReaction.Hostile
-            ? NpcAction.Idle
-            : distance <= 1
-                ? NpcAction.Attack
-                : NpcAction.Pursue;
+        int distance,
+        long withdrawUntilTick)
+    {
+        if (reaction != MonsterReaction.Hostile)
+        {
+            return NpcAction.Idle;
+        }
+
+        var profile = _behaviors.DefinitionOf(npc);
+        if (HasBroken(npc, profile))
+        {
+            return NpcAction.Flee;
+        }
+
+        if (profile.Withdraws && _clock.Tick < withdrawUntilTick)
+        {
+            return distance >= profile.WithdrawRangeTiles
+                ? NpcAction.Idle
+                : NpcAction.Withdraw;
+        }
+
+        return distance <= 1 ? NpcAction.Attack : NpcAction.Pursue;
+    }
 
     private void ScheduleAttack(
         ObjectId attackerId,
@@ -1252,8 +1533,28 @@ public sealed class CombatDirector
             Outcome = attack.Hit ? "Impact resolved." : "Attack missed.",
         };
         _lastAttacks[action.AttackerId] = completed;
+        PublishAttackOutcome(attacker, target, attack, action.WeaponId, events);
+    }
+
+    /// <summary>
+    /// Turns one resolved attack into the presentation facts a fight produces,
+    /// whatever delivered it.
+    /// </summary>
+    /// <remarks>
+    /// A sword, an arrow and a bolt of rot differ in how they reached the body
+    /// and not at all in what the body then does about it, so they share this.
+    /// Every event carries the same retained resolver evidence, which is what
+    /// lets the inspect panel reproduce a calculation it never performed.
+    /// </remarks>
+    private void PublishAttackOutcome(
+        WorldObject attacker,
+        WorldObject target,
+        CombatAttackOutcome attack,
+        ObjectId weaponId,
+        List<CombatEvent> events)
+    {
         var evidence = new CombatResolutionEvidence(
-            action.WeaponId,
+            weaponId,
             attack.Request.AttackCategory,
             attack.Request.RawD20,
             attack.Request.AttackModifier,
@@ -1269,8 +1570,8 @@ public sealed class CombatDirector
         events.Add(new CombatEvent(
             CombatEventKind.Impact,
             _clock.Tick,
-            action.AttackerId,
-            action.TargetId,
+            attacker.Id,
+            target.Id,
             CreatureVoices.For(attacker.TypeId),
             attack.ImmediateHits,
             attack.FinalTargetState.Concussion,
@@ -1280,8 +1581,8 @@ public sealed class CombatDirector
         events.Add(new CombatEvent(
             attack.Hit ? CombatEventKind.Hit : CombatEventKind.Miss,
             _clock.Tick,
-            action.AttackerId,
-            action.TargetId,
+            attacker.Id,
+            target.Id,
             CreatureVoices.For(attacker.TypeId),
             attack.ImmediateHits,
             attack.FinalTargetState.Concussion,
@@ -1295,8 +1596,8 @@ public sealed class CombatDirector
             events.Add(new CombatEvent(
                 CombatEventKind.Critical,
                 _clock.Tick,
-                action.AttackerId,
-                action.TargetId,
+                attacker.Id,
+                target.Id,
                 CreatureVoices.For(attacker.TypeId),
                 attack.ImmediateHits,
                 attack.FinalTargetState.Concussion,
@@ -1310,8 +1611,8 @@ public sealed class CombatDirector
             events.Add(new CombatEvent(
                 CombatEventKind.ConditionApplied,
                 _clock.Tick,
-                action.AttackerId,
-                action.TargetId,
+                attacker.Id,
+                target.Id,
                 CreatureVoices.For(attacker.TypeId),
                 0,
                 attack.FinalTargetState.Concussion,
@@ -1325,8 +1626,8 @@ public sealed class CombatDirector
             events.Add(new CombatEvent(
                 CombatEventKind.ForcedMovement,
                 _clock.Tick,
-                action.AttackerId,
-                action.TargetId,
+                attacker.Id,
+                target.Id,
                 CreatureVoices.For(attacker.TypeId),
                 0,
                 attack.FinalTargetState.Concussion,
@@ -1339,8 +1640,8 @@ public sealed class CombatDirector
             events.Add(new CombatEvent(
                 CombatEventKind.Death,
                 _clock.Tick,
-                action.AttackerId,
-                action.TargetId,
+                attacker.Id,
+                target.Id,
                 CreatureVoices.For(attacker.TypeId),
                 0,
                 attack.FinalTargetState.Concussion,
@@ -1353,17 +1654,159 @@ public sealed class CombatDirector
             events.Add(new CombatEvent(
                 CombatEventKind.CorpseCreated,
                 _clock.Tick,
-                action.AttackerId,
-                action.TargetId,
+                attacker.Id,
+                target.Id,
                 CreatureVoices.For(attacker.TypeId),
                 0,
                 attack.FinalTargetState.Concussion,
                 $"{target.Name}'s corpse is committed.",
                 evidence,
                 PresentationKey: "actor.corpse"));
-            Forget(action.TargetId);
+            Forget(target.Id);
         }
     }
+
+    /// <summary>
+    /// Releases every cast that came due, and turns provocation and failure into
+    /// events the presentation layer can read.
+    /// </summary>
+    private void ResolveDueCasts(List<CombatEvent> events)
+    {
+        foreach (var release in _spells.Advance())
+        {
+            var spell = SpellCatalog.Get(release.Cast.SpellId);
+            var caster = _objects.TryGet(release.Cast.CasterId, out var value)
+                ? value
+                : default;
+            events.Add(new CombatEvent(
+                release.Outcome == SpellReleaseOutcome.Released
+                    ? CombatEventKind.SpellReleased
+                    : CombatEventKind.SpellFailed,
+                _clock.Tick,
+                release.Cast.CasterId,
+                release.Cast.TargetId,
+                VoiceOf(release.Cast.CasterId),
+                0,
+                caster.Health,
+                release.Message,
+                PresentationKey: release.Outcome switch
+                {
+                    SpellReleaseOutcome.Released => "spell.released",
+                    SpellReleaseOutcome.Fizzled => "spell.fizzled",
+                    _ => "spell.interrupted",
+                }));
+            if (release.Flight is { } flight)
+            {
+                events.Add(LaunchEvent(flight, spell.Name));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Carries everything in the air one beat, and resolves whatever it reached.
+    /// </summary>
+    private void ResolveProjectiles(List<CombatEvent> events)
+    {
+        foreach (var impact in _projectiles.Advance())
+        {
+            var definition = _projectiles.Catalog.Get(impact.Flight.DefinitionId);
+            var outcomes = _projectiles.Resolve(impact);
+            events.Add(new CombatEvent(
+                CombatEventKind.ProjectileImpact,
+                _clock.Tick,
+                impact.Flight.ShooterId,
+                impact.Struck.Count > 0 ? impact.Struck[0] : ObjectId.None,
+                VoiceOf(impact.Flight.ShooterId),
+                0,
+                0,
+                DescribeImpact(definition, impact),
+                PresentationKey: "projectile.impact"));
+
+            foreach (var outcome in outcomes)
+            {
+                if (!_objects.TryGet(outcome.AttackerId, out var attacker) ||
+                    !_objects.TryGet(outcome.TargetId, out var target))
+                {
+                    continue;
+                }
+
+                PublishAttackOutcome(
+                    attacker, target, outcome, impact.Flight.ProjectileId, events);
+                RecordMishap(outcome, impact, events);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A spell attack that came up a natural 1 takes the spell away from its
+    /// caster until dawn. The roll only exists at impact, so this is where the
+    /// mishap can first be known.
+    /// </summary>
+    private void RecordMishap(
+        CombatAttackOutcome outcome,
+        ProjectileImpact impact,
+        List<CombatEvent> events)
+    {
+        if (!outcome.Result.Mishap ||
+            !SpellCatalog.TrySpellForProjectile(impact.Flight.DefinitionId, out var spell))
+        {
+            return;
+        }
+
+        if (_spells.IsLockedOut(outcome.AttackerId, spell.Id))
+        {
+            return;
+        }
+
+        var lockout = _spells.RecordMishap(outcome.AttackerId, spell.Id);
+        events.Add(new CombatEvent(
+            CombatEventKind.SpellMishap,
+            _clock.Tick,
+            outcome.AttackerId,
+            outcome.TargetId,
+            VoiceOf(outcome.AttackerId),
+            0,
+            0,
+            $"{spell.Name} turns in the hand. It will not answer again " +
+            $"before dawn (beat {lockout.ExpiresAtTick}).",
+            PresentationKey: "spell.mishap"));
+    }
+
+    /// <summary>
+    /// The voice of whoever did this, or the neutral one when the actor has
+    /// already left the world. A shooter can die between loosing and landing.
+    /// </summary>
+    private CreatureVoice VoiceOf(ObjectId actorId) =>
+        _objects.TryGet(actorId, out var actor) &&
+        CreatureVoices.TryFor(actor.TypeId, out var voice)
+            ? voice
+            : CreatureVoice.Hail;
+
+    private CombatEvent LaunchEvent(ProjectileFlight flight, string what) =>
+        new(
+            CombatEventKind.ProjectileLaunched,
+            _clock.Tick,
+            flight.ShooterId,
+            flight.TargetId,
+            VoiceOf(flight.ShooterId),
+            0,
+            0,
+            $"{what} is away.",
+            PresentationKey: "projectile.launched");
+
+    private static string DescribeImpact(
+        ProjectileDefinition definition,
+        ProjectileImpact impact) => impact.Outcome switch
+    {
+        ProjectileOutcome.StruckActor when impact.Struck.Count > 1 =>
+            $"{definition.Name} bursts among {impact.Struck.Count} creatures.",
+        ProjectileOutcome.StruckActor => $"{definition.Name} finds its mark.",
+        ProjectileOutcome.StruckTerrain => $"{definition.Name} strikes the world and stops.",
+        ProjectileOutcome.Lost => $"{definition.Name} is lost.",
+        _ => impact.Struck.Count > 0
+            ? $"{definition.Name} bursts where it was aimed."
+            : $"{definition.Name} lands where it was aimed and finds nothing.",
+    };
 
     private void FinishAction(
         AttackAction action,
@@ -1399,15 +1842,28 @@ public sealed class CombatDirector
             return;
         }
 
+        var profile = _behaviors.DefinitionOf(npc);
         switch (state.Action)
         {
             case NpcAction.Idle:
                 return;
             case NpcAction.Pursue:
-                MoveToward(npc, player.Location.Position, state);
+                MoveToward(
+                    npc,
+                    profile.SeeksFlank
+                        ? FlankingTile(npc, player)
+                        : player.Location.Position,
+                    state,
+                    arrivalRadiusTiles: profile.SeeksFlank ? 0 : 1);
                 return;
             case NpcAction.Attack:
                 Swing(npc, player, events);
+                return;
+            case NpcAction.Withdraw:
+                MoveAwayFrom(npc, player.Location.Position, state);
+                return;
+            case NpcAction.Flee:
+                Flee(npc, player, state);
                 return;
             default:
                 throw new InvalidOperationException(
@@ -1415,52 +1871,162 @@ public sealed class CombatDirector
         }
     }
 
-    private void MoveToward(
-        WorldObject npc,
-        Vec3i target,
-        NpcCombatState state)
+    /// <summary>
+    /// A pack hunter's preferred tile: one beside the player that no ally is
+    /// already fighting from.
+    /// </summary>
+    /// <remarks>
+    /// This is what makes a pack read as a pack rather than as a queue. The four
+    /// tiles around the player are tried in a fixed order and the first
+    /// unclaimed one wins, so two wolves arriving together do not both walk into
+    /// the same square and shove; if all four are claimed the creature closes on
+    /// the player as anything else would.
+    /// </remarks>
+    private Vec3i FlankingTile(WorldObject npc, WorldObject player)
     {
-        if (_conditions.PreventsMovement(npc.Id))
+        var claimed = LivingNpcs()
+            .Where(ally => ally.Id != npc.Id &&
+                TileDistance(ally, player) <= 1 &&
+                _npcs.ContainsKey(ally.Id))
+            .Select(ally => ally.Location.Position)
+            .ToHashSet();
+        var origin = player.Location.Position;
+        var best = origin;
+        var bestDistance = int.MaxValue;
+        foreach (var (deltaX, deltaY) in new[] { (0, -1), (1, 0), (0, 1), (-1, 0) })
         {
-            return;
-        }
-
-        if (_clock.Tick < state.StepReadyAtTick)
-        {
-            return;
-        }
-
-        // A blocked attempt still consumes this movement interval. Rechecking
-        // five times a second would let several monsters jitter against the
-        // same occupied spatial cell and would exceed the round's move.
-        var movementSteps = MovementStepsPerRoundFor(npc);
-        _npcs[npc.Id] = state with
-        {
-            StepReadyAtTick = checked(
-                _clock.Tick +
-                (CombatClock.BeatsIn(AttackSpeed.RoundMilliseconds) /
-                 movementSteps)),
-        };
-
-        var from = npc.Location.Position;
-        var to = target;
-        var deltaX = Math.Sign(to.X - from.X);
-        var deltaY = Math.Sign(to.Y - from.Y);
-        var xFirst = Math.Abs(to.X - from.X) >= Math.Abs(to.Y - from.Y);
-        Span<(int X, int Y)> candidates = stackalloc (int, int)[2];
-        candidates[0] = xFirst ? (deltaX, 0) : (0, deltaY);
-        candidates[1] = xFirst ? (0, deltaY) : (deltaX, 0);
-
-        foreach (var (x, y) in candidates)
-        {
-            if (x == 0 && y == 0)
+            var candidate = new Vec3i(
+                checked(origin.X + (deltaX * WorldMap.WorldUnitsPerTile)),
+                checked(origin.Y + (deltaY * WorldMap.WorldUnitsPerTile)),
+                origin.Z);
+            if (claimed.Contains(candidate))
             {
                 continue;
             }
 
+            var distance = TileDistance(npc.Location.Position, candidate);
+            if (distance < bestDistance)
+            {
+                best = candidate;
+                bestDistance = distance;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// Running. A creature that has broken heads for its home ground, and once
+    /// it is far enough from the player it stops being part of the fight.
+    /// </summary>
+    /// <summary>
+    /// Says once, on the beat a creature decides it, that it has stopped
+    /// fighting.
+    /// </summary>
+    /// <remarks>
+    /// Announced on the transition rather than while running, so a long retreat
+    /// says it once; and at every site an action is chosen, because a creature
+    /// already below its breaking point when it first notices the player breaks
+    /// on that beat and never passes through a fighting action at all.
+    /// </remarks>
+    private void AnnounceBreak(
+        WorldObject npc,
+        NpcAction previous,
+        NpcAction next,
+        List<CombatEvent> events)
+    {
+        if (next != NpcAction.Flee || previous == NpcAction.Flee)
+        {
+            return;
+        }
+
+        events.Add(new CombatEvent(
+            CombatEventKind.Fled,
+            _clock.Tick,
+            npc.Id,
+            _playerId,
+            VoiceOf(npc.Id),
+            0,
+            npc.Health,
+            $"{npc.Name} breaks and runs.",
+            PresentationKey: "actor.fled"));
+    }
+
+    private void Flee(WorldObject npc, WorldObject player, NpcCombatState state)
+    {
+        _activeAttacks.Remove(npc.Id);
+
+        // Out of the creature's own tracking range is out of the fight. It is
+        // dropped rather than sent home: it has no home while it is running,
+        // and if the player follows it far enough to be noticed again it will
+        // simply break again, which is the right answer.
+        if (TileDistance(npc, player) >= _behaviors.DefinitionOf(npc).TrackingRadiusTiles)
+        {
+            Forget(npc.Id);
+            return;
+        }
+
+        MoveAwayFrom(npc, player.Location.Position, state);
+    }
+
+    /// <summary>
+    /// One step of a routed walk toward <paramref name="target"/>.
+    /// </summary>
+    /// <remarks>
+    /// Where this used to reduce the distance on one axis and give up when that
+    /// tile was occupied — which is what made a monster stand pressed against
+    /// the corner of a crate for the rest of a fight — it now asks the
+    /// pathfinder for a route through the map's own spatial index and commits
+    /// the first leg of it. The leg is still swept by <see cref="MovementSolver"/>
+    /// rather than teleported, so the step obeys the same contacts, supports and
+    /// step heights the player's does.
+    /// </remarks>
+    private void MoveToward(
+        WorldObject npc,
+        Vec3i target,
+        NpcCombatState state,
+        int arrivalRadiusTiles = 0)
+    {
+        if (!ClaimStep(npc, state))
+        {
+            return;
+        }
+
+        var route = _pathfinder.FindPath(npc.Id, target, arrivalRadiusTiles);
+        if (!route.Found || route.Steps.Count == 0)
+        {
+            return;
+        }
+
+        CommitStep(npc, route.Steps[0]);
+    }
+
+    /// <summary>
+    /// One step of a retreat: whichever legal neighbouring tile puts the most
+    /// ground between this creature and <paramref name="threat"/>.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately local rather than routed. Something backing off is not
+    /// solving a maze; it is getting out of reach, and a creature that walked a
+    /// clever twelve-tile route away from a player standing next to it would
+    /// read as a bug rather than as fear.
+    /// </remarks>
+    private void MoveAwayFrom(WorldObject npc, Vec3i threat, NpcCombatState state)
+    {
+        if (!ClaimStep(npc, state))
+        {
+            return;
+        }
+
+        var from = npc.Location.Position;
+        var current = TileDistance(from, threat);
+        var best = default(Vec3i);
+        var bestDistance = current;
+        foreach (var (deltaX, deltaY) in new[] { (0, -1), (1, 0), (0, 1), (-1, 0) })
+        {
             var displacement = new Vec3i(
-                x * WorldMap.WorldUnitsPerTile,
-                y * WorldMap.WorldUnitsPerTile,
+                deltaX * WorldMap.WorldUnitsPerTile,
+                deltaY * WorldMap.WorldUnitsPerTile,
                 0);
             var sweep = _movement.Resolve(npc.Id, displacement);
             if (!sweep.ReachedTarget)
@@ -1468,24 +2034,79 @@ public sealed class CombatDirector
                 continue;
             }
 
-            var moved = _transfers.Execute(
-                [
-                    new ObjectTransferRequest(
-                        npc.Id,
-                        npc.Location,
-                        ObjectLocation.OnMap(
-                            npc.Location.MapId,
-                            sweep.ResolvedPosition)),
-                ],
-                [sweep.PhysicsFor(npc.Id)]);
-            if (!moved.Succeeded)
+            var distance = TileDistance(sweep.ResolvedPosition, threat);
+            if (distance > bestDistance)
             {
-                throw new InvalidOperationException(
-                    $"A resolved pursuit step for {npc.Name} was rejected: " +
-                    moved.Message);
+                best = sweep.ResolvedPosition;
+                bestDistance = distance;
             }
+        }
 
+        if (bestDistance > current)
+        {
+            CommitStep(npc, best);
+        }
+    }
+
+    /// <summary>
+    /// Spends this creature's movement interval, or reports that it has none to
+    /// spend yet.
+    /// </summary>
+    /// <remarks>
+    /// A blocked attempt still consumes the interval. Rechecking five times a
+    /// second would let several monsters jitter against the same occupied cell,
+    /// and would spend more than the round's move.
+    /// </remarks>
+    private bool ClaimStep(WorldObject npc, NpcCombatState state)
+    {
+        if (_conditions.PreventsMovement(npc.Id) || _clock.Tick < state.StepReadyAtTick)
+        {
+            return false;
+        }
+
+        _npcs[npc.Id] = state with
+        {
+            StepReadyAtTick = checked(
+                _clock.Tick +
+                (CombatClock.BeatsIn(AttackSpeed.RoundMilliseconds) /
+                 MovementStepsPerRoundFor(npc))),
+        };
+        return true;
+    }
+
+    private void CommitStep(WorldObject npc, Vec3i destination)
+    {
+        var displacement = new Vec3i(
+            checked(destination.X - npc.Location.Position.X),
+            checked(destination.Y - npc.Location.Position.Y),
+            checked(destination.Z - npc.Location.Position.Z));
+        if (displacement == Vec3i.Zero)
+        {
             return;
+        }
+
+        var sweep = _movement.Resolve(npc.Id, displacement);
+        if (!sweep.ReachedTarget)
+        {
+            // The route was valid when it was found and the world has moved
+            // since. The interval is already spent; the next one re-routes.
+            return;
+        }
+
+        var moved = _transfers.Execute(
+            [
+                new ObjectTransferRequest(
+                    npc.Id,
+                    npc.Location,
+                    ObjectLocation.OnMap(
+                        npc.Location.MapId,
+                        sweep.ResolvedPosition)),
+            ],
+            [sweep.PhysicsFor(npc.Id)]);
+        if (!moved.Succeeded)
+        {
+            throw new InvalidOperationException(
+                $"A resolved step for {npc.Name} was rejected: {moved.Message}");
         }
     }
 
@@ -1581,10 +2202,17 @@ public sealed class CombatDirector
             return;
         }
 
+        // A skirmisher's withdrawal is booked by the swing that earns it, not by
+        // the impact: the decision to hit and leave is one decision, and the
+        // creature is already backing off while the blow is still landing.
+        var profile = _behaviors.DefinitionOf(npc);
         _npcs[npc.Id] = state with
         {
             SwingReadyAtTick = checked(
                 _clock.Tick + SwingBeatsFor(npc.Id)),
+            WithdrawUntilTick = profile.Withdraws
+                ? checked(_clock.Tick + profile.WithdrawBeats)
+                : state.WithdrawUntilTick,
         };
         ScheduleAttack(
             npc.Id,
@@ -1709,11 +2337,21 @@ public sealed class CombatDirector
             WorldMap.WorldUnitsPerTile;
     }
 
-    private enum NpcAction : byte
+    /// <summary>
+    /// The actions a creature chooses between. Saved as a byte, so the values
+    /// are stable and new ones are appended.
+    /// </summary>
+    internal enum NpcAction : byte
     {
         Idle = 0,
         Pursue = 1,
         Attack = 2,
+
+        /// <summary>Backing out of reach after a blow.</summary>
+        Withdraw = 3,
+
+        /// <summary>Broken, and putting distance between itself and the fight.</summary>
+        Flee = 4,
     }
 
     private readonly record struct NpcCombatState(
@@ -1727,5 +2365,6 @@ public sealed class CombatDirector
         long StepReadyAtTick,
         Vec3i HomePosition,
         Vec3i LastKnownPlayerPosition,
-        long LastPerceivedAtTick);
+        long LastPerceivedAtTick,
+        long WithdrawUntilTick = 0);
 }
