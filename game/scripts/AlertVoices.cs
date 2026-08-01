@@ -12,9 +12,9 @@ namespace Ash.Game;
 /// loaded up front and a missing file is a startup failure — a fight that
 /// silently gives no warning is worse than one that refuses to start.
 ///
-/// The cues are loaded with <see cref="AudioStreamOggVorbis.LoadFromFile"/>
-/// rather than <c>GD.Load</c> so they need no <c>.import</c> sidecar and no
-/// editor pass. See <c>assets/audio/creature-alerts/ATTRIBUTION.md</c>.
+/// The cues are loaded through Godot's resource loader so source runs use the
+/// imported resource and exported PCKs follow the same remap. See
+/// <c>assets/audio/creature-alerts/ATTRIBUTION.md</c>.
 /// </remarks>
 public sealed partial class AlertVoices : Node
 {
@@ -35,7 +35,8 @@ public sealed partial class AlertVoices : Node
         foreach (var voice in Enum.GetValues<CreatureVoice>())
         {
             var path = $"{AudioRoot}/{CreatureVoices.AssetName(voice)}.ogg";
-            if (!Godot.FileAccess.FileExists(path))
+            var stream = GD.Load<AudioStream>(path);
+            if (stream is null)
             {
                 throw new InvalidOperationException(
                     $"The alert cue for {voice} is missing from {path}. Every " +
@@ -43,7 +44,7 @@ public sealed partial class AlertVoices : Node
                     "player gets before the blow.");
             }
 
-            _streams[voice] = AudioStreamOggVorbis.LoadFromFile(path);
+            _streams[voice] = stream;
         }
 
         for (var index = 0; index < Voices; index++)
@@ -54,7 +55,7 @@ public sealed partial class AlertVoices : Node
         }
     }
 
-    public void Play(CreatureVoice voice)
+    public void Play(CombatEventKind kind, CreatureVoice voice)
     {
         if (_players.Count == 0)
         {
@@ -67,6 +68,18 @@ public sealed partial class AlertVoices : Node
         var player = _players[_nextPlayer];
         _nextPlayer = (_nextPlayer + 1) % _players.Count;
         player.Stream = _streams[voice];
+        (player.PitchScale, player.VolumeDb) = kind switch
+        {
+            CombatEventKind.Alerted => (1.0f, 0.0f),
+            CombatEventKind.AttackStarted => (1.35f, -8.0f),
+            CombatEventKind.Whiffed or CombatEventKind.Miss => (1.65f, -10.0f),
+            CombatEventKind.Hit => (0.75f, -5.0f),
+            CombatEventKind.Critical => (0.55f, 0.0f),
+            CombatEventKind.ConditionApplied or CombatEventKind.ForcedMovement =>
+                (1.15f, -7.0f),
+            CombatEventKind.Death => (0.45f, -1.0f),
+            _ => (1.0f, -12.0f),
+        };
         player.Play();
     }
 }

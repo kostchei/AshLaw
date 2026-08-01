@@ -150,6 +150,109 @@ public sealed class AttackActionTests
         Assert.Equal(leftEvents, rightEvents);
     }
 
+    [Fact]
+    public void ImpactEventsRetainTheCompleteResolverEvidenceAndAppliedCondition()
+    {
+        using var world = MeleeWorld(new CriticalResolver());
+        var rat = Rat(world);
+        Assert.True(world.ToggleRightHand().Succeeded);
+
+        Assert.True(world.AttackAdjacentMonster().Succeeded);
+        var events = AdvanceOneBeat(world);
+
+        var impact = Assert.Single(events, value =>
+            value.Kind == CombatEventKind.Impact && value.ActorId == world.PlayerId);
+        var evidence = Assert.IsType<CombatResolutionEvidence>(impact.Resolution);
+        Assert.Equal(world.PlayerId, impact.ActorId);
+        Assert.Equal(rat.Id, impact.TargetId);
+        Assert.Equal(world.Sheets.For(world.PlayerId).Weapon, evidence.WeaponId);
+        Assert.Equal(AttackCategoryId.OneHandedSlashing, evidence.AttackCategory);
+        Assert.Equal(17, evidence.NetRoll);
+        Assert.Equal(ArmorType.None, evidence.Armor);
+        Assert.Equal(CriticalTier.C, evidence.CriticalTier);
+        Assert.Equal(CriticalTableId.Slash, evidence.CriticalTable);
+        Assert.Equal("A testing critical.", evidence.TraumaText);
+        Assert.Contains(evidence.AppliedEffects,
+            value => value.Kind == TraumaEffectKind.Stun);
+        Assert.Contains("resolver trace", evidence.CalculationTrace);
+        Assert.Contains("d20", impact.CalculationText);
+        Assert.Contains(events, value =>
+            value.Kind == CombatEventKind.Critical &&
+            value.PresentationKey == "attack.critical");
+        Assert.Contains(events, value =>
+            value.Kind == CombatEventKind.ConditionApplied &&
+            value.EffectKind == TraumaEffectKind.Stun &&
+            value.PresentationKey == "condition.applied");
+        Assert.True(world.Conditions.Has(rat.Id, TraumaEffectKind.Stun));
+    }
+
+    [Fact]
+    public void CombatHistoryIsBoundedAndKeepsDeterministicSequenceOrder()
+    {
+        using var world = MeleeWorld(new CountingResolver(damage: 0));
+        var rat = Rat(world);
+
+        for (var attack = 0; attack < PlayableSliceWorld.CombatHistoryCapacity; attack++)
+        {
+            world.Combat.ScheduleAttackIntent(world.PlayerId, rat.Id);
+            _ = world.Combat.DrainImmediateEvents();
+            _ = AdvanceOneBeat(world);
+        }
+
+        Assert.Equal(PlayableSliceWorld.CombatHistoryCapacity, world.CombatHistory.Count);
+        Assert.True(world.CombatHistory[0].Sequence > 1);
+        Assert.All(
+            world.CombatHistory.Zip(world.CombatHistory.Skip(1)),
+            pair => Assert.Equal(pair.First.Sequence + 1, pair.Second.Sequence));
+        Assert.Contains(world.CombatHistory,
+            value => value.Kind == CombatEventKind.Impact);
+    }
+
+    [Fact]
+    public void MidWindUpSaveResumesTheExactImpactRecoveryAndFutureRolls()
+    {
+        var firstPath = Path.GetTempFileName();
+        var secondPath = Path.GetTempFileName();
+        try
+        {
+            using var original = MeleeWorld(new RulesAttackRulesResolver());
+            Assert.True(original.ToggleRightHand().Succeeded);
+            Assert.True(original.AttackAdjacentMonster().Succeeded);
+            var expectedAction = Assert.IsType<AttackAction>(
+                original.Combat.ActiveAttackOf(original.PlayerId));
+            var expectedCooldown = original.Combat.PlayerCooldownRemainingMilliseconds;
+
+            Assert.True(original.RequestSave(firstPath).Succeeded);
+            using var loaded = PlayableSliceWorld.Load(firstPath);
+
+            Assert.Equal(expectedAction, loaded.Combat.ActiveAttackOf(loaded.PlayerId));
+            Assert.Equal(expectedCooldown, loaded.Combat.PlayerCooldownRemainingMilliseconds);
+            Assert.Equal(original.Dice.State, loaded.Dice.State);
+
+            Assert.True(loaded.RequestSave(secondPath).Succeeded);
+            Assert.Equal(File.ReadAllBytes(firstPath), File.ReadAllBytes(secondPath));
+
+            var originalEvents = AdvanceOneBeat(original)
+                .Select(value => value with { Sequence = 0 })
+                .ToArray();
+            var loadedEvents = AdvanceOneBeat(loaded)
+                .Select(value => value with { Sequence = 0 })
+                .ToArray();
+
+            Assert.Equal(originalEvents, loadedEvents);
+            Assert.Equal(Rat(original).Injury, Rat(loaded).Injury);
+            Assert.Equal(original.Dice.State, loaded.Dice.State);
+            Assert.Equal(
+                original.Combat.PlayerCooldownRemainingMilliseconds,
+                loaded.Combat.PlayerCooldownRemainingMilliseconds);
+        }
+        finally
+        {
+            File.Delete(firstPath);
+            File.Delete(secondPath);
+        }
+    }
+
     private static PlayableSliceWorld MeleeWorld(
         IAttackRulesResolver resolver,
         ulong seed = 20260731)
@@ -241,5 +344,30 @@ public sealed class AttackActionTests
                 Mishap = false,
             };
         }
+    }
+
+    private sealed class CriticalResolver : IAttackRulesResolver
+    {
+        public AttackResult Resolve(AttackRequest request) => new()
+        {
+            Hit = true,
+            RawD20 = request.RawD20,
+            NetRoll = 17,
+            Margin = 6,
+            ConcussionHits = 2,
+            CriticalTier = CriticalTier.C,
+            CriticalTable = CriticalTableId.Slash,
+            TraumaText = "A testing critical.",
+            TraumaEffects =
+            [
+                new TraumaEffect(
+                    TraumaEffectKind.Stun,
+                    Magnitude: 1,
+                    Duration: 1,
+                    DurationUnit: TraumaDurationUnit.Rounds),
+            ],
+            Mishap = false,
+            Messages = ["resolver trace"],
+        };
     }
 }

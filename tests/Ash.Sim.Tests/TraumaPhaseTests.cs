@@ -377,13 +377,14 @@ public sealed class TraumaPhaseTests
         var rat = world.Monsters.Single(monster =>
             monster.TypeId == CombatProfileCatalog.CaveRatTypeId);
         PlaceBeside(world, rat);
+        var before = rat.Health;
 
         var outcome = world.Attacks.ResolveMelee(world.PlayerId, rat.Id);
 
         Assert.Equal(CriticalTier.C, outcome.Result.CriticalTier);
         Assert.Equal("Arm smashed; the rat reels.", outcome.Result.TraumaText);
         Assert.Equal(3, outcome.ImmediateHits);
-        Assert.Equal(1, world.Objects.Get(rat.Id).Health);
+        Assert.Equal(before - 3, world.Objects.Get(rat.Id).Health);
         Assert.Contains(outcome.ApplicableTraumaEffects, effect =>
             effect.Kind == TraumaEffectKind.AdditionalHits && effect.Magnitude == 2);
         Assert.True(world.Conditions.Has(rat.Id, TraumaEffectKind.Injured));

@@ -21,7 +21,7 @@ end to end and establishes the shared pipeline those later attack types use.
 - Unsupported structured trauma effects must fail explicitly; silently ignoring
   one does not satisfy a checkbox.
 
-## Reviewed remainder for Phases 1-5
+## Reviewed completion for Phases 1-8
 
 Review date: 2026-08-01. This is the short execution queue; the numbered
 checkboxes in the phases below remain authoritative.
@@ -42,6 +42,20 @@ checkboxes in the phases below remain authoritative.
   the former no-throw smoke test.
 - **Phase 5:** complete. The timing and deterministic-order proofs pass again
   after the Phase 3 atomicity and Phase 4 condition-semantics repairs.
+- **Phase 6:** complete. Committed combat events retain complete resolver
+  evidence in a bounded deterministic history; Godot consumes presentation
+  keys for animation poses, audio, HUD summaries, and the calculation inspector.
+  Evidence: `AttackActionTests` (270-test simulation suite) and
+  `tools/run-game.ps1 -Demo -Combat` on Godot 4.7-stable.
+- **Phase 7:** complete. Save format 9 persists active actions, cooldowns, and
+  deterministic continuation; packaged text rules and canonical rule/profile
+  fingerprints replace the source-tree runtime assumption. Evidence:
+  `MidWindUpSaveResumesTheExactImpactRecoveryAndFutureRolls`,
+  `RulesRepositoryTests`, and the exported dual-impact combat smoke.
+- **Phase 8:** complete. Authored demo-monster vitality is documented in
+  `combat-balance.md`; direct resolver, equipment, critical, collision, atomic
+  death, replay, and save fixtures pass. The final Release headless matrix,
+  complete solution, source Godot smoke, and exported Godot smoke are green.
 
 ## Existing prerequisites
 
@@ -330,95 +344,95 @@ checkboxes in the phases below remain authoritative.
 
 ## Phase 6 — Combat events, log, animation, audio, and HUD
 
-- [ ] **RTC-601 — Expand combat events:** represent attack start, impact, miss,
+- [x] **RTC-601 — Expand combat events:** represent attack start, impact, miss,
   hit, critical, condition, forced movement, interruption, death, and corpse
   results.
-- [ ] **RTC-602 — Include resolution evidence:** events/log entries retain
+- [x] **RTC-602 — Include resolution evidence:** events/log entries retain
   attacker, target, weapon, raw roll, modifiers, net roll, armour, damage,
   critical tier/table, trauma text, and applied effects.
-- [ ] **RTC-603 — Add retained combat history:** keep a bounded deterministic log
+- [x] **RTC-603 — Add retained combat history:** keep a bounded deterministic log
   rather than exposing only the last status message or current beat's events.
-- [ ] **RTC-604 — Drive actor animation from events/state:** Godot presents wind-
+- [x] **RTC-604 — Drive actor animation from events/state:** Godot presents wind-
   up, attack, hit reaction, prone, interruption, and death without owning combat
   authority.
-- [ ] **RTC-605 — Add audio cues:** retain encounter voices and add weapon swing,
+- [x] **RTC-605 — Add audio cues:** retain encounter voices and add weapon swing,
   miss, impact, critical, condition, and death cues from committed events.
-- [ ] **RTC-606 — Add compact HUD feedback:** show weapon/category, attack
+- [x] **RTC-606 — Add compact HUD feedback:** show weapon/category, attack
   readiness, hit or miss, damage, critical tier, and important conditions.
-- [ ] **RTC-607 — Add inspectable calculation log:** the UI can reproduce the
+- [x] **RTC-607 — Add inspectable calculation log:** the UI can reproduce the
   `AttackResolver.Messages` trace for debugging and player-facing detail.
-- [ ] **RTC-608 — Presentation tests/smoke proof:** headless simulation verifies
+- [x] **RTC-608 — Presentation tests/smoke proof:** headless simulation verifies
   event payloads; a Godot smoke run verifies events select the expected
   presentation without changing simulation state.
 
 ## Phase 7 — Save compatibility and exported runtime rules
 
-- [ ] **RTC-701 — Choose mid-attack save policy:** either persist active attack
+- [x] **RTC-701 — Choose mid-attack save policy:** either persist active attack
   actions/cooldowns or make the save gate defer until combat actions reach a
   documented safe point; do not silently reset wind-ups for advantage.
-- [ ] **RTC-702 — Bump save format:** serialize all new authoritative combat
+- [x] **RTC-702 — Bump save format:** serialize all new authoritative combat
   state and update `MinimumReaderVersion` as required.
-- [ ] **RTC-703 — Add migration:** define safe defaults for older saves that lack
+- [x] **RTC-703 — Add migration:** define safe defaults for older saves that lack
   profiles, conditions, and active actions; add corrupt/unknown enum rejection.
-- [ ] **RTC-704 — Preserve deterministic continuation:** save/load during or
+- [x] **RTC-704 — Preserve deterministic continuation:** save/load during or
   between attacks resumes the same dice state, condition ticks, action order,
   and future result.
-- [ ] **RTC-705 — Add stream/text rules loaders:** remove the source-tree-only
+- [x] **RTC-705 — Add stream/text rules loaders:** remove the source-tree-only
   assumption from `RulesRepository` so an exported game can load JSON and CSV
   data from packaged resources.
-- [ ] **RTC-706 — Package combat data:** ship attack tables, critical tables,
+- [x] **RTC-706 — Package combat data:** ship attack tables, critical tables,
   progression, character bonuses, and vitality configuration in the Godot pack.
-- [ ] **RTC-707 — Fingerprint runtime rules:** incompatible rule/profile changes
+- [x] **RTC-707 — Fingerprint runtime rules:** incompatible rule/profile changes
   alter the content fingerprint and are refused or migrated deliberately.
-- [ ] **RTC-708 — Export smoke test:** a packaged/headless game resolves one
+- [x] **RTC-708 — Export smoke test:** a packaged/headless game resolves one
   player and one NPC attack without reading the repository filesystem.
 
 ### Phase 7 exit proof
 
-- [ ] Saving and loading preserves consequential combat state and produces a
+- [x] Saving and loading preserves consequential combat state and produces a
   byte-stable save when no state changes.
-- [ ] The exported runtime resolves combat using packaged rules data with no
+- [x] The exported runtime resolves combat using packaged rules data with no
   duplicated constants in Godot code.
 
 ## Phase 8 — End-to-end verification and tuning
 
-- [ ] **RTC-801 — Player-versus-monster fixture:** equipped sword, derived
+- [x] **RTC-801 — Player-versus-monster fixture:** equipped sword, derived
   attack, monster defence/armour, deterministic result, damage, and log all
   agree with a direct rules fixture.
-- [ ] **RTC-802 — Monster-versus-player fixture:** natural or equipped monster
+- [x] **RTC-802 — Monster-versus-player fixture:** natural or equipped monster
   attack uses the player's current armour, shield, and defence.
-- [ ] **RTC-803 — Equipment mutation fixture:** changing weapon, armour, shield,
+- [x] **RTC-803 — Equipment mutation fixture:** changing weapon, armour, shield,
   or helmet changes the next applicable request and conditional trauma result.
-- [ ] **RTC-804 — Critical condition fixture:** a seeded critical applies
+- [x] **RTC-804 — Critical condition fixture:** a seeded critical applies
   immediate damage, at least one timed condition, narrative text, and later
   condition consequences.
-- [ ] **RTC-805 — Collision effect fixture:** forced movement cannot enter solid
+- [x] **RTC-805 — Collision effect fixture:** forced movement cannot enter solid
   terrain, occupied cells, or invalid elevation and leaves the spatial index
   valid.
-- [ ] **RTC-806 — Atomic death fixture:** a lethal critical creates a coherent
+- [x] **RTC-806 — Atomic death fixture:** a lethal critical creates a coherent
   corpse and loot graph with no intermediate dead actor visible.
-- [ ] **RTC-807 — Replay fixture:** two worlds with the same snapshot and timed
+- [x] **RTC-807 — Replay fixture:** two worlds with the same snapshot and timed
   inputs produce identical attack outcomes, event sequences, condition state,
   positions, corpses, and dice state.
-- [ ] **RTC-808 — Save round trip fixture:** conditions and active/recovering
+- [x] **RTC-808 — Save round trip fixture:** conditions and active/recovering
   attacks survive save/load and continue on the same beats.
-- [ ] **RTC-809 — Balance pass:** review resolver-scale damage against current
+- [x] **RTC-809 — Balance pass:** review resolver-scale damage against current
   Avatar and monster concussion/wound pools; replace test-era health values with
   authored, documented values rather than clamping resolver output.
-- [ ] **RTC-810 — Full regression:** `Ash.Rules.Tests`, `Ash.Sim.Tests`,
+- [x] **RTC-810 — Full regression:** `Ash.Rules.Tests`, `Ash.Sim.Tests`,
   architecture checks, save compatibility, and the Godot smoke test pass.
 
 ## Final definition of done
 
-- [ ] Player and AI physical attacks use one timed simulation pipeline and one
+- [x] Player and AI physical attacks use one timed simulation pipeline and one
   call boundary into `AttackResolver`.
-- [ ] Equipped weapon, natural attack, armour, shield, abilities, class, level,
+- [x] Equipped weapon, natural attack, armour, shield, abilities, class, level,
   and active conditions determine the request; no fixed player/NPC damage
   remains.
-- [ ] Critical effects change authoritative world state atomically and every
+- [x] Critical effects change authoritative world state atomically and every
   supported effect has deterministic timing and stacking behavior.
-- [ ] Presentation is event-driven and cannot alter combat outcomes.
-- [ ] Combat state and future deterministic rolls survive save/load.
-- [ ] Exported builds load the same data-backed rules used by tests.
-- [ ] The complete calculation and applied consequences are inspectable in the
+- [x] Presentation is event-driven and cannot alter combat outcomes.
+- [x] Combat state and future deterministic rolls survive save/load.
+- [x] Exported builds load the same data-backed rules used by tests.
+- [x] The complete calculation and applied consequences are inspectable in the
   combat log.

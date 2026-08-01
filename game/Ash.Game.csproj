@@ -25,5 +25,16 @@
     <ProjectReference Include="..\src\Ash.Script\Ash.Script.csproj" />
     <ProjectReference Include="..\src\Ash.Sim\Ash.Sim.csproj" />
   </ItemGroup>
-</Project>
 
+  <ItemGroup>
+    <RuntimeRules Include="..\vendor\ash-v1-rules\data\*.json;..\vendor\ash-v1-rules\data\*.csv" />
+    <RuntimeRules Include="..\data\character-creation.json;..\data\vitality.json" />
+  </ItemGroup>
+
+  <Target Name="StageRuntimeRules" BeforeTargets="BeforeBuild">
+    <RemoveDir Directories="$(MSBuildProjectDirectory)\assets\rules" />
+    <MakeDir Directories="$(MSBuildProjectDirectory)\assets\rules" />
+    <Copy SourceFiles="@(RuntimeRules)"
+          DestinationFiles="@(RuntimeRules->'$(MSBuildProjectDirectory)\assets\rules\%(Filename)%(Extension).txt')" />
+  </Target>
+</Project>

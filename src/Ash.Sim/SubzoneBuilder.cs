@@ -395,6 +395,7 @@ public static class SubzoneBuilder
             : rank >= 3
                 ? ("monster.goblin-guard", "Goblin Guard")
                 : ("monster.cave-rat", "Cave Rat");
+        var body = CombatBalance.GeneratedMonsterBody(typeId, rank);
         return Spawn(
             objects,
             map,
@@ -423,8 +424,10 @@ public static class SubzoneBuilder
                 Charisma = 6,
                 Class = CharacterClass.Fighter,
                 Level = rank,
-                Health = 2 + (rank * 2),
-                MaxHealth = 2 + (rank * 2),
+                Health = body.MaximumConcussion,
+                MaxHealth = body.MaximumConcussion,
+                Wounds = body.MaximumWounds,
+                MaxWounds = body.MaximumWounds,
             });
     }
 

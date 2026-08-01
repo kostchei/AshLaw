@@ -20,6 +20,9 @@ public sealed record SliceActionResult(bool Succeeded, string Message);
 /// </summary>
 public sealed class PlayableSliceWorld : IDisposable
 {
+    /// <summary>Committed combat events retained for UI and replay inspection.</summary>
+    public const int CombatHistoryCapacity = 128;
+
     /// <summary>
     /// The hand-built acceptance map. Generated subzones are numbered from one,
     /// so the demo never collides with a world's own maps.
@@ -53,7 +56,9 @@ public sealed class PlayableSliceWorld : IDisposable
     /// Identifies the content this world's type and shape ids belong to. A save
     /// written for different content is refused rather than reinterpreted.
     /// </summary>
-    public const string ContentFingerprint = "ash.playable-slice.v2";
+    public static string ContentFingerprint =>
+        $"ash.playable-slice.v3:{RulesRepository.RuntimeRulesFingerprint}:" +
+        CombatProfileCatalog.CanonicalFingerprint;
 
     private const string AvatarTypeId = "actor.avatar";
     private const string DaggerTypeId = "item.bronze-dagger";
@@ -100,6 +105,8 @@ public sealed class PlayableSliceWorld : IDisposable
     private const int BridgeDeckHeight = 4;
 
     private ObjectId _activeChestId = ObjectId.None;
+    private readonly List<CombatEvent> _combatHistory = [];
+    private long _nextCombatEventSequence = 1;
 
     private PlayableSliceWorld(
         ObjectStore objects,
@@ -152,7 +159,7 @@ public sealed class PlayableSliceWorld : IDisposable
             Conditions,
             playerId);
         SaveGate = new WorldSaveGate(
-            objects, Physics, Dice, ContentFingerprint, Conditions);
+            objects, Physics, Dice, ContentFingerprint, Conditions, Combat);
         Drag = new DragService(objects);
         Stacks = new StackService(objects);
         LastMessage = "Explore. Open a chest or fight a monster.";
@@ -191,6 +198,13 @@ public sealed class PlayableSliceWorld : IDisposable
     /// </summary>
     public IReadOnlyList<CombatEvent> LastCombatEvents { get; private set; } =
         [];
+
+    /// <summary>
+    /// A bounded, deterministic history of committed combat presentation
+    /// facts. The newest event is last; sequence numbers never depend on UI
+    /// frame rate.
+    /// </summary>
+    public IReadOnlyList<CombatEvent> CombatHistory => _combatHistory;
 
     public DragService Drag { get; }
 
@@ -362,7 +376,7 @@ public sealed class PlayableSliceWorld : IDisposable
             "Cave Rat",
             "monster.goblin",
             new GridPosition(13, 14),
-            maxHealth: 4,
+            CombatBalance.DemoMonsterBody("monster.cave-rat"),
             loot: ["Rat Tail"]);
         SpawnMonster(
             objects,
@@ -370,7 +384,7 @@ public sealed class PlayableSliceWorld : IDisposable
             "Goblin Scout",
             "monster.goblin",
             new GridPosition(24, 18),
-            maxHealth: 6,
+            CombatBalance.DemoMonsterBody("monster.goblin-scout"),
             loot: ["Copper Ring", "Throwing Knife"],
             worn: "Notched Blade");
         SpawnMonster(
@@ -379,7 +393,7 @@ public sealed class PlayableSliceWorld : IDisposable
             "Many-Eyed Tyrant",
             "monster.many-eyed",
             new GridPosition(35, 8),
-            maxHealth: 8,
+            CombatBalance.DemoMonsterBody("monster.many-eyed-tyrant"),
             loot: ["Glass Eye", "Nullstone Shard"]);
         SpawnMonster(
             objects,
@@ -387,7 +401,7 @@ public sealed class PlayableSliceWorld : IDisposable
             "Goblin Guard",
             "monster.goblin",
             new GridPosition(30, 22),
-            maxHealth: 8,
+            CombatBalance.DemoMonsterBody("monster.goblin-guard"),
             loot: ["Iron Buckle", "Guard Token"]);
 
         SpawnPhysicsArea(objects);
@@ -538,6 +552,8 @@ public sealed class PlayableSliceWorld : IDisposable
             }
         }
         world.Conditions.Restore(loaded.Conditions ?? []);
+        world.Combat.Restore(
+            loaded.Combat ?? CombatDirectorSnapshot.Empty(world.Clock.Tick));
         return world;
     }
 
@@ -872,15 +888,11 @@ public sealed class PlayableSliceWorld : IDisposable
                     }
                 }
             }
-            LastCombatEvents = Combat.Advance();
+            PublishCombatEvents(Combat.Advance());
         }
         else
         {
             LastCombatEvents = [];
-        }
-        foreach (var combat in LastCombatEvents)
-        {
-            LastMessage = combat.Message;
         }
 
         // End of a completed tick: the one point a deferred save is safe.
@@ -1415,7 +1427,7 @@ public sealed class PlayableSliceWorld : IDisposable
         }
 
         Combat.Provoke(monster.Id);
-        LastCombatEvents = Combat.DrainImmediateEvents();
+        PublishCombatEvents(Combat.DrainImmediateEvents());
         return Finish(true, swing.Message);
     }
 
@@ -1436,6 +1448,27 @@ public sealed class PlayableSliceWorld : IDisposable
         }
 
         _activeChestId = ObjectId.None;
+    }
+
+    private void PublishCombatEvents(IEnumerable<CombatEvent> events)
+    {
+        var published = events
+            .Select(value => value with { Sequence = _nextCombatEventSequence++ })
+            .ToArray();
+        LastCombatEvents = published;
+        if (published.Length == 0)
+        {
+            return;
+        }
+
+        _combatHistory.AddRange(published);
+        if (_combatHistory.Count > CombatHistoryCapacity)
+        {
+            _combatHistory.RemoveRange(
+                0,
+                _combatHistory.Count - CombatHistoryCapacity);
+        }
+        LastMessage = published[^1].Message;
     }
 
     private static void SpawnChest(
@@ -1521,7 +1554,7 @@ public sealed class PlayableSliceWorld : IDisposable
         string name,
         string shapeId,
         GridPosition position,
-        int maxHealth,
+        MonsterBodyProfile body,
         IEnumerable<string> loot,
         string? worn = null)
     {
@@ -1549,8 +1582,10 @@ public sealed class PlayableSliceWorld : IDisposable
             Charisma = 6,
             Class = CharacterClass.Fighter,
             Level = 1,
-            Health = maxHealth,
-            MaxHealth = maxHealth,
+            Health = body.MaximumConcussion,
+            MaxHealth = body.MaximumConcussion,
+            Wounds = body.MaximumWounds,
+            MaxWounds = body.MaximumWounds,
         });
         foreach (var item in loot)
         {

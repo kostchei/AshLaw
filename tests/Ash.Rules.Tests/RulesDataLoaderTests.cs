@@ -26,6 +26,36 @@ public sealed class RulesDataLoaderTests
     }
 
     [Fact]
+    public void PackagedTextLoadsTheSameRulesWithoutAFileSystemPath()
+    {
+        var files = RulesDataLoader.RequiredFileNames.ToDictionary(
+            name => name,
+            name => File.ReadAllText(Path.Combine(
+                RulesTestRepository.DataDirectory,
+                name)),
+            StringComparer.Ordinal);
+
+        var fromDirectory = RulesDataLoader.LoadFromDirectory(
+            RulesTestRepository.DataDirectory);
+        var fromText = RulesDataLoader.LoadFromTextFiles(files);
+        var request = new AttackRequest(
+            17,
+            AttackCategoryId.OneHandedSlashing,
+            2,
+            1,
+            ArmorType.Chain,
+            CriticalTableId.Slash);
+
+        Assert.Equivalent(
+            AttackResolver.Resolve(fromDirectory, request),
+            AttackResolver.Resolve(fromText, request),
+            strict: true);
+        Assert.Equal(
+            fromDirectory.ClassProgression.GetAttackModifier(CharacterClass.Fighter, 20),
+            fromText.ClassProgression.GetAttackModifier(CharacterClass.Fighter, 20));
+    }
+
+    [Fact]
     public void AttackSummaryDisagreementIsRejected()
     {
         using var copy = TemporaryRulesData.Create();

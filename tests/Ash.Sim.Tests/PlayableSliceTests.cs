@@ -210,10 +210,14 @@ public sealed class PlayableSliceTests
         CombatRound.WaitForPlayerImpact(world);
         Assert.True(world.Objects.Get(rat.Id).IsAlive);
 
-        // The second blow costs a second round.
-        CombatRound.WaitForPlayerSwing(world);
-        Assert.True(world.AttackAdjacentMonster().Succeeded);
-        CombatRound.WaitForPlayerImpact(world);
+        // Every later blow costs another round; the authored rat body is not
+        // coupled to this fixture's two-damage resolver.
+        for (var swing = 0; swing < 5 && world.Objects.Get(rat.Id).IsAlive; swing++)
+        {
+            CombatRound.WaitForPlayerSwing(world);
+            Assert.True(world.AttackAdjacentMonster().Succeeded);
+            CombatRound.WaitForPlayerImpact(world);
+        }
         var corpse = world.Objects.Get(rat.Id);
         Assert.False(corpse.IsAlive);
         Assert.True(corpse.HasFlag(ObjectFlags.Corpse));

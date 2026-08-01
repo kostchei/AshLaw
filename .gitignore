@@ -10,6 +10,7 @@ build/
 **/bin/
 **/obj/
 artifacts/
+game/assets/rules/
 *.user
 *.suo
 *.userprefs

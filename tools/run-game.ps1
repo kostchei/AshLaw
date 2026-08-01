@@ -58,6 +58,9 @@ param(
     # Exercise the in-game save and load commands during the run.
     [switch]$SaveLoad,
 
+    # Stage and resolve one melee action, then report event-driven presentation.
+    [switch]$Combat,
+
     # Pick an object up and drop it into the backpack during the run.
     [switch]$DragDrop,
 
@@ -195,6 +198,7 @@ if ($DebugOverlay) { $godotArgs += "--debug-overlay" }
 if ($Backpack) { $godotArgs += "--backpack-open" }
 if ($Help) { $godotArgs += "--help-open" }
 if ($SaveLoad) { $godotArgs += "--smoke-save-load" }
+if ($Combat) { $godotArgs += "--smoke-combat" }
 if ($DragDrop) { $godotArgs += "--smoke-drag-drop" }
 if ($Hold) { $godotArgs += "--smoke-hold" }
 if ($Demo) { $godotArgs += "--demo" }
@@ -256,6 +260,21 @@ if (-not (Test-Path $reportPath)) {
 
     if (-not ($report -contains "invariants=ok")) {
         $failures += "the report does not confirm the world invariants"
+    }
+
+    if ($Combat) {
+        if (-not ($report -contains "combat_evidence=True")) {
+            $failures += "the combat smoke run retained no resolution evidence"
+        }
+        if (-not ($report | Where-Object { $_ -like "combat_presentations=*attack.*" })) {
+            $failures += "the combat smoke run selected no attack presentation"
+        }
+        if (-not ($report -contains "combat_player_impacts=1")) {
+            $failures += "the combat smoke run resolved no player impact"
+        }
+        if (-not ($report -contains "combat_npc_impacts=1")) {
+            $failures += "the combat smoke run resolved no NPC impact"
+        }
     }
 
     $cycles = ($report | Where-Object { $_ -like "sort_cycles=*" }) -replace ".*=", ""

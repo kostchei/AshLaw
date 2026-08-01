@@ -96,6 +96,10 @@ public partial class Main : Node2D
     private bool _helpVisible;
     private readonly List<string> _log = [];
     private string _lastLogged = string.Empty;
+    private long _lastLoggedCombatSequence;
+    private long _lastPresentedCombatSequence;
+    private bool _combatDetailVisible;
+    private readonly Dictionary<ObjectId, TimedPresentation> _actorPresentations = [];
     private SmokeRun? _smoke;
     private IReadOnlyDictionary<string, byte[]> _shapeMasks =
         new Dictionary<string, byte[]>();
@@ -106,6 +110,21 @@ public partial class Main : Node2D
     private Vector2 _cursor;
 
     private sealed record WorldDrawItem(SortItem SortItem, Action Draw);
+
+    private enum ActorPresentation : byte
+    {
+        Stance,
+        WindUp,
+        Attack,
+        HitReaction,
+        Prone,
+        Interrupted,
+        Death,
+    }
+
+    private readonly record struct TimedPresentation(
+        ActorPresentation State,
+        long ExpiresAfterTick);
 
     /// <summary>
     /// A sprite as it was actually drawn this frame, in native pixels. Picking
@@ -146,6 +165,9 @@ public partial class Main : Node2D
         /// <summary>Keep the object in hand, so the report shows a live drag.</summary>
         public bool HoldDrag { get; init; }
 
+        /// <summary>Stage and resolve a real melee action for presentation proof.</summary>
+        public bool Combat { get; init; }
+
         public string? DragMessage { get; set; }
 
         public string? DropMessage { get; set; }
@@ -160,6 +182,18 @@ public partial class Main : Node2D
         public bool SaveLanded { get; set; }
 
         public string? LoadMessage { get; set; }
+
+        public string? CombatMessage { get; set; }
+
+        public bool CombatEvidence { get; set; }
+
+        public string CombatPresentations { get; set; } = string.Empty;
+
+        public string CombatCalculation { get; set; } = string.Empty;
+
+        public int PlayerCombatImpacts { get; set; }
+
+        public int NpcCombatImpacts { get; set; }
 
         public int Frame { get; set; }
 
@@ -177,6 +211,7 @@ public partial class Main : Node2D
                 System.Globalization.CultureInfo.InvariantCulture);
         }
 
+        ConfigureRuntimeRules();
         _world = CreateConfiguredWorld();
         _debugOverlayVisible = userArguments.Contains(
             "--debug-overlay",
@@ -222,6 +257,32 @@ public partial class Main : Node2D
             ? PlayableSliceWorld.CreateDemo()
             : PlayableSliceWorld.CreateGenerated(_worldSeed);
 
+    private static void ConfigureRuntimeRules()
+    {
+        const string root = "res://assets/rules";
+        var rules = RulesRepository.RequiredRulesFiles.ToDictionary(
+            name => name,
+            name => ReadPackagedText($"{root}/{name}.txt"),
+            StringComparer.Ordinal);
+        RulesRepository.ConfigureTextPackage(
+            rules,
+            ReadPackagedText($"{root}/{CharacterCreationLoader.FileName}.txt"),
+            ReadPackagedText($"{root}/{VitalityLoader.FileName}.txt"));
+    }
+
+    private static string ReadPackagedText(string path)
+    {
+        using var file = Godot.FileAccess.Open(
+            path,
+            Godot.FileAccess.ModeFlags.Read);
+        if (file is null)
+        {
+            throw new InvalidOperationException(
+                $"The exported runtime rules resource is missing: {path}.");
+        }
+        return file.GetAsText();
+    }
+
     private static SmokeRun? ParseSmokeRun(IReadOnlyList<string> arguments)
     {
         if (!arguments.Contains("--smoke-test", StringComparer.Ordinal))
@@ -247,6 +308,9 @@ public partial class Main : Node2D
                 StringComparer.Ordinal),
             HoldDrag = arguments.Contains(
                 "--smoke-hold",
+                StringComparer.Ordinal),
+            Combat = arguments.Contains(
+                "--smoke-combat",
                 StringComparer.Ordinal),
         };
     }
@@ -298,6 +362,88 @@ public partial class Main : Node2D
         }
 
         smoke.Frame++;
+
+        if (smoke.Combat)
+        {
+            var retainedResolutions = _world.CombatHistory
+                .Where(value => value.Resolution is not null)
+                .ToArray();
+            if (retainedResolutions.Length > 0)
+            {
+                smoke.CombatEvidence = true;
+                smoke.CombatPresentations = string.Join(
+                    ',',
+                    _world.CombatHistory
+                        .Select(value => value.PresentationKey)
+                        .Distinct());
+                smoke.CombatCalculation = retainedResolutions[^1]
+                    .CalculationText
+                    .Replace(System.Environment.NewLine, " | ");
+                smoke.PlayerCombatImpacts = Math.Max(
+                    smoke.PlayerCombatImpacts,
+                    _world.CombatHistory.Count(value =>
+                        value.Kind == CombatEventKind.Impact &&
+                        value.ActorId == _world.PlayerId));
+                smoke.NpcCombatImpacts = Math.Max(
+                    smoke.NpcCombatImpacts,
+                    _world.CombatHistory.Count(value =>
+                        value.Kind == CombatEventKind.Impact &&
+                        value.ActorId != _world.PlayerId));
+            }
+        }
+
+        if (smoke.Combat && smoke.Frame == 2)
+        {
+            var target = _world.Monsters
+                .Where(value => value.IsAlive)
+                .OrderBy(value => value.Id)
+                .Cast<WorldObject?>()
+                .FirstOrDefault();
+            if (target is null)
+            {
+                smoke.CombatMessage = "no living monster exists";
+            }
+            else
+            {
+                var offsets = new[]
+                {
+                    new Vec3i(-WorldUnitsPerTile, 0, 0),
+                    new Vec3i(WorldUnitsPerTile, 0, 0),
+                    new Vec3i(0, -WorldUnitsPerTile, 0),
+                    new Vec3i(0, WorldUnitsPerTile, 0),
+                };
+                foreach (var offset in offsets)
+                {
+                    var destination = new Vec3i(
+                        checked(target.Value.Location.Position.X + offset.X),
+                        checked(target.Value.Location.Position.Y + offset.Y),
+                        checked(target.Value.Location.Position.Z + offset.Z));
+                    var moved = _world.Transfers.Execute(new ObjectTransferRequest(
+                        _world.PlayerId,
+                        _world.Player.Location,
+                        ObjectLocation.OnMap(target.Value.Location.MapId, destination)));
+                    if (!moved.Succeeded)
+                    {
+                        continue;
+                    }
+
+                    if (_world.EquippedIn(EquipmentSlot.RightHand) is null)
+                    {
+                        _ = _world.ToggleRightHand();
+                    }
+                    var playerAttack = _world.AttackAdjacentMonster();
+                    smoke.CombatMessage = playerAttack.Message;
+                    if (playerAttack.Succeeded)
+                    {
+                        _ = _world.Combat.ScheduleAttackIntent(
+                            target.Value.Id,
+                            _world.PlayerId);
+                    }
+                    break;
+                }
+                smoke.CombatMessage ??= "no adjacent placement was legal";
+            }
+        }
 
         // Real moves through the same input path a player uses, so movement,
         // collision, support attachment and drawing all run several times
@@ -462,6 +608,30 @@ public partial class Main : Node2D
             lines.Add($"load={smoke.LoadMessage}");
         }
 
+        if (smoke.Combat)
+        {
+            var resolutions = _world.CombatHistory
+                .Where(value => value.Resolution is not null)
+                .ToArray();
+            var presentations = resolutions.Length > 0
+                ? string.Join(',', _world.CombatHistory
+                    .Select(value => value.PresentationKey)
+                    .Distinct())
+                : smoke.CombatPresentations;
+            var calculation = resolutions.Length > 0
+                ? resolutions[^1].CalculationText.Replace(
+                    System.Environment.NewLine,
+                    " | ")
+                : smoke.CombatCalculation;
+            lines.Add($"combat={smoke.CombatMessage}");
+            lines.Add($"combat_events={_world.CombatHistory.Count}");
+            lines.Add($"combat_evidence={resolutions.Length > 0 || smoke.CombatEvidence}");
+            lines.Add($"combat_player_impacts={smoke.PlayerCombatImpacts}");
+            lines.Add($"combat_npc_impacts={smoke.NpcCombatImpacts}");
+            lines.Add($"combat_presentations={presentations}");
+            lines.Add($"combat_calculation={calculation}");
+        }
+
         if (smoke.ScreenshotPath is { } screenshotPath)
         {
             var image = GetViewport().GetTexture()?.GetImage();
@@ -497,12 +667,24 @@ public partial class Main : Node2D
         // per twelve physics steps — so a fight paces identically whatever the
         // frame rate is doing.
         _world.AdvancePhysics();
-        foreach (var combat in _world.LastCombatEvents)
+        foreach (var combat in _world.CombatHistory
+                     .Where(value => value.Sequence > _lastPresentedCombatSequence)
+                     .OrderBy(value => value.Sequence))
         {
-            if (combat.Kind == CombatEventKind.Alerted)
+            ApplyPresentation(combat);
+            if (combat.Kind is CombatEventKind.Alerted or
+                CombatEventKind.AttackStarted or
+                CombatEventKind.Whiffed or
+                CombatEventKind.Miss or
+                CombatEventKind.Hit or
+                CombatEventKind.Critical or
+                CombatEventKind.ConditionApplied or
+                CombatEventKind.ForcedMovement or
+                CombatEventKind.Death)
             {
-                _voices.Play(combat.Voice);
+                _voices.Play(combat.Kind, combat.Voice);
             }
+            _lastPresentedCombatSequence = combat.Sequence;
         }
 
         _camera.StepToward(
@@ -510,6 +692,80 @@ public partial class Main : Node2D
             CameraPixelsPerPhysicsTick);
         QueueRedraw();
     }
+
+    private void ApplyPresentation(CombatEvent combat)
+    {
+        var shortBeat = checked(combat.Tick + 2);
+        switch (combat.Kind)
+        {
+            case CombatEventKind.AttackStarted:
+                _actorPresentations[combat.ActorId] = new(
+                    ActorPresentation.WindUp,
+                    checked(combat.Tick + 1));
+                break;
+            case CombatEventKind.Impact:
+            case CombatEventKind.Miss:
+            case CombatEventKind.Whiffed:
+                _actorPresentations[combat.ActorId] = new(
+                    ActorPresentation.Attack,
+                    shortBeat);
+                break;
+            case CombatEventKind.Hit:
+            case CombatEventKind.Critical:
+                _actorPresentations[combat.TargetId] = new(
+                    ActorPresentation.HitReaction,
+                    shortBeat);
+                break;
+            case CombatEventKind.ConditionApplied
+                when combat.EffectKind == TraumaEffectKind.Prone:
+                _actorPresentations[combat.TargetId] = new(
+                    ActorPresentation.Prone,
+                    long.MaxValue);
+                break;
+            case CombatEventKind.Interrupted:
+                _actorPresentations[combat.ActorId] = new(
+                    ActorPresentation.Interrupted,
+                    shortBeat);
+                break;
+            case CombatEventKind.Death:
+                _actorPresentations[combat.TargetId] = new(
+                    ActorPresentation.Death,
+                    long.MaxValue);
+                break;
+        }
+    }
+
+    private ActorPresentation PresentationOf(ObjectId actorId)
+    {
+        if (_world.Conditions.Has(actorId, TraumaEffectKind.Prone))
+        {
+            return ActorPresentation.Prone;
+        }
+
+        if (!_actorPresentations.TryGetValue(actorId, out var presentation))
+        {
+            return ActorPresentation.Stance;
+        }
+        if (_world.Clock.Tick <= presentation.ExpiresAfterTick)
+        {
+            return presentation.State;
+        }
+
+        _actorPresentations.Remove(actorId);
+        return ActorPresentation.Stance;
+    }
+
+    private static Vector2 PresentationOffset(
+        ActorPresentation presentation,
+        long tick) => presentation switch
+    {
+        ActorPresentation.WindUp => new Vector2(-1, -1),
+        ActorPresentation.Attack => new Vector2(2, 0),
+        ActorPresentation.HitReaction => new Vector2(tick % 2 == 0 ? -2 : 2, 1),
+        ActorPresentation.Prone => new Vector2(0, 4),
+        ActorPresentation.Interrupted => new Vector2(-1, 2),
+        _ => Vector2.Zero,
+    };
 
     public override void _Draw()
     {
@@ -530,6 +786,10 @@ public partial class Main : Node2D
         if (_helpVisible)
         {
             DrawHelp();
+        }
+        else if (_combatDetailVisible)
+        {
+            DrawCombatDetails();
         }
     }
 
@@ -557,7 +817,7 @@ public partial class Main : Node2D
             ("T", "collapse the trestle"),
             ("F5 / F9", "save / load"),
             ("R", "restart"),
-            ("F3", "debug overlay"),
+            ("F3 / C", "debug / combat math"),
             ("ESC", "close, or cancel a drag"),
         };
         for (var index = 0; index < lines.Length; index++)
@@ -668,6 +928,9 @@ public partial class Main : Node2D
             case Key.F3:
                 _debugOverlayVisible = !_debugOverlayVisible;
                 return true;
+            case Key.C:
+                _combatDetailVisible = !_combatDetailVisible;
+                return true;
             case Key.T:
                 _world.RemoveTrestleSupport();
                 return true;
@@ -688,6 +951,9 @@ public partial class Main : Node2D
         _world.Dispose();
         _world = world;
         _playerDirection = 6;
+        _actorPresentations.Clear();
+        _lastLoggedCombatSequence = 0;
+        _lastPresentedCombatSequence = 0;
         SnapCameraToPlayer();
     }
 
@@ -1287,15 +1553,24 @@ public partial class Main : Node2D
 
     private void DrawPlayer()
     {
+        var presentation = PresentationOf(_world.PlayerId);
         var at = Iso(_world.PlayerPosition) +
             new Vector2(0, 3) +
-            Elevation(_world.Player.Location.Position.Z);
+            Elevation(_world.Player.Location.Position.Z) +
+            PresentationOffset(presentation, _world.Clock.Tick);
         DrawShadow(at, 7);
 
-        if (!DrawShape("avatar.knight", "stance", _playerDirection, at))
+        var drew = presentation == ActorPresentation.Death &&
+            DrawShape("avatar.knight", "die", _playerDirection, at);
+        if (!drew)
+        {
+            drew = DrawShape("avatar.knight", "stance", _playerDirection, at);
+        }
+        if (!drew)
         {
             DrawPlayerFallback(at);
         }
+        DrawCombatPoseCue(at, presentation);
 
         if (_world.Chests.Any(chest =>
                 _world.PlayerPosition.ManhattanDistance(
@@ -1426,9 +1701,11 @@ public partial class Main : Node2D
 
     private void DrawMonster(WorldObject monster)
     {
+        var presentation = PresentationOf(monster.Id);
         var at = Iso(_world.GetGridPosition(monster.Id)) +
             new Vector2(0, 3) +
-            Elevation(monster.Location.Position.Z);
+            Elevation(monster.Location.Position.Z) +
+            PresentationOffset(presentation, _world.Clock.Tick);
 
         if (monster.ShapeId == "monster.many-eyed")
         {
@@ -1437,11 +1714,18 @@ public partial class Main : Node2D
         else
         {
             DrawShadow(at, 7);
-            if (!DrawShape("monster.goblin", "stance", direction: 6, at))
+            var drew = presentation == ActorPresentation.Death &&
+                DrawShape("monster.goblin", "die", direction: 6, at);
+            if (!drew)
+            {
+                drew = DrawShape("monster.goblin", "stance", direction: 6, at);
+            }
+            if (!drew)
             {
                 DrawCaveRat(at);
             }
         }
+        DrawCombatPoseCue(at, presentation);
 
         if (monster.Health < monster.MaxHealth)
         {
@@ -1454,6 +1738,29 @@ public partial class Main : Node2D
             DrawRect(
                 new Rect2(at.X - 7, at.Y + healthOffset, healthWidth, 2),
                 new Color("b93b30"));
+        }
+    }
+
+    private void DrawCombatPoseCue(Vector2 at, ActorPresentation presentation)
+    {
+        switch (presentation)
+        {
+            case ActorPresentation.WindUp:
+                DrawArc(at + new Vector2(0, -16), 4, 0, Mathf.Pi, 8, Highlight, 1);
+                break;
+            case ActorPresentation.Attack:
+                DrawLine(at + new Vector2(3, -13), at + new Vector2(9, -9), Highlight, 1);
+                break;
+            case ActorPresentation.HitReaction:
+                DrawLine(at + new Vector2(-4, -14), at + new Vector2(4, -8), Wounded, 1);
+                DrawLine(at + new Vector2(4, -14), at + new Vector2(-4, -8), Wounded, 1);
+                break;
+            case ActorPresentation.Prone:
+                DrawLine(at + new Vector2(-7, 0), at + new Vector2(7, 0), Wounded, 2);
+                break;
+            case ActorPresentation.Interrupted:
+                DrawText(at + new Vector2(-2, -18), "!", 7, MutedText);
+                break;
         }
     }
 
@@ -2360,11 +2667,12 @@ public partial class Main : Node2D
         DrawText(new Vector2(246, 13), "ASH", 12, Highlight);
         DrawVitality();
         var rightHand = _world.EquippedIn(EquipmentSlot.RightHand);
+        var category = _world.PlayerSheet.AttackProfile?.Category;
         DrawText(
             new Vector2(246, 39),
             rightHand is null
-                ? "HAND (empty)"
-                : $"HAND {Shorten(rightHand.Value.Name, 9)}",
+                ? $"HAND {AttackCategoryLabel(category)}"
+                : $"{Shorten(rightHand.Value.Name, 9)} {AttackCategoryLabel(category)}",
             7,
             rightHand is null ? MutedText : Text);
         DrawSwingReadiness();
@@ -2375,9 +2683,29 @@ public partial class Main : Node2D
         }
         else
         {
+            var latest = _world.CombatHistory.LastOrDefault(value =>
+                value.ActorId == _world.PlayerId || value.TargetId == _world.PlayerId);
             DrawText(
-                new Vector2(246, 53),
-                _world.SaveGate.IsSavePending ? "SAVING…" : "H HELP",
+                new Vector2(246, 55),
+                latest.Sequence == 0
+                    ? "COMBAT READY"
+                    : Shorten(
+                        $"{latest.Kind} {latest.Damage}" +
+                        (latest.Resolution?.CriticalTier is { } tier ? $" {tier}" : string.Empty),
+                        15),
+                7,
+                latest.Kind is CombatEventKind.Critical or CombatEventKind.Death
+                    ? Wounded
+                    : MutedText);
+            var conditions = string.Join(",", _world.Conditions.Of(_world.PlayerId)
+                .Select(value => value.Kind)
+                .Distinct()
+                .Take(2));
+            DrawText(
+                new Vector2(246, 63),
+                _world.SaveGate.IsSavePending
+                    ? "SAVING…"
+                    : conditions.Length == 0 ? "H HELP C MATH" : Shorten(conditions, 15),
                 7,
                 _world.SaveGate.IsSavePending ? Highlight : MutedText);
 
@@ -2386,9 +2714,21 @@ public partial class Main : Node2D
         // Whatever the pack does not use is the log.
         var logTop = _world.BackpackOpen && _world.ActiveChest is null
             ? CarriedGridY + (CarriedGridRows() * CarriedCellStride) + 8
-            : 66;
+            : 75;
         DrawMessageLog(logTop);
     }
+
+    private static string AttackCategoryLabel(AttackCategoryId? category) =>
+        category switch
+        {
+            AttackCategoryId.OneHandedSlashing => "SLASH",
+            AttackCategoryId.OneHandedConcussion => "CRUSH",
+            AttackCategoryId.TwoHandedWeapons => "2-HAND",
+            AttackCategoryId.MissileWeapons => "MISSILE",
+            AttackCategoryId.ToothAndClaw => "NATURAL",
+            AttackCategoryId.GrapplingUnbalancing => "UNARMED",
+            _ => "NO ATTACK",
+        };
 
     /// <summary>
     /// How much of the six-second round the player's weapon has left to run.
@@ -2720,6 +3060,21 @@ public partial class Main : Node2D
     /// </summary>
     private void RecordMessage()
     {
+        var combatEvents = _world.CombatHistory
+            .Where(value => value.Sequence > _lastLoggedCombatSequence)
+            .OrderBy(value => value.Sequence)
+            .ToArray();
+        foreach (var combat in combatEvents)
+        {
+            AddLog(combat.Message);
+            _lastLoggedCombatSequence = combat.Sequence;
+        }
+        if (combatEvents.Length > 0)
+        {
+            _lastLogged = _world.LastMessage;
+            return;
+        }
+
         var message = _world.LastMessage;
         if (message.Length == 0 ||
             string.Equals(message, _lastLogged, StringComparison.Ordinal))
@@ -2728,10 +3083,44 @@ public partial class Main : Node2D
         }
 
         _lastLogged = message;
+        AddLog(message);
+    }
+
+    private void AddLog(string message)
+    {
         _log.Add(message);
         if (_log.Count > LogHistory)
         {
             _log.RemoveRange(0, _log.Count - LogHistory);
+        }
+    }
+
+    private void DrawCombatDetails()
+    {
+        var impact = _world.CombatHistory.LastOrDefault(value =>
+            value.Resolution is not null);
+        DrawRect(new Rect2(18, 20, 210, 160), new Color("17110df2"));
+        DrawRect(new Rect2(21, 23, 204, 154), PanelInset);
+        DrawRect(new Rect2(18, 20, 210, 160), PanelEdge, filled: false, width: 1);
+        DrawText(new Vector2(28, 36), "COMBAT CALCULATION", 9, Highlight);
+        if (impact.Resolution is null)
+        {
+            DrawText(new Vector2(28, 52), "No resolved impact yet.", 7, MutedText);
+            return;
+        }
+
+        var lines = impact.CalculationText
+            .Split(System.Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .SelectMany(value => WrapMessage(value, 42))
+            .Take(14)
+            .ToArray();
+        for (var index = 0; index < lines.Length; index++)
+        {
+            DrawText(
+                new Vector2(28, 50 + (index * 8)),
+                lines[index],
+                6,
+                index < 4 ? Text : MutedText);
         }
     }
 
@@ -2761,14 +3150,16 @@ public partial class Main : Node2D
         }
     }
 
-    private static IReadOnlyList<string> WrapMessage(string message)
+    private static IReadOnlyList<string> WrapMessage(
+        string message,
+        int maximumCharacters = 15)
     {
         var words = message.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var lines = new List<string>();
         var current = string.Empty;
         foreach (var word in words)
         {
-            if ((current.Length + word.Length + 1) > 15)
+            if ((current.Length + word.Length + 1) > maximumCharacters)
             {
                 lines.Add(current);
                 current = word;

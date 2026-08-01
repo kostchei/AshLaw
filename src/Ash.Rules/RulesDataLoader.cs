@@ -5,9 +5,9 @@ namespace Ash.Rules;
 
 public static class RulesDataLoader
 {
-    private const string JsonFileName = "combat_system_data.json";
-    private const string AttackSummaryFileName = "attack_tables_summary.csv";
-    private const string ClassProgressionFileName = "class_progression.csv";
+    public const string JsonFileName = "combat_system_data.json";
+    public const string AttackSummaryFileName = "attack_tables_summary.csv";
+    public const string ClassProgressionFileName = "class_progression.csv";
 
     /// <summary>
     /// Bracket rules from <c>class_progression_tables.md</c> §2. These derive the
@@ -105,6 +105,14 @@ public static class RulesDataLoader
         new(CriticalTableId.Impact, "ct_9_impact_critical_table.csv"),
     ];
 
+    public static IReadOnlyList<string> RequiredFileNames { get; } =
+    [
+        JsonFileName,
+        AttackSummaryFileName,
+        ClassProgressionFileName,
+        .. CriticalTableDefinitions.Select(value => value.FileName),
+    ];
+
     public static RulesData LoadFromDirectory(string dataDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataDirectory);
@@ -149,6 +157,51 @@ public static class RulesDataLoader
         }
     }
 
+    /// <summary>
+    /// Loads the complete rules package from caller-supplied text. Exported
+    /// runtimes can feed this from a resource pack without exposing repository
+    /// paths or duplicating any parsed constants in game code.
+    /// </summary>
+    public static RulesData LoadFromTextFiles(
+        IReadOnlyDictionary<string, string> files)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        string Read(string name) => files.TryGetValue(name, out var text)
+            ? text
+            : throw new RulesDataException($"Missing required rules text: {name}");
+
+        try
+        {
+            var (attackTables, spellcasting) = LoadJsonText(
+                Read(JsonFileName),
+                JsonFileName);
+            ValidateAttackSummaryText(
+                Read(AttackSummaryFileName),
+                AttackSummaryFileName,
+                attackTables);
+            var criticalOutcomes = LoadCriticalTablesFromText(name => Read(name));
+            var classProgression = LoadClassProgressionText(
+                Read(ClassProgressionFileName),
+                ClassProgressionFileName);
+            return new RulesData(
+                attackTables,
+                criticalOutcomes,
+                spellcasting,
+                classProgression);
+        }
+        catch (RulesDataException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (
+            exception is JsonException or FormatException or OverflowException)
+        {
+            throw new RulesDataException(
+                $"Failed to load in-memory rules data: {exception.Message}",
+                exception);
+        }
+    }
+
     private static (
         IDictionary<AttackCategoryId, AttackTable> AttackTables,
         SpellcastingRules Spellcasting)
@@ -159,8 +212,16 @@ public static class RulesDataLoader
             throw new RulesDataException($"Missing required rules file: {path}");
         }
 
+        return LoadJsonText(File.ReadAllText(path), path);
+    }
+
+    private static (
+        IDictionary<AttackCategoryId, AttackTable> AttackTables,
+        SpellcastingRules Spellcasting)
+        LoadJsonText(string text, string source)
+    {
         using var document = JsonDocument.Parse(
-            File.ReadAllText(path),
+            text,
             new JsonDocumentOptions
             {
                 AllowTrailingCommas = false,
@@ -489,7 +550,15 @@ public static class RulesDataLoader
             throw new RulesDataException($"Missing required rules file: {path}");
         }
 
-        var rows = CsvDocument.Parse(File.ReadAllText(path), path);
+        ValidateAttackSummaryText(File.ReadAllText(path), path, attackTables);
+    }
+
+    private static void ValidateAttackSummaryText(
+        string text,
+        string path,
+        IDictionary<AttackCategoryId, AttackTable> attackTables)
+    {
+        var rows = CsvDocument.Parse(text, path);
         var expectedHeader = new[]
         {
             "Category_ID",
@@ -591,18 +660,29 @@ public static class RulesDataLoader
 
     private static IDictionary<(CriticalTableId, int), CriticalOutcome>
         LoadCriticalTables(string directory)
+        => LoadCriticalTablesFromText(fileName =>
+        {
+            var path = Path.Combine(directory, fileName);
+            if (!File.Exists(path))
+            {
+                throw new RulesDataException($"Missing required rules file: {path}");
+            }
+            return File.ReadAllText(path);
+        }, directory);
+
+    private static IDictionary<(CriticalTableId, int), CriticalOutcome>
+        LoadCriticalTablesFromText(
+            Func<string, string> read,
+            string? sourceRoot = null)
     {
         var outcomes =
             new Dictionary<(CriticalTableId, int), CriticalOutcome>();
         foreach (var definition in CriticalTableDefinitions)
         {
-            var path = Path.Combine(directory, definition.FileName);
-            if (!File.Exists(path))
-            {
-                throw new RulesDataException($"Missing required rules file: {path}");
-            }
-
-            var rows = CsvDocument.Parse(File.ReadAllText(path), path);
+            var path = sourceRoot is null
+                ? definition.FileName
+                : Path.Combine(sourceRoot, definition.FileName);
+            var rows = CsvDocument.Parse(read(definition.FileName), path);
             var expectedHeader = new[]
             {
                 "Index",
@@ -658,7 +738,14 @@ public static class RulesDataLoader
             throw new RulesDataException($"Missing required rules file: {path}");
         }
 
-        var rows = CsvDocument.Parse(File.ReadAllText(path), path);
+        return LoadClassProgressionText(File.ReadAllText(path), path);
+    }
+
+    private static ClassProgressionTable LoadClassProgressionText(
+        string text,
+        string path)
+    {
+        var rows = CsvDocument.Parse(text, path);
         var classNames = Enum.GetNames<CharacterClass>();
         var expectedHeader = new[] { "Level" }.Concat(classNames).ToArray();
         RequireCsvHeader(rows[0], expectedHeader, path);

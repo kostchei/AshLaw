@@ -18,7 +18,8 @@ public sealed record ObjectWorldSnapshot(
     ulong DiceState,
     ObjectStoreSnapshot Objects,
     IReadOnlyList<WorldMapSnapshot> Maps,
-    IReadOnlyList<ActorConditionSnapshot>? Conditions = null);
+    IReadOnlyList<ActorConditionSnapshot>? Conditions = null,
+    CombatDirectorSnapshot? Combat = null);
 
 /// <summary>
 /// A world rebuilt from a save: a store, its maps and the tick they were saved
@@ -30,7 +31,8 @@ public sealed record LoadedObjectWorld(
     long SimulationTick,
     ushort CurrentMapId,
     ulong DiceState,
-    IReadOnlyList<ActorConditionSnapshot>? Conditions = null);
+    IReadOnlyList<ActorConditionSnapshot>? Conditions = null,
+    CombatDirectorSnapshot? Combat = null);
 
 public sealed class ObjectWorldSaveException : InvalidOperationException
 {
@@ -59,11 +61,13 @@ public static class ObjectWorldSave
     /// concussion hits, the death clock, and which abilities a body has lost
     /// the reliable use of, and version 7 persistent actor conditions with
     /// exact expiry and next-periodic ticks, and version 8 explicit condition
-    /// removal and stacking policies.
+    /// removal and stacking policies, and version 9 exact combat director
+    /// state: active wind-ups, cooldowns, NPC decisions, movement ledgers and
+    /// death-save timing.
     /// Version 1 was never written outside this repository's tests, so it has
     /// no migration and is simply refused.
     /// </summary>
-    public const int FormatVersion = 8;
+    public const int FormatVersion = 9;
 
     /// <summary>
     /// The oldest format this build still reads. Version 2 migrates forward
@@ -76,7 +80,7 @@ public static class ObjectWorldSave
     /// The oldest reader that can still make sense of a file this build writes.
     /// A reader below this refuses the file instead of guessing at it.
     /// </summary>
-    public const int MinimumReaderVersion = 8;
+    public const int MinimumReaderVersion = 9;
 
     /// <summary>A sanity bound so a corrupt length cannot ask for a huge buffer.</summary>
     public const int MaximumPayloadBytes = 256 * 1024 * 1024;
@@ -167,7 +171,7 @@ public static class ObjectWorldSave
                 "The save payload does not match its checksum.");
         }
 
-        var (maps, objects, conditions) = ReadPayload(payload, formatVersion);
+        var (maps, objects, conditions, combat) = ReadPayload(payload, formatVersion, tick);
         return new ObjectWorldSnapshot(
             fingerprint,
             tick,
@@ -175,7 +179,8 @@ public static class ObjectWorldSave
             diceState,
             objects,
             maps,
-            conditions);
+            conditions,
+            combat);
     }
 
     /// <summary>
@@ -188,7 +193,8 @@ public static class ObjectWorldSave
         long simulationTick,
         ushort currentMapId,
         ulong diceState = 0,
-        IReadOnlyList<ActorConditionSnapshot>? conditions = null)
+        IReadOnlyList<ActorConditionSnapshot>? conditions = null,
+        CombatDirectorSnapshot? combat = null)
     {
         ArgumentNullException.ThrowIfNull(objects);
         ArgumentException.ThrowIfNullOrWhiteSpace(contentFingerprint);
@@ -199,7 +205,8 @@ public static class ObjectWorldSave
             diceState,
             objects.Capture(),
             objects.Maps.All.Select(map => map.Capture()).ToArray(),
-            conditions ?? []);
+            conditions ?? [],
+            combat ?? CombatDirectorSnapshot.Empty(simulationTick));
     }
 
     /// <summary>
@@ -243,7 +250,8 @@ public static class ObjectWorldSave
             snapshot.SimulationTick,
             snapshot.CurrentMapId,
             snapshot.DiceState,
-            snapshot.Conditions ?? []);
+            snapshot.Conditions ?? [],
+            snapshot.Combat ?? CombatDirectorSnapshot.Empty(snapshot.SimulationTick));
     }
 
     public static LoadedObjectWorld RestoreFile(
@@ -360,12 +368,16 @@ public static class ObjectWorldSave
             WriteText(buffer, condition.PresentationKey);
         }
 
+        WriteCombatDirector(
+            buffer,
+            snapshot.Combat ?? CombatDirectorSnapshot.Empty(snapshot.SimulationTick));
+
         return buffer.ToArray();
     }
 
     private static (IReadOnlyList<WorldMapSnapshot> Maps, ObjectStoreSnapshot Objects,
-        IReadOnlyList<ActorConditionSnapshot> Conditions)
-        ReadPayload(ReadOnlySpan<byte> payload, int formatVersion)
+        IReadOnlyList<ActorConditionSnapshot> Conditions, CombatDirectorSnapshot Combat)
+        ReadPayload(ReadOnlySpan<byte> payload, int formatVersion, long simulationTick)
     {
         var reader = new SpanReader(payload);
         var maps = ReadMaps(ref reader);
@@ -465,13 +477,143 @@ public static class ObjectWorldSave
             }
         }
 
+        var combat = formatVersion >= 9
+            ? ReadCombatDirector(ref reader)
+            : CombatDirectorSnapshot.Empty(simulationTick);
+
         if (!reader.AtEnd)
         {
             throw new ObjectWorldSaveException(
                 "The payload has trailing bytes after the object store.");
         }
 
-        return (maps, new ObjectStoreSnapshot(slots, free), conditions);
+        return (maps, new ObjectStoreSnapshot(slots, free), conditions, combat);
+    }
+
+    private static void WriteCombatDirector(
+        Stream buffer,
+        CombatDirectorSnapshot combat)
+    {
+        WriteInt64(buffer, combat.PlayerReadyAtTick);
+        WriteNullableInt64(buffer, combat.PlayerDeathSaveAtTick);
+
+        var steps = combat.PlayerStepTicks.Order().ToArray();
+        WriteInt32(buffer, steps.Length);
+        foreach (var tick in steps)
+        {
+            WriteInt64(buffer, tick);
+        }
+
+        var npcs = combat.Npcs.OrderBy(value => value.ActorId).ToArray();
+        WriteInt32(buffer, npcs.Length);
+        foreach (var npc in npcs)
+        {
+            WriteUInt32(buffer, npc.ActorId.Value);
+            WriteInt32(buffer, (int)npc.Awareness);
+            WriteInt32(buffer, (int)npc.Activity);
+            WriteInt32(buffer, (int)npc.Reaction);
+            buffer.WriteByte(npc.Action);
+            buffer.WriteByte(npc.Provoked ? (byte)1 : (byte)0);
+            WriteInt64(buffer, npc.ActionReadyAtTick);
+            WriteInt64(buffer, npc.SwingReadyAtTick);
+            WriteInt64(buffer, npc.StepReadyAtTick);
+        }
+
+        var attacks = combat.ActiveAttacks
+            .OrderBy(value => value.AttackerId)
+            .ToArray();
+        WriteInt32(buffer, attacks.Length);
+        foreach (var action in attacks)
+        {
+            WriteUInt32(buffer, action.AttackerId.Value);
+            WriteUInt32(buffer, action.TargetId.Value);
+            WriteUInt32(buffer, action.WeaponId.Value);
+            WriteInt64(buffer, action.StartTick);
+            WriteInt64(buffer, action.ImpactTick);
+            WriteInt64(buffer, action.RecoveryTick);
+            WriteInt32(buffer, (int)action.Phase);
+            WriteInt32(buffer, (int)action.InterruptionPolicy);
+            WriteText(buffer, action.Outcome ?? string.Empty);
+        }
+    }
+
+    private static CombatDirectorSnapshot ReadCombatDirector(ref SpanReader reader)
+    {
+        var playerReady = reader.ReadInt64();
+        var deathSave = ReadNullableInt64(ref reader);
+        var stepCount = ReadBoundedCount(ref reader, "player movement beat", 1_000_000);
+        var steps = new long[stepCount];
+        for (var index = 0; index < steps.Length; index++)
+        {
+            steps[index] = reader.ReadInt64();
+        }
+
+        var npcCount = ReadBoundedCount(ref reader, "NPC combat state", 1_000_000);
+        var npcs = new NpcCombatSnapshot[npcCount];
+        for (var index = 0; index < npcs.Length; index++)
+        {
+            var actorId = ObjectIdFromValue(reader.ReadUInt32());
+            var awareness = ReadEnum<Awareness>(ref reader, index, nameof(Awareness));
+            var activity = ReadEnum<MonsterActivity>(ref reader, index, nameof(MonsterActivity));
+            var reaction = ReadEnum<MonsterReaction>(ref reader, index, nameof(MonsterReaction));
+            var action = reader.ReadByte();
+            if (action > 2)
+            {
+                throw new ObjectWorldSaveException(
+                    $"NPC combat state {index} has unknown action {action}.");
+            }
+            var provoked = reader.ReadByte() switch
+            {
+                0 => false,
+                1 => true,
+                var value => throw new ObjectWorldSaveException(
+                    $"NPC combat state {index} has invalid provoked flag {value}."),
+            };
+            npcs[index] = new NpcCombatSnapshot(
+                actorId,
+                awareness,
+                activity,
+                reaction,
+                action,
+                provoked,
+                reader.ReadInt64(),
+                reader.ReadInt64(),
+                reader.ReadInt64());
+        }
+
+        var attackCount = ReadBoundedCount(ref reader, "active attack", 1_000_000);
+        var attacks = new AttackAction[attackCount];
+        for (var index = 0; index < attacks.Length; index++)
+        {
+            attacks[index] = new AttackAction(
+                ObjectIdFromValue(reader.ReadUInt32()),
+                ObjectIdFromValue(reader.ReadUInt32()),
+                ObjectIdFromValue(reader.ReadUInt32()),
+                reader.ReadInt64(),
+                reader.ReadInt64(),
+                reader.ReadInt64(),
+                ReadEnum<AttackActionPhase>(
+                    ref reader, index, nameof(AttackActionPhase)),
+                ReadEnum<AttackInterruptionPolicy>(
+                    ref reader, index, nameof(AttackInterruptionPolicy)),
+                EmptyToNull(reader.ReadText()));
+        }
+
+        return new CombatDirectorSnapshot(playerReady, deathSave, steps, npcs, attacks);
+    }
+
+    private static int ReadBoundedCount(
+        ref SpanReader reader,
+        string name,
+        int maximum)
+    {
+        var count = reader.ReadInt32();
+        if (count < 0 || count > maximum)
+        {
+            throw new ObjectWorldSaveException(
+                $"The save declares an impossible {name} count of {count}.");
+        }
+        return count;
     }
 
     private static IReadOnlyList<WorldMapSnapshot> ReadMaps(ref SpanReader reader)
@@ -880,13 +1022,14 @@ public static class ObjectWorldSave
         where TEnum : struct, Enum
     {
         var value = reader.ReadInt32();
-        if (!Enum.IsDefined(typeof(TEnum), value))
+        var boxed = Enum.ToObject(typeof(TEnum), value);
+        if (!Enum.IsDefined(typeof(TEnum), boxed))
         {
             throw new ObjectWorldSaveException(
                 $"Slot {index} holds {value}, which is not a known {name}.");
         }
 
-        return (TEnum)Enum.ToObject(typeof(TEnum), value);
+        return (TEnum)boxed;
     }
 
     private static ObjectId ObjectIdFromValue(uint value)

@@ -1,4 +1,6 @@
 using Ash.Rules;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Ash.Sim;
 
@@ -144,6 +146,9 @@ public sealed class CombatProfileCatalog
             [CaveRatTypeId] = CaveRatBite,
         });
 
+    /// <summary>Canonical identity of every built-in weapon and natural profile.</summary>
+    public static string CanonicalFingerprint { get; } = ComputeFingerprint();
+
     public bool TryWeapon(string typeId, out AttackProfile profile) =>
         _weapons.TryGetValue(typeId, out profile!);
 
@@ -151,4 +156,26 @@ public sealed class CombatProfileCatalog
         _natural.TryGetValue(actorTypeId, out var profile)
             ? profile
             : Unarmed;
+
+    private static string ComputeFingerprint()
+    {
+        var profiles = new Dictionary<string, AttackProfile>(StringComparer.Ordinal)
+        {
+            [RustySwordTypeId] = RustySword,
+            [BronzeDaggerTypeId] = BronzeDagger,
+            [GoblinBladeTypeId] = GoblinBlade,
+            [CaveRatTypeId] = CaveRatBite,
+            ["fallback.unarmed"] = Unarmed,
+        };
+        var canonical = string.Join(
+            "\n",
+            profiles.OrderBy(value => value.Key, StringComparer.Ordinal)
+                .Select(value =>
+                    $"{value.Key}|{value.Value.Id}|{value.Value.Category}|" +
+                    $"{value.Value.CriticalTable}|{value.Value.WeaponAttackModifier}|" +
+                    $"{value.Value.Size}|{value.Value.MaximumCriticalTier}|" +
+                    $"{value.Value.MeleeRangeTiles}|{value.Value.IsNatural}"));
+        return Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
+    }
 }

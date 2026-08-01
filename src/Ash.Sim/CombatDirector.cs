@@ -47,11 +47,17 @@ public enum CombatEventKind : byte
     /// <summary>An NPC recognised the player and made its noise.</summary>
     Alerted = 0,
 
-    /// <summary>A blow landed.</summary>
-    Swing = 1,
+    /// <summary>An attack reached its authoritative impact beat.</summary>
+    Impact = 1,
 
-    /// <summary>A blow finished off its target.</summary>
-    Killed = 2,
+    /// <summary>Compatibility name for the original impact event.</summary>
+    Swing = Impact,
+
+    /// <summary>A target died as a committed result.</summary>
+    Death = 2,
+
+    /// <summary>Compatibility name for the original death event.</summary>
+    Killed = Death,
 
     /// <summary>A round of the death clock was rolled.</summary>
     DeathSave = 3,
@@ -67,6 +73,24 @@ public enum CombatEventKind : byte
 
     /// <summary>The attacker or attack source became invalid before impact.</summary>
     Interrupted = 7,
+
+    /// <summary>The resolver completed an attack that did not hit.</summary>
+    Miss = 8,
+
+    /// <summary>The resolver completed an attack that hit.</summary>
+    Hit = 9,
+
+    /// <summary>A committed hit included a critical result.</summary>
+    Critical = 10,
+
+    /// <summary>A committed attack applied a persistent actor condition.</summary>
+    ConditionApplied = 11,
+
+    /// <summary>A committed attack displaced its target.</summary>
+    ForcedMovement = 12,
+
+    /// <summary>A committed death transformed the target into a corpse.</summary>
+    CorpseCreated = 13,
 }
 
 public enum AttackActionPhase : byte
@@ -99,10 +123,123 @@ public readonly record struct AttackAction(
     AttackInterruptionPolicy InterruptionPolicy,
     string? Outcome = null);
 
+public readonly record struct NpcCombatSnapshot(
+    ObjectId ActorId,
+    Awareness Awareness,
+    MonsterActivity Activity,
+    MonsterReaction Reaction,
+    byte Action,
+    bool Provoked,
+    long ActionReadyAtTick,
+    long SwingReadyAtTick,
+    long StepReadyAtTick);
+
+public sealed record CombatDirectorSnapshot(
+    long PlayerReadyAtTick,
+    long? PlayerDeathSaveAtTick,
+    IReadOnlyList<long> PlayerStepTicks,
+    IReadOnlyList<NpcCombatSnapshot> Npcs,
+    IReadOnlyList<AttackAction> ActiveAttacks)
+{
+    public static CombatDirectorSnapshot Empty(long tick) =>
+        new(tick, null, [], [], []);
+}
+
 /// <summary>
 /// Something a fight did on one combat beat, for the presentation layer to
 /// sound and draw. The simulation never plays audio; it says what was heard.
 /// </summary>
+public sealed class CombatResolutionEvidence : IEquatable<CombatResolutionEvidence>
+{
+    public CombatResolutionEvidence(
+        ObjectId weaponId,
+        AttackCategoryId attackCategory,
+        int rawRoll,
+        int attackModifier,
+        int defenseModifier,
+        int netRoll,
+        ArmorType armor,
+        int damage,
+        CriticalTier? criticalTier,
+        CriticalTableId? criticalTable,
+        string? traumaText,
+        IEnumerable<TraumaEffect> appliedEffects,
+        IEnumerable<string> calculationTrace)
+    {
+        WeaponId = weaponId;
+        AttackCategory = attackCategory;
+        RawRoll = rawRoll;
+        AttackModifier = attackModifier;
+        DefenseModifier = defenseModifier;
+        NetRoll = netRoll;
+        Armor = armor;
+        Damage = damage;
+        CriticalTier = criticalTier;
+        CriticalTable = criticalTable;
+        TraumaText = traumaText;
+        AppliedEffects = Array.AsReadOnly(appliedEffects.ToArray());
+        CalculationTrace = Array.AsReadOnly(calculationTrace.ToArray());
+    }
+
+    public ObjectId WeaponId { get; }
+    public AttackCategoryId AttackCategory { get; }
+    public int RawRoll { get; }
+    public int AttackModifier { get; }
+    public int DefenseModifier { get; }
+    public int NetRoll { get; }
+    public ArmorType Armor { get; }
+    public int Damage { get; }
+    public CriticalTier? CriticalTier { get; }
+    public CriticalTableId? CriticalTable { get; }
+    public string? TraumaText { get; }
+    public IReadOnlyList<TraumaEffect> AppliedEffects { get; }
+    public IReadOnlyList<string> CalculationTrace { get; }
+
+    public bool Equals(CombatResolutionEvidence? other) =>
+        other is not null &&
+        WeaponId == other.WeaponId &&
+        AttackCategory == other.AttackCategory &&
+        RawRoll == other.RawRoll &&
+        AttackModifier == other.AttackModifier &&
+        DefenseModifier == other.DefenseModifier &&
+        NetRoll == other.NetRoll &&
+        Armor == other.Armor &&
+        Damage == other.Damage &&
+        CriticalTier == other.CriticalTier &&
+        CriticalTable == other.CriticalTable &&
+        string.Equals(TraumaText, other.TraumaText, StringComparison.Ordinal) &&
+        AppliedEffects.SequenceEqual(other.AppliedEffects) &&
+        CalculationTrace.SequenceEqual(other.CalculationTrace, StringComparer.Ordinal);
+
+    public override bool Equals(object? obj) =>
+        obj is CombatResolutionEvidence other && Equals(other);
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(WeaponId);
+        hash.Add(AttackCategory);
+        hash.Add(RawRoll);
+        hash.Add(AttackModifier);
+        hash.Add(DefenseModifier);
+        hash.Add(NetRoll);
+        hash.Add(Armor);
+        hash.Add(Damage);
+        hash.Add(CriticalTier);
+        hash.Add(CriticalTable);
+        hash.Add(TraumaText, StringComparer.Ordinal);
+        foreach (var effect in AppliedEffects)
+        {
+            hash.Add(effect);
+        }
+        foreach (var line in CalculationTrace)
+        {
+            hash.Add(line, StringComparer.Ordinal);
+        }
+        return hash.ToHashCode();
+    }
+}
+
 public readonly record struct CombatEvent(
     CombatEventKind Kind,
     long Tick,
@@ -111,7 +248,44 @@ public readonly record struct CombatEvent(
     CreatureVoice Voice,
     int Damage,
     int RemainingHealth,
-    string Message);
+    string Message,
+    CombatResolutionEvidence? Resolution = null,
+    TraumaEffectKind? EffectKind = null,
+    string PresentationKey = "combat",
+    long Sequence = 0)
+{
+    /// <summary>
+    /// A compact, reproducible calculation log for the inspect panel. It is
+    /// derived solely from retained resolution evidence; presentation never
+    /// recomputes combat.
+    /// </summary>
+    public string CalculationText
+    {
+        get
+        {
+            if (Resolution is not { } resolution)
+            {
+                return Message;
+            }
+
+            var lines = new List<string>
+            {
+                $"d20 {resolution.RawRoll} + attack {resolution.AttackModifier} " +
+                $"- defence {resolution.DefenseModifier} = net {resolution.NetRoll}",
+                $"{resolution.AttackCategory} vs {resolution.Armor}; " +
+                $"damage {resolution.Damage}",
+                resolution.CriticalTier is { } tier
+                    ? $"critical {tier}/{resolution.CriticalTable}: {resolution.TraumaText}"
+                    : "critical none",
+                resolution.AppliedEffects.Count == 0
+                    ? "effects none"
+                    : $"effects {string.Join(", ", resolution.AppliedEffects)}",
+            };
+            lines.AddRange(resolution.CalculationTrace);
+            return string.Join(Environment.NewLine, lines);
+        }
+    }
+}
 
 /// <summary>What a swing attempt did, and how long until the next one.</summary>
 public readonly record struct SwingAttempt(
@@ -139,10 +313,9 @@ public readonly record struct StepAttempt(
 /// the audible cue is a real warning with real time behind it, and a swing is a
 /// decision rather than a keypress rate.
 ///
-/// This state is deliberately not saved. Recognition and swing timers describe
-/// a fight in progress, and a loaded world starts standing still: NPCs have not
-/// noticed you yet and nobody is mid-swing. Persisting a half-elapsed
-/// recognition would restore a warning the player never heard.
+/// Recognition, recovery, movement ledgers and active wind-ups are saved at
+/// their exact beats. Loading therefore cannot erase a warning already heard,
+/// grant a free swing, or reorder two due impacts.
 /// </remarks>
 public sealed class CombatDirector
 {
@@ -193,10 +366,8 @@ public sealed class CombatDirector
     private long _playerReadyAtTick;
 
     /// <summary>
-    /// The beat the player's next death save falls on. Like recognition and
-    /// swing timers this is not saved: a loaded world rolls the next save a
-    /// full round after the load rather than resuming a countdown the player
-    /// never watched.
+    /// The beat the player's next death save falls on. It is saved exactly so
+    /// loading cannot buy another round of life.
     /// </summary>
     private long? _playerDeathSaveAtTick;
 
@@ -314,6 +485,100 @@ public sealed class CombatDirector
 
     public AttackAction? LastAttackOf(ObjectId actorId) =>
         _lastAttacks.TryGetValue(actorId, out var action) ? action : null;
+
+    public CombatDirectorSnapshot Capture()
+    {
+        PruneStepLedger();
+        return new CombatDirectorSnapshot(
+            _playerReadyAtTick,
+            _playerDeathSaveAtTick,
+            _playerSteps.Order().ToArray(),
+            _npcs.OrderBy(value => value.Key)
+                .Select(value => new NpcCombatSnapshot(
+                    value.Key,
+                    value.Value.Awareness,
+                    value.Value.Activity,
+                    value.Value.Reaction,
+                    (byte)value.Value.Action,
+                    value.Value.Provoked,
+                    value.Value.ActionReadyAtTick,
+                    value.Value.SwingReadyAtTick,
+                    value.Value.StepReadyAtTick))
+                .ToArray(),
+            _activeAttacks.Values.OrderBy(value => value.AttackerId).ToArray());
+    }
+
+    public void Restore(CombatDirectorSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        if (snapshot.PlayerReadyAtTick < 0 ||
+            snapshot.PlayerDeathSaveAtTick is < 0)
+        {
+            throw new ObjectWorldSaveException("Combat timing contains a negative beat.");
+        }
+        if (snapshot.PlayerStepTicks.Count > MovementAllowance.StepsPerRound ||
+            snapshot.PlayerStepTicks.Any(tick => tick < 0 || tick > _clock.Tick))
+        {
+            throw new ObjectWorldSaveException("The saved player movement ledger is invalid.");
+        }
+
+        var npcs = new Dictionary<ObjectId, NpcCombatState>();
+        foreach (var value in snapshot.Npcs.OrderBy(value => value.ActorId))
+        {
+            if (npcs.ContainsKey(value.ActorId) ||
+                !_objects.TryGet(value.ActorId, out var actor) ||
+                !actor.HasFlag(ObjectFlags.Monster) ||
+                !Enum.IsDefined(typeof(NpcAction), value.Action))
+            {
+                throw new ObjectWorldSaveException(
+                    $"The saved NPC combat state for {value.ActorId} is invalid.");
+            }
+            npcs.Add(value.ActorId, new NpcCombatState(
+                value.Awareness,
+                value.Activity,
+                value.Reaction,
+                (NpcAction)value.Action,
+                value.Provoked,
+                value.ActionReadyAtTick,
+                value.SwingReadyAtTick,
+                value.StepReadyAtTick));
+        }
+
+        var attacks = new Dictionary<ObjectId, AttackAction>();
+        foreach (var action in snapshot.ActiveAttacks.OrderBy(value => value.AttackerId))
+        {
+            if (attacks.ContainsKey(action.AttackerId) ||
+                action.Phase != AttackActionPhase.WindUp ||
+                action.StartTick > action.ImpactTick ||
+                action.ImpactTick <= _clock.Tick ||
+                action.RecoveryTick < action.ImpactTick ||
+                !_objects.TryGet(action.AttackerId, out _) ||
+                !_objects.TryGet(action.TargetId, out _) ||
+                (!action.WeaponId.IsNone && !_objects.TryGet(action.WeaponId, out _)))
+            {
+                throw new ObjectWorldSaveException(
+                    $"The saved active attack for {action.AttackerId} is invalid.");
+            }
+            attacks.Add(action.AttackerId, action);
+        }
+
+        _playerReadyAtTick = snapshot.PlayerReadyAtTick;
+        _playerDeathSaveAtTick = snapshot.PlayerDeathSaveAtTick;
+        _playerSteps.Clear();
+        _playerSteps.AddRange(snapshot.PlayerStepTicks.Order());
+        _npcs.Clear();
+        foreach (var value in npcs)
+        {
+            _npcs.Add(value.Key, value.Value);
+        }
+        _activeAttacks.Clear();
+        foreach (var value in attacks)
+        {
+            _activeAttacks.Add(value.Key, value.Value);
+        }
+        _lastAttacks.Clear();
+        _immediateEvents.Clear();
+    }
 
     /// <summary>
     /// Advances every NPC one combat beat. The caller runs this only on a beat,
@@ -697,7 +962,8 @@ public sealed class CombatDirector
             CreatureVoices.For(attacker.TypeId),
             0,
             _objects.Get(targetId).Health,
-            $"{attacker.Name} begins an attack."));
+            $"{attacker.Name} begins an attack.",
+            PresentationKey: "attack.wind-up"));
     }
 
     private void ResolveDueAttacks(List<CombatEvent> events)
@@ -771,17 +1037,115 @@ public sealed class CombatDirector
             Outcome = attack.Hit ? "Impact resolved." : "Attack missed.",
         };
         _lastAttacks[action.AttackerId] = completed;
+        var evidence = new CombatResolutionEvidence(
+            action.WeaponId,
+            attack.Request.AttackCategory,
+            attack.Request.RawD20,
+            attack.Request.AttackModifier,
+            attack.Request.DefenseModifier,
+            attack.Result.NetRoll,
+            attack.Request.Armor,
+            attack.ImmediateHits,
+            attack.Result.CriticalTier,
+            attack.Result.CriticalTable,
+            attack.Result.TraumaText,
+            attack.ApplicableTraumaEffects,
+            attack.Result.Messages);
         events.Add(new CombatEvent(
-            CombatEventKind.Swing,
+            CombatEventKind.Impact,
             _clock.Tick,
             action.AttackerId,
             action.TargetId,
             CreatureVoices.For(attacker.TypeId),
             attack.ImmediateHits,
             attack.FinalTargetState.Concussion,
-            DescribeResolvedAttack(attacker, target, attack)));
+            DescribeResolvedAttack(attacker, target, attack),
+            evidence,
+            PresentationKey: "attack.impact"));
+        events.Add(new CombatEvent(
+            attack.Hit ? CombatEventKind.Hit : CombatEventKind.Miss,
+            _clock.Tick,
+            action.AttackerId,
+            action.TargetId,
+            CreatureVoices.For(attacker.TypeId),
+            attack.ImmediateHits,
+            attack.FinalTargetState.Concussion,
+            attack.Hit
+                ? $"{attacker.Name} hits {target.Name} for {attack.ImmediateHits}."
+                : $"{attacker.Name} misses {target.Name}.",
+            evidence,
+            PresentationKey: attack.Hit ? "attack.hit" : "attack.miss"));
+        if (attack.Result.CriticalTier is { } tier)
+        {
+            events.Add(new CombatEvent(
+                CombatEventKind.Critical,
+                _clock.Tick,
+                action.AttackerId,
+                action.TargetId,
+                CreatureVoices.For(attacker.TypeId),
+                attack.ImmediateHits,
+                attack.FinalTargetState.Concussion,
+                $"Critical {tier}: {attack.Result.TraumaText}",
+                evidence,
+                PresentationKey: "attack.critical"));
+        }
+        foreach (var condition in attack.ApplicableTraumaEffects
+                     .Where(effect => ActorConditionService.CanStore(effect.Kind)))
+        {
+            events.Add(new CombatEvent(
+                CombatEventKind.ConditionApplied,
+                _clock.Tick,
+                action.AttackerId,
+                action.TargetId,
+                CreatureVoices.For(attacker.TypeId),
+                0,
+                attack.FinalTargetState.Concussion,
+                $"{target.Name} gains {condition.Kind}.",
+                evidence,
+                condition.Kind,
+                "condition.applied"));
+        }
+        if (attack.Trauma.Moved)
+        {
+            events.Add(new CombatEvent(
+                CombatEventKind.ForcedMovement,
+                _clock.Tick,
+                action.AttackerId,
+                action.TargetId,
+                CreatureVoices.For(attacker.TypeId),
+                0,
+                attack.FinalTargetState.Concussion,
+                $"{target.Name} is forced from position.",
+                evidence,
+                PresentationKey: "condition.forced-movement"));
+        }
+        if (attack.FinalTargetState.IsDead)
+        {
+            events.Add(new CombatEvent(
+                CombatEventKind.Death,
+                _clock.Tick,
+                action.AttackerId,
+                action.TargetId,
+                CreatureVoices.For(attacker.TypeId),
+                0,
+                attack.FinalTargetState.Concussion,
+                $"{target.Name} dies.",
+                evidence,
+                PresentationKey: "actor.death"));
+        }
         if (attack.Trauma.CorpseCreated)
         {
+            events.Add(new CombatEvent(
+                CombatEventKind.CorpseCreated,
+                _clock.Tick,
+                action.AttackerId,
+                action.TargetId,
+                CreatureVoices.For(attacker.TypeId),
+                0,
+                attack.FinalTargetState.Concussion,
+                $"{target.Name}'s corpse is committed.",
+                evidence,
+                PresentationKey: "actor.corpse"));
             Forget(action.TargetId);
         }
     }
@@ -803,7 +1167,10 @@ public sealed class CombatDirector
             : 0;
         events.Add(new CombatEvent(
             kind, _clock.Tick, action.AttackerId, action.TargetId,
-            voice, 0, remaining, message));
+            voice, 0, remaining, message,
+            PresentationKey: phase == AttackActionPhase.Whiffed
+                ? "attack.whiff"
+                : "attack.interrupted"));
     }
 
     private void PerformAction(
