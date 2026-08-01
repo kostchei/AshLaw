@@ -19,8 +19,11 @@ public readonly record struct ActorSheet(
     int Level,
     int ClassAttackModifier,
     int AttackModifier,
+    int WeaponAttackModifier,
+    int WeaponQualityModifier,
     Ability GoverningAbility,
     ObjectId Weapon,
+    AttackProfile? AttackProfile,
     bool WeaponIsFinesse,
     ArmorType Armor,
     int DefenseModifier,
@@ -37,16 +40,19 @@ public sealed class ActorSheets
     private readonly ObjectStore _objects;
     private readonly ClassProgressionTable _progression;
     private readonly AbilityBonusTable _bonuses;
+    private readonly CombatProfileCatalog _profiles;
 
     public ActorSheets(
         ObjectStore objects,
         ClassProgressionTable progression,
-        AbilityBonusTable bonuses)
+        AbilityBonusTable bonuses,
+        CombatProfileCatalog? profiles = null)
     {
         _objects = objects ?? throw new ArgumentNullException(nameof(objects));
         _progression = progression ??
             throw new ArgumentNullException(nameof(progression));
         _bonuses = bonuses ?? throw new ArgumentNullException(nameof(bonuses));
+        _profiles = profiles ?? CombatProfileCatalog.Default;
     }
 
     public ActorSheet For(ObjectId actorId)
@@ -63,6 +69,13 @@ public sealed class ActorSheets
         var weapon = Weapon(worn);
         var shield = Shield(worn, weapon);
         var finesse = !weapon.Id.IsNone && weapon.HasFlag(ObjectFlags.Finesse);
+        var attackProfile = weapon.Id.IsNone
+            ? _profiles.NaturalFor(actor.TypeId)
+            : _profiles.TryWeapon(weapon.TypeId, out var equippedProfile)
+                ? equippedProfile
+                : null;
+        var weaponAttackModifier = attackProfile?.WeaponAttackModifier ?? 0;
+        var weaponQualityModifier = weapon.Id.IsNone ? 0 : weapon.Quality;
 
         // An unlevelled creature has no class progression: what it brings is
         // its body and its gear.
@@ -85,9 +98,13 @@ public sealed class ActorSheets
                 AttackDerivation.WeaponAbilityBonus(
                     _bonuses,
                     abilities,
-                    finesse)),
+                    finesse),
+                checked(weaponAttackModifier + weaponQualityModifier)),
+            weaponAttackModifier,
+            weaponQualityModifier,
             AttackDerivation.GoverningAbility(_bonuses, abilities, finesse),
             weapon.Id,
+            attackProfile,
             finesse,
             ArmorWorn(worn),
             DefenseDerivation.DefenseModifier(
@@ -110,7 +127,7 @@ public sealed class ActorSheets
     /// <summary>
     /// What the actor is fighting with: the right hand first, then the left.
     /// </summary>
-    private static WorldObject Weapon(IReadOnlyList<WorldObject> worn)
+    private WorldObject Weapon(IReadOnlyList<WorldObject> worn)
     {
         foreach (var slot in new[]
                  {
@@ -121,7 +138,9 @@ public sealed class ActorSheets
             foreach (var item in worn)
             {
                 if (item.Location.Slot == (byte)slot &&
-                    item.DefenseBonus == 0)
+                    item.HasFlag(ObjectFlags.Weapon) &&
+                    !item.HasFlag(ObjectFlags.Broken) &&
+                    _profiles.TryWeapon(item.TypeId, out _))
                 {
                     return item;
                 }
@@ -143,6 +162,7 @@ public sealed class ActorSheets
         {
             if (item.Id != weapon.Id &&
                 item.DefenseBonus > 0 &&
+                !item.HasFlag(ObjectFlags.Broken) &&
                 item.Location.Slot is (byte)EquipmentSlot.LeftHand
                     or (byte)EquipmentSlot.RightHand)
             {
@@ -158,7 +178,8 @@ public sealed class ActorSheets
     {
         foreach (var item in worn)
         {
-            if (item.Location.Slot == (byte)EquipmentSlot.Body)
+            if (item.Location.Slot == (byte)EquipmentSlot.Body &&
+                !item.HasFlag(ObjectFlags.Broken))
             {
                 return item.ArmorType;
             }

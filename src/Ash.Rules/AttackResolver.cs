@@ -13,6 +13,23 @@ public static class AttackResolver
                 "Raw d20 must be between 1 and 20.");
         }
 
+        if (request.AttackSize is { } size && !Enum.IsDefined(size))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request),
+                size,
+                "Attack size must be a defined value.");
+        }
+
+        if (request.MaximumCriticalTier is { } maximumTier &&
+            !Enum.IsDefined(maximumTier))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request),
+                maximumTier,
+                "Maximum critical tier must be a defined value.");
+        }
+
         var table = rules.GetAttackTable(request.AttackCategory);
         if (!table.IsSourceValidated && !request.AllowUnvalidatedTable)
         {
@@ -25,10 +42,13 @@ public static class AttackResolver
         }
 
         var target = table.ForArmor(request.Armor);
-        int netRoll;
+        int uncappedNetRoll;
         try
         {
-            netRoll = checked(request.RawD20 + request.AttackModifier - request.DefenseModifier);
+            uncappedNetRoll = checked(
+                request.RawD20 +
+                request.AttackModifier -
+                request.DefenseModifier);
         }
         catch (OverflowException exception)
         {
@@ -38,11 +58,22 @@ public static class AttackResolver
                 exception.Message);
         }
 
+        var netRoll = request.AttackSize is { } attackSize
+            ? Math.Min(
+                uncappedNetRoll,
+                AttackSizeRules.MaximumNetRoll(attackSize))
+            : uncappedNetRoll;
+
         var margin = checked(netRoll - target.HitThreshold);
         var messages = new List<string>
         {
-            FormattableString.Invariant($"Net roll = {request.RawD20} + {request.AttackModifier} - {request.DefenseModifier} = {netRoll}."),
+            FormattableString.Invariant($"Net roll = {request.RawD20} + {request.AttackModifier} - {request.DefenseModifier} = {uncappedNetRoll}."),
         };
+        if (netRoll != uncappedNetRoll)
+        {
+            messages.Add(
+                $"{request.AttackSize} attack caps the net roll at {netRoll}.");
+        }
 
         var isSpell = request.IsSpell ||
             request.AttackCategory is AttackCategoryId.SpellBolts or AttackCategoryId.SpellBalls;
@@ -82,7 +113,16 @@ public static class AttackResolver
         {
             var numericTier = checked((int)decimal.Floor(
                 (netRoll - target.BaseCriticalA) / target.CriticalInterval));
-            criticalTier = (CriticalTier)Math.Min(numericTier, (int)CriticalTier.E);
+            var resolvedTier = (CriticalTier)Math.Min(
+                numericTier,
+                (int)CriticalTier.E);
+            var sizeMaximum = request.AttackSize is { } sized
+                ? AttackSizeRules.MaximumCriticalTier(sized)
+                : CriticalTier.E;
+            var requestedMaximum = request.MaximumCriticalTier ?? CriticalTier.E;
+            criticalTier = (CriticalTier)Math.Min(
+                (int)resolvedTier,
+                Math.Min((int)sizeMaximum, (int)requestedMaximum));
             criticalTable = request.CriticalTable ??
                 table.DefaultCriticalTable;
             if (criticalTable is null)

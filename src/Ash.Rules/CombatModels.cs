@@ -42,6 +42,48 @@ public enum CriticalTier
     E,
 }
 
+/// <summary>
+/// How far up the Tooth &amp; Claw result table a physical attack may reach.
+/// Source AT-5 caps Tiny, Small, Medium, Large and Huge attacks at chart rows
+/// 81-85, 101-105, 116-120, 131-135 and 146-150 respectively.
+/// </summary>
+public enum AttackSize
+{
+    Tiny,
+    Small,
+    Medium,
+    Large,
+    Huge,
+}
+
+public static class AttackSizeRules
+{
+    /// <summary>The highest net d20 result represented by the size's row.</summary>
+    public static int MaximumNetRoll(AttackSize size) => size switch
+    {
+        AttackSize.Tiny => 17,
+        AttackSize.Small => 21,
+        AttackSize.Medium => 24,
+        AttackSize.Large => 27,
+        AttackSize.Huge => 30,
+        _ => throw new ArgumentOutOfRangeException(nameof(size)),
+    };
+
+    /// <summary>
+    /// The greatest ordinary A-E critical visible at that size cap. The source
+    /// also has a Tiny "T" tier, which this runtime does not represent.
+    /// </summary>
+    public static CriticalTier MaximumCriticalTier(AttackSize size) =>
+        size switch
+        {
+            AttackSize.Tiny => CriticalTier.A,
+            AttackSize.Small => CriticalTier.B,
+            AttackSize.Medium => CriticalTier.D,
+            AttackSize.Large or AttackSize.Huge => CriticalTier.E,
+            _ => throw new ArgumentOutOfRangeException(nameof(size)),
+        };
+}
+
 public enum TraumaEffectKind
 {
     AdditionalHits,
@@ -155,7 +197,9 @@ public sealed record AttackRequest(
     /// unvalidated table cannot be consumed by accident as if it were sourced.
     /// See <see cref="AttackTable.IsSourceValidated"/>.
     /// </summary>
-    bool AllowUnvalidatedTable = false);
+    bool AllowUnvalidatedTable = false,
+    AttackSize? AttackSize = null,
+    CriticalTier? MaximumCriticalTier = null);
 
 public sealed record AttackResult
 {

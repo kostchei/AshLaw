@@ -129,6 +129,7 @@ public sealed class ActorSheetTests
                 EquipmentSlots = EquipmentSlotMask.Body,
                 ArmorType = ArmorType.Chain,
                 DefenseBonus = 4,
+                Flags = ObjectFlags.Item | ObjectFlags.Movable,
             });
 
         // Chain is -4 against a +2 strength bonus, so agility loses two of its
@@ -143,6 +144,7 @@ public sealed class ActorSheetTests
                 Location = ObjectLocation.Equipped(actor, EquipmentSlot.LeftHand),
                 EquipmentSlots = EquipmentSlotMask.LeftHand,
                 DefenseBonus = 2,
+                Flags = ObjectFlags.Item | ObjectFlags.Movable,
             });
 
         var shielded = sheets.For(actor);
@@ -194,6 +196,75 @@ public sealed class ActorSheetTests
         var armed = world.PlayerSheet;
         Assert.False(armed.IsUnarmed);
         Assert.Equal("Rusty Sword", world.Objects.Get(armed.Weapon).Name);
+        Assert.Equal(CombatProfileCatalog.RustySword, armed.AttackProfile);
+        Assert.Equal(-1, armed.WeaponQualityModifier);
+        Assert.Equal(1, armed.AttackModifier);
+    }
+
+    [Fact]
+    public void BronzeDaggerKeepsWeaponAndQualityModifiersSeparate()
+    {
+        var store = new ObjectStore();
+        using var map = new WorldMap(store, 0, width: 8, depth: 8);
+        var rogue = store.Create(
+            Actor("Rogue", strength: 10, dexterity: 18) with
+            {
+                Class = CharacterClass.Rogue,
+                Level = 4,
+            });
+        store.Create(new ObjectSpawn
+        {
+            TypeId = CombatProfileCatalog.BronzeDaggerTypeId,
+            Name = "Bronze Dagger",
+            ShapeId = "loot.shortsword",
+            Location = ObjectLocation.Equipped(
+                rogue,
+                EquipmentSlot.RightHand),
+            Flags =
+                ObjectFlags.Item |
+                ObjectFlags.Movable |
+                ObjectFlags.Weapon |
+                ObjectFlags.Finesse,
+            EquipmentSlots = EquipmentSlotMask.EitherHand,
+            Quality = -1,
+        });
+        var sheet = new ActorSheets(
+            store,
+            RulesRepository.ClassProgression,
+            RulesRepository.AbilityBonuses).For(rogue);
+
+        Assert.Equal(CombatProfileCatalog.BronzeDagger, sheet.AttackProfile);
+        Assert.Equal(-3, sheet.WeaponAttackModifier);
+        Assert.Equal(-1, sheet.WeaponQualityModifier);
+        Assert.Equal(
+            sheet.ClassAttackModifier + 4 - 3 - 1,
+            sheet.AttackModifier);
+    }
+
+    [Fact]
+    public void CaveRatUsesASmallPunctureBiteAndOthersFallBackToUnarmed()
+    {
+        using var world = PlayableSliceWorld.CreateDemo();
+        var rat = world.Monsters.Single(
+            monster => monster.TypeId == CombatProfileCatalog.CaveRatTypeId);
+        var goblinGuard = world.Monsters.Single(
+            monster => monster.TypeId == "monster.goblin-guard");
+        var goblinScout = world.Monsters.Single(
+            monster => monster.TypeId == "monster.goblin-scout");
+
+        var bite = world.Sheets.For(rat.Id).AttackProfile;
+        var unarmed = world.Sheets.For(goblinGuard.Id).AttackProfile;
+        var goblin = world.Sheets.For(goblinScout.Id);
+
+        Assert.Equal(CombatProfileCatalog.CaveRatBite, bite);
+        Assert.Equal(AttackCategoryId.ToothAndClaw, bite!.Category);
+        Assert.Equal(CriticalTableId.Puncture, bite.CriticalTable);
+        Assert.Equal(AttackSize.Small, bite.Size);
+        Assert.Equal(CriticalTier.B, bite.MaximumCriticalTier);
+        Assert.Equal(CombatProfileCatalog.Unarmed, unarmed);
+        Assert.Equal(CriticalTier.A, unarmed!.MaximumCriticalTier);
+        Assert.Equal(CombatProfileCatalog.GoblinBlade, goblin.AttackProfile);
+        Assert.Equal(-1, goblin.WeaponQualityModifier);
     }
 
     [Fact]
@@ -288,7 +359,7 @@ public sealed class ActorSheetTests
         bool finesse) =>
         new()
         {
-            TypeId = $"item.{name.ToLowerInvariant().Replace(' ', '-')}",
+            TypeId = CombatProfileCatalog.RustySwordTypeId,
             Name = name,
             ShapeId = "loot.shortsword",
             Location = ObjectLocation.Equipped(
@@ -298,6 +369,7 @@ public sealed class ActorSheetTests
             Height = 8,
             Flags = ObjectFlags.Item |
                 ObjectFlags.Movable |
+                ObjectFlags.Weapon |
                 (finesse ? ObjectFlags.Finesse : ObjectFlags.None),
             EquipmentSlots =
                 EquipmentSlotMask.EitherHand |

@@ -56,6 +56,66 @@ public sealed class AttackResolverTests
     }
 
     [Fact]
+    public void SmallToothAndClawCapsTheResultAndCritical()
+    {
+        var result = AttackResolver.Resolve(
+            _rules,
+            new AttackRequest(
+                20,
+                AttackCategoryId.ToothAndClaw,
+                30,
+                0,
+                ArmorType.None,
+                CriticalTableId.Puncture,
+                AttackSize: AttackSize.Small));
+
+        Assert.Equal(21, result.NetRoll);
+        Assert.Equal(16, result.ConcussionHits);
+        Assert.Equal(CriticalTier.B, result.CriticalTier);
+        Assert.Contains(
+            result.Messages,
+            message => message.Contains(
+                "Small attack caps the net roll at 21",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AWeaponCriticalCapCanBeLowerThanTheAttackSizeCap()
+    {
+        var result = AttackResolver.Resolve(
+            _rules,
+            new AttackRequest(
+                20,
+                AttackCategoryId.ToothAndClaw,
+                30,
+                0,
+                ArmorType.None,
+                CriticalTableId.Unbalancing,
+                AttackSize: AttackSize.Small,
+                MaximumCriticalTier: CriticalTier.A));
+
+        Assert.Equal(CriticalTier.A, result.CriticalTier);
+    }
+
+    [Fact]
+    public void AHighDaggerResultCannotExceedTierC()
+    {
+        var result = AttackResolver.Resolve(
+            _rules,
+            new AttackRequest(
+                20,
+                AttackCategoryId.OneHandedSlashing,
+                30,
+                0,
+                ArmorType.None,
+                CriticalTableId.Puncture,
+                MaximumCriticalTier: CriticalTier.C));
+
+        Assert.Equal(50, result.NetRoll);
+        Assert.Equal(CriticalTier.C, result.CriticalTier);
+    }
+
+    [Fact]
     public void NaturalOneSpellMishapOverridesAHighNetRoll()
     {
         var result = AttackResolver.Resolve(
