@@ -479,6 +479,20 @@ Implements INTEGRATION.md §10 steps 1–12. No Godot, no world model.
 
 ### M6 — Actors and combat (6–8 weeks) · spec Stage 6 — *first consumer of M0*
 
+**Vertical-slice status:** the first active-enemy state machine is implemented
+in `Ash.Sim.CombatDirector`. Encounters roll a 2d6 activity, then (unless the
+player attacks immediately) `2d6 + Charisma modifier` for reaction. Monsters
+take 1d6 seconds to react and one 200 ms beat to act or change actions. Hostile
+monsters pursue at six tiles per round through the shared movement, placement,
+transfer, and spatial-index systems; non-hostile reactions currently hold
+position. This is direct distance-reducing pursuit, not the obstacle-routing
+pathfinding required by task 4. See
+[Monster encounter states](monster-encounters.md).
+
+The checkable implementation sequence for replacing fixed damage with equipped,
+data-backed real-time resolution is in
+[Real-time combat implementation checklist](real-time-combat-checklist.md).
+
 **Tasks**
 
 1. Actor state per §8.1; faction/disposition; condition system with the
